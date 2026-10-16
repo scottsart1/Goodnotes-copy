@@ -261,8 +261,9 @@ class TypedDocController(val graph: AppGraph, val docId: String) {
         fields.keys.retainAll(s.blocks.map { it.id }.toSet())
         updateHistoryFlags()
         changed()
-        val focus = s.focusId?.takeIf { id -> s.blocks.any { it.id == id } } ?: s.blocks.firstOrNull()?.id
-        if (focus != null) requestFocus(focus, s.selection)
+        val focus = s.blocks.firstOrNull { it.id == s.focusId && BlockOps.isTextual(it.type) }
+            ?: s.blocks.firstOrNull { BlockOps.isTextual(it.type) }
+        if (focus != null) requestFocus(focus.id, s.selection?.takeIf { focus.id == s.focusId } ?: TextRange(focus.text.length))
     }
 
     // ------------------------------------------------------------------ Saving

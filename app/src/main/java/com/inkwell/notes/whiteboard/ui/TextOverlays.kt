@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -89,7 +90,7 @@ fun TextBoxEditor(request: TextEditRequest, paperColor: Int, onDone: (String, Te
         keyboard?.show()
     }
 
-    BoxWithConstraints(Modifier.fillMaxSize()) {
+    BoxWithConstraints(Modifier.fillMaxSize().imePadding()) {
         Box(Modifier.fillMaxSize().consumeClicks { commit() })
         val rect = request.viewRect
         val maxWpx = constraints.maxWidth.toFloat()
@@ -98,7 +99,9 @@ fun TextBoxEditor(request: TextEditRequest, paperColor: Int, onDone: (String, Te
         val fontPx = (config.fontSizePt * request.pxPerPt).coerceIn(with(density) { 12.dp.toPx() }, with(density) { 96.dp.toPx() })
         val barH = with(density) { 52.dp.toPx() }
         val x = rect.left.coerceIn(0f, max(0f, maxWpx - widthPx))
-        val y = if (rect.top - barH >= 0f) rect.top - barH else rect.top
+        val estimatedH = barH + fontPx * 1.6f + with(density) { 24.dp.toPx() }
+        val y = (if (rect.top - barH >= 0f) rect.top - barH else rect.top)
+            .coerceAtMost(max(0f, constraints.maxHeight - estimatedH))
         val style = TextStyle(
             fontFamily = Figtree,
             fontSize = with(density) { fontPx.toSp() },
@@ -174,7 +177,7 @@ fun StickyEditor(request: StickyEditRequest, onDone: (String, Int) -> Unit) {
         keyboard?.show()
     }
 
-    BoxWithConstraints(Modifier.fillMaxSize()) {
+    BoxWithConstraints(Modifier.fillMaxSize().imePadding()) {
         Box(Modifier.fillMaxSize().consumeClicks { commit() })
         val rect = request.viewRect
         val minSide = with(density) { 200.dp.toPx() }

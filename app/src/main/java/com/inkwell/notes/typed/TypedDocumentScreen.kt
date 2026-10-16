@@ -280,7 +280,7 @@ private fun TypedEditor(controller: TypedDocController, nav: AppNavigator) {
         val wide = maxWidth >= 1000.dp
         val showOutline = outlineOpen ?: (maxWidth >= 1200.dp)
         val sideOutline = maxWidth >= 840.dp
-        Column(Modifier.fillMaxSize()) {
+        Column(Modifier.fillMaxSize().imePadding()) {
             TopFrame {
                 SlimTopBar(
                     title = controller.doc?.title ?: stringResource(R.string.td_title_fallback),
@@ -314,10 +314,10 @@ private fun TypedEditor(controller: TypedDocController, nav: AppNavigator) {
             )
             Row(Modifier.weight(1f).fillMaxWidth()) {
                 if (showOutline && sideOutline) {
-                    OutlinePanel(outline, onJump = { jumpTo(controller, it) }, modifier = Modifier.width(248.dp).fillMaxHeight())
+                    OutlinePanel(outline, onJump = { item -> scope.launch { scrollToBlock(listState, controller, item) } }, modifier = Modifier.width(248.dp).fillMaxHeight())
                     VerticalDivider(thickness = 1.dp, color = c.outline)
                 }
-                Box(Modifier.weight(1f).fillMaxHeight().imePadding()) {
+                Box(Modifier.weight(1f).fillMaxHeight()) {
                     LazyColumn(
                         state = listState,
                         modifier = Modifier.fillMaxSize(),
@@ -351,7 +351,7 @@ private fun TypedEditor(controller: TypedDocController, nav: AppNavigator) {
                                     ),
                             )
                         }
-                        item(key = "end-space") {
+                        item(key = END_KEY) {
                             // Tapping below the last block continues writing at the end.
                             Box(
                                 Modifier
@@ -373,7 +373,7 @@ private fun TypedEditor(controller: TypedDocController, nav: AppNavigator) {
                         Box(Modifier.fillMaxSize().background(c.ink.copy(alpha = 0.18f)).clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { outlineOpen = false })
                         OutlinePanel(
                             outline,
-                            onJump = { jumpTo(controller, it); outlineOpen = false },
+                            onJump = { item -> outlineOpen = false; scope.launch { scrollToBlock(listState, controller, item) } },
                             modifier = Modifier.width(280.dp).fillMaxHeight().align(Alignment.CenterStart),
                         )
                     }
@@ -413,9 +413,12 @@ private fun TypedEditor(controller: TypedDocController, nav: AppNavigator) {
     }
 }
 
-private fun jumpTo(controller: TypedDocController, item: OutlineItem) {
-    val block = controller.blocks.getOrNull(item.index)?.takeIf { it.id == item.blockId } ?: controller.blocks.firstOrNull { it.id == item.blockId } ?: return
-    controller.requestFocus(block.id, TextRange(block.text.length))
+/** Key of the trailing tap-to-continue area; not a String so drag reordering ignores it. */
+private const val END_KEY = -1
+
+private suspend fun scrollToBlock(listState: androidx.compose.foundation.lazy.LazyListState, controller: TypedDocController, item: OutlineItem) {
+    val index = controller.blocks.indexOfFirst { it.id == item.blockId }.takeIf { it >= 0 } ?: return
+    listState.animateScrollToItem(index)
 }
 
 @Composable
