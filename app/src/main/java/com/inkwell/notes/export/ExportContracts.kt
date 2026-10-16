@@ -34,6 +34,8 @@ data class ExportOptions(
     val jpegQuality: Int = 90,
     /** INKWELL: bundle audio recordings. */
     val includeAudio: Boolean = true,
+    /** TEXT/MARKDOWN/DOCX: append recording transcripts. */
+    val includeTranscripts: Boolean = true,
 )
 
 interface ExportService {
