@@ -30,7 +30,7 @@ object FolderNaming {
 
     /** One path segment: illegal characters become "_", whitespace collapses, no leading/trailing dots or spaces. */
     fun segment(name: String, fallback: String = "Untitled", maxLength: Int = MAX_SEGMENT): String {
-        var s = name.replace(ILLEGAL, "_").replace(SPACES, " ").trim().trim('.', ' ')
+        var s = name.replace(SPACES, " ").replace(ILLEGAL, "_").trim().trim('.', ' ')
         if (s.length > maxLength) s = s.take(maxLength).trimEnd('.', ' ')
         if (s.isEmpty()) s = fallback
         if (s.substringBefore('.').uppercase() in RESERVED) s = "${s}_"

@@ -53,6 +53,8 @@ class SyncEngine(
     private val onFolderRevoked: suspend () -> Unit,
     private val clock: () -> Long = System::currentTimeMillis,
     private val io: kotlinx.coroutines.CoroutineDispatcher = Dispatchers.IO,
+    /** Resolves the saved vault link (HTTPS only); replaceable for tests against a local server. */
+    private val endpointFor: (String) -> VaultEndpoint? = VaultUrl::endpointOrNull,
 ) {
     private val runLock = Mutex()
     private val _running = MutableStateFlow(false)
@@ -457,7 +459,7 @@ class SyncEngine(
             val lockedUntil = state.vaultLockedUntil
             if (lockedUntil > now) throw VaultException.Locked((lockedUntil - now + 999) / 1000)
             client?.let { return it }
-            val endpoint = VaultUrl.endpointOrNull(prefs.vaultUrl) ?: throw VaultException.MissingLink()
+            val endpoint = endpointFor(prefs.vaultUrl) ?: throw VaultException.MissingLink()
             return vaultClient(endpoint).also { client = it }
         }
 
