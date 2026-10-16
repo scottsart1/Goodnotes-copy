@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.layout.width
@@ -171,14 +172,29 @@ fun SplitLayout(leftDocId: String, rightDocId: String, nav: AppNavigator, keepSc
                 ids.forEachIndexed { i, id -> paneContent(id, i == 0, Modifier.fillMaxHeight().weight(if (i == 0) fraction else 1f - fraction)) }
             }
         }
-        // Divider handle drawn over the pane boundary.
+        // Divider: a thin draggable strip on the pane boundary (so pens still reach the pane
+        // edges) plus a swap button in its middle that can also be dragged.
         val offsetPx = (fraction * total).roundToInt()
         val handleLabel = stringResource(R.string.editor_resize_split)
+        val stripHalf = with(density) { 6.dp.roundToPx() }
+        val buttonHalf = with(density) { 24.dp.roundToPx() }
+        val orientation = if (stacked) Orientation.Vertical else Orientation.Horizontal
         Box(
-            (if (stacked) Modifier.fillMaxWidth().height(44.dp).offset { IntOffset(0, offsetPx - with(density) { 22.dp.roundToPx() }) }
-            else Modifier.fillMaxHeight().width(44.dp).offset { IntOffset(offsetPx - with(density) { 22.dp.roundToPx() }, 0) })
-                .draggable(dividerState, if (stacked) Orientation.Vertical else Orientation.Horizontal)
+            (if (stacked) Modifier.fillMaxWidth().height(12.dp).offset { IntOffset(0, offsetPx - stripHalf) }
+            else Modifier.fillMaxHeight().width(12.dp).offset { IntOffset(offsetPx - stripHalf, 0) })
+                .draggable(dividerState, orientation)
                 .semantics { contentDescription = handleLabel },
+        )
+        val maxW = constraints.maxWidth
+        val maxH = constraints.maxHeight
+        Box(
+            Modifier
+                .offset {
+                    if (stacked) IntOffset(maxW / 2 - buttonHalf, offsetPx - buttonHalf)
+                    else IntOffset(offsetPx - buttonHalf, maxH / 2 - buttonHalf)
+                }
+                .size(48.dp)
+                .draggable(dividerState, orientation),
             contentAlignment = Alignment.Center,
         ) {
             FloatingSurface(shape = CircleShape) {

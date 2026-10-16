@@ -35,7 +35,6 @@ import com.inkwell.notes.ink.InkSelection
 import com.inkwell.notes.ink.ItemRef
 import com.inkwell.notes.ink.ItemType
 import com.inkwell.notes.ink.PageLayoutMode
-import com.inkwell.notes.editor.logic.DebouncedSaveScheduler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -69,8 +68,6 @@ data class LongPressRequest(val pageIndex: Int, val pageX: Float, val pageY: Flo
 
 /** Where an image chosen by the user goes: a page point, or the viewport centre when null. */
 data class ImagePlacement(val pageIndex: Int?, val at: PointF?)
-
-private class PendingSave(val page: PageMeta, val content: PageContent)
 
 /**
  * Everything one open notebook/PDF needs: the canvas (created once per document), its
@@ -118,18 +115,15 @@ class NotebookController(
     private var pendingToolState: ToolState? = null
     private val unreadablePages: MutableSet<String> = Collections.synchronizedSet(HashSet())
 
-    private val saver = DebouncedSaveScheduler<String, PendingSave>(
-        scope = graph.appScope,
-        delayMs = SAVE_DEBOUNCE_MS,
-        save = { _, p -> persist(p) },
-        onError = { pageId, error, willRetry ->
-            Log.e(TAG, "Saving page $pageId failed (retry=$willRetry): ${error.javaClass.simpleName}")
-            if (!willRetry) messages.show(str(R.string.editor_save_failed), long = true)
-        },
-    )
+    private val docSaver = DocSaver.forDocument(graph, docId)
+    private val saver get() = docSaver.scheduler
+    private val saveErrorListener: (Throwable, Boolean) -> Unit = { _, willRetry ->
+        if (!willRetry) messages.show(str(R.string.editor_save_failed), long = true)
+    }
 
     init {
         canvas.listener = this
+        docSaver.addErrorListener(saveErrorListener)
     }
 
     fun str(@StringRes id: Int, vararg args: Any): String = appContext.getString(id, *args)
@@ -219,7 +213,7 @@ class NotebookController(
         if (disposed) return
         // Never overwrite a page whose stored content could not be read.
         if (page.id in unreadablePages) return
-        saver.submit(page.id, PendingSave(page, content))
+        saver.submit(page.id, PendingPageSave(page, content))
     }
 
     override suspend fun renderBackground(page: PageMeta, widthPx: Int, heightPx: Int): Bitmap? {
@@ -235,15 +229,6 @@ class NotebookController(
 
     override suspend fun loadImage(assetId: String): Bitmap? = withContext(Dispatchers.IO) {
         ImageImporter.decodeFile(graph.files.assetFile(docId, assetId), ImageMath.MAX_DECODE_PX)
-    }
-
-    private suspend fun persist(p: PendingSave) {
-        // A page deleted while its save was pending must not be recreated on disk.
-        if (graph.library.getPage(p.page.id) == null) return
-        graph.pageStore.save(docId, p.page.id, p.content)
-        runCatching { graph.library.pageContentChanged(docId, p.page.id) }.onFailure { Log.w(TAG, "pageContentChanged failed", it) }
-        runCatching { graph.indexing.pageChanged(docId, p.page.id) }.onFailure { Log.w(TAG, "indexing failed", it) }
-        runCatching { graph.sync.onDocumentChanged(docId) }.onFailure { Log.w(TAG, "sync notify failed", it) }
     }
 
     /** Commits the canvas and waits until every pending page is on disk (before exports and copies). */
@@ -435,7 +420,7 @@ class NotebookController(
     /** Runs a library operation with error reporting. */
     fun launchOp(@StringRes failure: Int, block: suspend () -> Unit): Job = uiScope.launch {
         catchingNonCancel { block() }.onFailure {
-            Log.w(TAG, "Operation failed: ${it.javaClass.simpleName}: ${it.message}")
+            Log.w(TAG, "Operation failed: ${it.javaClass.simpleName}")
             messages.show(str(failure))
         }
     }
@@ -505,6 +490,7 @@ class NotebookController(
             if (!missing) runCatching { graph.thumbnails.refresh(docId) }
         }
         canvas.listener = null
+        docSaver.removeErrorListener(saveErrorListener)
         thumbCache.evictAll()
         runCatching { canvas.setPlaybackHighlight(null, 0) }
         runCatching { canvas.release() }
@@ -513,7 +499,6 @@ class NotebookController(
 
     companion object {
         private const val TAG = "NotebookController"
-        const val SAVE_DEBOUNCE_MS = 400L
         const val TOOL_SAVE_DEBOUNCE_MS = 600L
 
         fun formatClock(ms: Long): String {

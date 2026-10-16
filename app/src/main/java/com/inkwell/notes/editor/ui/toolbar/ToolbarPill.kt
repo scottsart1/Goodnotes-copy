@@ -28,7 +28,9 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -113,7 +115,7 @@ fun ToolbarHost(
     modifier: Modifier = Modifier,
 ) {
     var handleExpanded by remember { mutableStateOf(false) }
-    androidx.compose.runtime.LaunchedEffect(focusMode) { if (!focusMode) handleExpanded = false }
+    LaunchedEffect(focusMode) { if (!focusMode) handleExpanded = false }
     BoxWithConstraints(modifier.fillMaxSize()) {
         val vertical = prefs.position == ToolbarPosition.LEFT || prefs.position == ToolbarPosition.RIGHT
         val available = if (vertical) maxHeight.value else maxWidth.value
@@ -133,11 +135,21 @@ fun ToolbarHost(
             ToolbarMode.FULL -> {
                 var barSize by remember { mutableStateOf(IntSize.Zero) }
                 var drag by remember { mutableStateOf<Offset?>(null) }
-                val placement: Modifier = if (prefs.position == ToolbarPosition.FLOATING) {
-                    val (bx, by) = ToolbarLayout.floatingOffset(prefs.floatingX, prefs.floatingY, containerW, containerH, barSize.width.toFloat(), barSize.height.toFloat(), margin)
+                // Position dropped by the user, shown until the saved preference catches up.
+                var dropped by remember { mutableStateOf<Pair<Float, Float>?>(null) }
+                LaunchedEffect(prefs.floatingX, prefs.floatingY) { dropped = null }
+                val currentPrefs by rememberUpdatedState(prefs)
+                val currentCallbacks by rememberUpdatedState(callbacks)
+                fun floatingTopLeft(): Pair<Float, Float> {
+                    val (fx, fy) = dropped ?: (currentPrefs.floatingX to currentPrefs.floatingY)
+                    val (bx, by) = ToolbarLayout.floatingOffset(fx, fy, containerW, containerH, barSize.width.toFloat(), barSize.height.toFloat(), margin)
                     val d = drag ?: Offset.Zero
                     val x = (bx + d.x).coerceIn(margin, (containerW - barSize.width - margin).coerceAtLeast(margin))
                     val y = (by + d.y).coerceIn(margin, (containerH - barSize.height - margin).coerceAtLeast(margin))
+                    return x to y
+                }
+                val placement: Modifier = if (prefs.position == ToolbarPosition.FLOATING) {
+                    val (x, y) = floatingTopLeft()
                     Modifier.offset { IntOffset(x.roundToInt(), y.roundToInt()) }
                 } else {
                     Modifier.align(alignmentFor(prefs.position)).padding(
@@ -164,11 +176,11 @@ fun ToolbarHost(
                                 onDragStart = { drag = Offset.Zero },
                                 onDragCancel = { drag = null },
                                 onDragEnd = {
-                                    val (bx, by) = ToolbarLayout.floatingOffset(prefs.floatingX, prefs.floatingY, containerW, containerH, barSize.width.toFloat(), barSize.height.toFloat(), margin)
-                                    val d = drag ?: Offset.Zero
-                                    val (fx, fy) = ToolbarLayout.floatingFraction(bx + d.x, by + d.y, containerW, containerH, barSize.width.toFloat(), barSize.height.toFloat())
+                                    val (x, y) = floatingTopLeft()
+                                    val fraction = ToolbarLayout.floatingFraction(x, y, containerW, containerH, barSize.width.toFloat(), barSize.height.toFloat())
+                                    dropped = fraction
                                     drag = null
-                                    callbacks.onPrefs(prefs.copy(floatingX = fx, floatingY = fy))
+                                    currentCallbacks.onPrefs(currentPrefs.copy(floatingX = fraction.first, floatingY = fraction.second))
                                 },
                             ) { change, amount ->
                                 change.consume()

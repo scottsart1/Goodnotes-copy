@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
@@ -46,5 +47,13 @@ fun SplitScreen(leftDocId: String, rightDocId: String, nav: AppNavigator) {
     val context = LocalContext.current
     val graph = remember { AppGraph.get(context) }
     val settings by graph.settings.settings.collectAsStateWithLifecycle()
+    if (leftDocId == rightDocId || leftDocId.isEmpty() || rightDocId.isEmpty()) {
+        // One document cannot be edited in two canvases at once; open it normally instead.
+        LaunchedEffect(leftDocId, rightDocId) {
+            nav.back()
+            leftDocId.ifEmpty { rightDocId }.takeIf { it.isNotEmpty() }?.let { nav.openDocumentById(it) }
+        }
+        return
+    }
     SplitLayout(leftDocId, rightDocId, nav, settings.view.keepScreenOn)
 }
