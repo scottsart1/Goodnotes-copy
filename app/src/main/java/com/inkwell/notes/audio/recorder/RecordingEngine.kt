@@ -419,6 +419,9 @@ internal class RecordingEngine(private val graph: AppGraph) {
     private suspend fun afterFinished(docId: String, recordingId: String) {
         runCatching { graph.sync.onRecordingFinished(docId, recordingId) }
             .onFailure { Log.w(TAG, "Sync hook failed", it) }
+        // Who spoke when: queued in the background (on-device engine), never while recording.
+        runCatching { graph.speakers.onRecordingFinished(docId, recordingId) }
+            .onFailure { Log.w(TAG, "Speaker hook failed", it) }
         val auto = graph.settings.current.recording.autoTranscribe
         if (auto && runCatching { graph.ai.isAvailable(AiTask.TRANSCRIPTION) }.getOrDefault(false)) {
             runCatching { Transcriptions.enqueue(graph, docId, recordingId, replace = false) }

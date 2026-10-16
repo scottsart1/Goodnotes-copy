@@ -45,6 +45,19 @@ interface SpeakerDao {
     @Query("UPDATE people SET voiceSamples = 0")
     suspend fun clearAllVoiceSamples()
 
+    // ---- speaker engine additions
+
+    /** Recordings [personId] is labelled in. */
+    @Query("SELECT COUNT(DISTINCT recordingId) FROM recording_speakers WHERE personId = :personId")
+    suspend fun recordingCountOf(personId: String): Int
+
+    @Query("UPDATE people SET voiceSamples = :count, updatedAt = :updatedAt WHERE id = :id")
+    suspend fun setVoiceSamples(id: String, count: Int, updatedAt: Long)
+
+    /** Every recording id (to find voice data left behind by deleted recordings). */
+    @Query("SELECT id FROM recordings")
+    suspend fun allRecordingIds(): List<String>
+
     // ---- recording speakers
 
     @Query("SELECT * FROM recording_speakers WHERE recordingId = :recordingId ORDER BY label")
