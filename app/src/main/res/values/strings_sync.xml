@@ -31,6 +31,7 @@
     <string name="sync_vault_url">Vault link</string>
     <string name="sync_vault_password">Password</string>
     <string name="sync_vault_password_saved">Saved. Type a new one to replace it.</string>
+    <string name="sync_vault_password_hint">Vault password</string>
     <string name="sync_vault_password_show">Show password</string>
     <string name="sync_vault_password_hide">Hide password</string>
     <string name="sync_vault_forget">Forget password</string>

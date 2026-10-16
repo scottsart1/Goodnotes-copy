@@ -105,45 +105,57 @@ internal fun VaultCard(
     // The password is never read back from storage; this field only holds what is typed now.
     var password by remember { mutableStateOf("") }
     var reveal by remember { mutableStateOf(false) }
+    var urlFocused by remember { mutableStateOf(false) }
     val parsed = remember(url) { VaultUrl.parse(url) }
-    val urlError = (parsed as? VaultUrl.Parsed.Invalid)?.reason
+    // Explain a malformed link once the user leaves the field, not on every keystroke.
+    val urlError = (parsed as? VaultUrl.Parsed.Invalid)?.reason?.takeIf { !urlFocused }
     val normalized = (parsed as? VaultUrl.Parsed.Valid)?.endpoint?.baseUrl
 
     StorageCard(title = stringResource(R.string.sync_vault_title), subtitle = stringResource(R.string.sync_vault_subtitle), icon = Icons.Outlined.CloudUpload) {
-        OutlinedTextField(
-            value = url,
-            onValueChange = { url = it; onUrlChanged(it) },
-            modifier = Modifier.fillMaxWidth().onFocusChanged { if (!it.isFocused) onUrlCommit(url) },
-            label = { Text(stringResource(R.string.sync_vault_url)) },
-            placeholder = { Text(VaultUrl.PLACEHOLDER, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-            singleLine = true,
-            isError = urlError != null,
-            supportingText = urlError?.let { { Text(it) } },
-            shape = R12,
-            colors = inkFieldColors(),
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, autoCorrectEnabled = false, imeAction = ImeAction.Next),
-        )
-        OutlinedTextField(
-            value = password,
-            onValueChange = { password = it; onPasswordChanged(it) },
-            modifier = Modifier.fillMaxWidth().onFocusChanged { if (!it.isFocused) onPasswordCommit() },
-            label = { Text(stringResource(R.string.sync_vault_password)) },
-            placeholder = if (hasPassword) ({ Text(stringResource(R.string.sync_vault_password_saved)) }) else null,
-            leadingIcon = if (hasPassword && password.isEmpty()) ({ Icon(Icons.Outlined.Lock, null, Modifier.size(Dimens.icon)) }) else null,
-            singleLine = true,
-            shape = R12,
-            colors = inkFieldColors(),
-            visualTransformation = if (reveal) VisualTransformation.None else PasswordVisualTransformation(),
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, autoCorrectEnabled = false, imeAction = ImeAction.Done),
-            keyboardActions = KeyboardActions(onDone = { onPasswordCommit() }),
-            trailingIcon = {
-                SmallIconButton(
-                    if (reveal) Icons.Outlined.VisibilityOff else Icons.Outlined.Visibility,
-                    stringResource(if (reveal) R.string.sync_vault_password_hide else R.string.sync_vault_password_show),
-                    { reveal = !reveal },
-                )
-            },
-        )
+        LabeledField(stringResource(R.string.sync_vault_url)) {
+            OutlinedTextField(
+                value = url,
+                onValueChange = { url = it; onUrlChanged(it) },
+                modifier = Modifier.fillMaxWidth().onFocusChanged {
+                    if (urlFocused && !it.isFocused) onUrlCommit(url)
+                    urlFocused = it.isFocused
+                },
+                placeholder = { Text(VaultUrl.PLACEHOLDER, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                singleLine = true,
+                isError = urlError != null,
+                supportingText = urlError?.let { { Text(it) } },
+                shape = R12,
+                colors = inkFieldColors(),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, autoCorrectEnabled = false, imeAction = ImeAction.Next),
+            )
+        }
+        LabeledField(stringResource(R.string.sync_vault_password)) {
+            OutlinedTextField(
+                value = password,
+                onValueChange = { password = it; onPasswordChanged(it) },
+                modifier = Modifier.fillMaxWidth().onFocusChanged { if (!it.isFocused) onPasswordCommit() },
+                placeholder = {
+                    Text(
+                        stringResource(if (hasPassword) R.string.sync_vault_password_saved else R.string.sync_vault_password_hint),
+                        maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    )
+                },
+                leadingIcon = if (hasPassword && password.isEmpty()) ({ Icon(Icons.Outlined.Lock, null, Modifier.size(Dimens.icon)) }) else null,
+                singleLine = true,
+                shape = R12,
+                colors = inkFieldColors(),
+                visualTransformation = if (reveal) VisualTransformation.None else PasswordVisualTransformation(),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, autoCorrectEnabled = false, imeAction = ImeAction.Done),
+                keyboardActions = KeyboardActions(onDone = { onPasswordCommit() }),
+                trailingIcon = {
+                    SmallIconButton(
+                        if (reveal) Icons.Outlined.VisibilityOff else Icons.Outlined.Visibility,
+                        stringResource(if (reveal) R.string.sync_vault_password_hide else R.string.sync_vault_password_show),
+                        { reveal = !reveal },
+                    )
+                },
+            )
+        }
         FlowRow(
             Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -174,6 +186,15 @@ internal fun VaultCard(
         if (usesVault && (normalized == null || (!hasPassword && password.isEmpty()))) {
             InfoLine(stringResource(R.string.sync_vault_needs_setup))
         }
+    }
+}
+
+/** Small label above a field, so the placeholder stays visible while the field is empty. */
+@Composable
+private fun LabeledField(label: String, field: @Composable () -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text(label, style = MaterialTheme.typography.labelMedium, color = Inkwell.colors.inkMuted)
+        field()
     }
 }
 
