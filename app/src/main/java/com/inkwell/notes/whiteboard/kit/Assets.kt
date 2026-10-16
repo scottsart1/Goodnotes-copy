@@ -115,9 +115,10 @@ object FileSharing {
     fun authority(context: Context): String = context.packageName + ".files"
 
     /** Opens the system share sheet for [file]. Returns false when nothing can receive it. */
-    fun share(context: Context, file: File, mime: String, chooserTitle: String): Boolean {
+    suspend fun share(context: Context, file: File, mime: String, chooserTitle: String): Boolean {
         return try {
-            val uri = FileProvider.getUriForFile(context, authority(context), file)
+            // getUriForFile resolves canonical paths (disk access): keep it off Main.
+            val uri = withContext(Dispatchers.IO) { FileProvider.getUriForFile(context, authority(context), file) }
             val send = Intent(Intent.ACTION_SEND).apply {
                 type = mime
                 putExtra(Intent.EXTRA_STREAM, uri)

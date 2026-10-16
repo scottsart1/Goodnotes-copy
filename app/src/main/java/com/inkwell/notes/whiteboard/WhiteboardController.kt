@@ -235,6 +235,7 @@ class WhiteboardController(val graph: AppGraph, val docId: String) : InkCanvasLi
         minimapJob = scope.launch {
             if (delayMs > 0) delay(delayMs)
             val (w, h) = minimapPx
+            if (content.images.isNotEmpty()) withContext(Dispatchers.IO) { ops.preloadOverviewImages(content) }
             val rendered = withContext(Dispatchers.Default) { ops.renderOverview(content, w, h) }
             minimap = rendered
             contentBox = rendered?.bounds

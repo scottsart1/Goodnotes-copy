@@ -73,7 +73,16 @@ class BoardOperations(private val c: WhiteboardController) {
 
     // ------------------------------------------------------------------ Overview (minimap)
 
-    /** Renders all content into a bitmap at most [maxW] x [maxH] pixels. Call off Main. */
+    /** Decodes small copies of the images the overview needs (disk work, call on IO). */
+    fun preloadOverviewImages(content: PageContent) {
+        for (im in content.images) {
+            if (!smallImages.containsKey(im.assetId)) {
+                smallImages[im.assetId] = DocAssets.decodeAsset(graph, docId, im.assetId, maxSide = 256)
+            }
+        }
+    }
+
+    /** Renders all content into a bitmap at most [maxW] x [maxH] pixels. CPU only; call on Default. */
     fun renderOverview(content: PageContent, maxW: Int, maxH: Int): MinimapImage? {
         val b = BoardGeometry.contentBounds(content) ?: return null
         val bw = max(b.width, 1f)
@@ -86,7 +95,7 @@ class BoardOperations(private val c: WhiteboardController) {
             val canvas = Canvas(bmp)
             canvas.scale(s, s)
             canvas.translate(-b.left, -b.top)
-            PageRenderer.drawContent(canvas, content, { id -> smallImage(id) })
+            PageRenderer.drawContent(canvas, content, { id -> smallImages[id] })
             MinimapImage(bmp.asImageBitmap(), Box(b.left, b.top, b.left + bw, b.top + bh))
         } catch (t: Throwable) {
             if (t is CancellationException) throw t
@@ -95,12 +104,6 @@ class BoardOperations(private val c: WhiteboardController) {
         }
     }
 
-    private fun smallImage(assetId: String): Bitmap? {
-        if (smallImages.containsKey(assetId)) return smallImages[assetId]
-        val bmp = DocAssets.decodeAsset(graph, docId, assetId, maxSide = 256)
-        smallImages[assetId] = bmp
-        return bmp
-    }
 
     // ------------------------------------------------------------------ Export area
 
@@ -123,7 +126,8 @@ class BoardOperations(private val c: WhiteboardController) {
         val title = c.doc?.title ?: "Whiteboard"
         c.busy = R.string.wb_exporting
         return try {
-            val bmp = withContext(Dispatchers.Default) { renderRegion(content, region, scale, paper) }
+            val images = withContext(Dispatchers.IO) { decodeRegionImages(content, region, scale) }
+            val bmp = withContext(Dispatchers.Default) { renderRegion(content, region, scale, paper, images) }
             withContext(Dispatchers.IO) {
                 val stamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
                 val file = File(graph.files.exportsDir, "${FileSharing.safeName(title, "Whiteboard")}_area_$stamp.png")
@@ -144,9 +148,8 @@ class BoardOperations(private val c: WhiteboardController) {
         }
     }
 
-    private fun renderRegion(content: PageContent, region: Box, scale: Float, paper: Int): Bitmap {
-        val w = (region.width * scale).roundToInt().coerceIn(1, 8192)
-        val h = (region.height * scale).roundToInt().coerceIn(1, 8192)
+    /** Images inside [region], decoded at the export resolution. Disk work: call on IO. */
+    private fun decodeRegionImages(content: PageContent, region: Box, scale: Float): Map<String, Bitmap?> {
         val images = HashMap<String, Bitmap?>()
         for (im in content.images) {
             if (im.assetId in images) continue
@@ -154,6 +157,12 @@ class BoardOperations(private val c: WhiteboardController) {
             val need = (max(im.width, im.height) * scale).roundToInt().coerceIn(64, 4096)
             images[im.assetId] = DocAssets.decodeAsset(graph, docId, im.assetId, maxSide = need)
         }
+        return images
+    }
+
+    private fun renderRegion(content: PageContent, region: Box, scale: Float, paper: Int, images: Map<String, Bitmap?>): Bitmap {
+        val w = (region.width * scale).roundToInt().coerceIn(1, 8192)
+        val h = (region.height * scale).roundToInt().coerceIn(1, 8192)
         val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bmp)
         canvas.drawColor(paper)
