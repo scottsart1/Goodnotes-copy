@@ -100,8 +100,13 @@ class EraserEngine(private val idFactory: () -> String = { UUID.randomUUID().toS
                 val o = e.item
                 if (o is Stroke && o.id != item.id) others += o.points
             }
-            var cuts = SegmentEraser.crossings(item.points, InkPoints.STRIDE, others, includeSelf = true)
-            if (cuts.isEmpty()) cuts = SegmentEraser.corners(item.points, InkPoints.STRIDE, minSegment = item.width * 1.5f + 1f)
+            // Crossings and sharp corners both bound a segment. Using corners only as a fallback
+            // broke closed shapes: a box whose last sample meets (or overshoots) its first has a
+            // "crossing" at each end and would lose every side at once, and a box crossed by a
+            // single line would lose everything from that crossing round to its end.
+            val crossings = SegmentEraser.crossings(item.points, InkPoints.STRIDE, others, includeSelf = true)
+            val corners = SegmentEraser.corners(item.points, InkPoints.STRIDE, minSegment = item.width * 1.5f + 1f)
+            val cuts = SegmentEraser.merge(crossings, corners)
             val touch = ItemGeometry.nearestArcLength(item, x, y)
             val rest = SegmentEraser.removeSpan(item.points, InkPoints.STRIDE, touch, cuts, item.width * 0.5f)
             changed.union(ItemGeometry.bounds(item, tmp, content))
