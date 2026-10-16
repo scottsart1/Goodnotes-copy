@@ -42,9 +42,10 @@ import com.inkwell.notes.ui.theme.Inkwell
  */
 @Composable
 fun TemporaryToolToast(tool: ToolType?, modifier: Modifier = Modifier) {
-    // Keep the last tool while fading out so the label does not jump.
-    var shown by remember { mutableStateOf(tool ?: ToolType.ERASER) }
-    if (tool != null) shown = tool
+    // Keep the last tool while fading out so the label does not jump (plain holder, not state).
+    val last = remember { arrayOfNulls<ToolType>(1) }
+    if (tool != null) last[0] = tool
+    val shown = tool ?: last[0] ?: ToolType.ERASER
     val c = Inkwell.colors
     val bg = if (c.isDark) c.surfaceAlt else c.ink
     val fg = if (c.isDark) c.ink else c.surface
@@ -78,8 +79,9 @@ fun TemporaryToolToast(tool: ToolType?, modifier: Modifier = Modifier) {
 @Composable
 fun BusyPill(labels: List<String>, modifier: Modifier = Modifier) {
     val label = labels.lastOrNull()
-    var last by remember { mutableStateOf("") }
-    if (label != null) last = label
+    val holder = remember { arrayOf("") }
+    if (label != null) holder[0] = label
+    val last = holder[0]
     val c = Inkwell.colors
     AnimatedVisibility(visible = label != null, enter = fadeIn(tween(150)), exit = fadeOut(tween(150)), modifier = modifier) {
         Row(

@@ -113,7 +113,7 @@ fun ToolbarHost(
     modifier: Modifier = Modifier,
 ) {
     var handleExpanded by remember { mutableStateOf(false) }
-    if (!focusMode && handleExpanded) handleExpanded = false
+    androidx.compose.runtime.LaunchedEffect(focusMode) { if (!focusMode) handleExpanded = false }
     BoxWithConstraints(modifier.fillMaxSize()) {
         val vertical = prefs.position == ToolbarPosition.LEFT || prefs.position == ToolbarPosition.RIGHT
         val available = if (vertical) maxHeight.value else maxWidth.value

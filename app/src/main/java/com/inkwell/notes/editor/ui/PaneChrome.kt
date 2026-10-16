@@ -100,7 +100,9 @@ fun PaneChrome(
                 onClose = { id ->
                     val next = EditorSession.tabs.close(id)
                     if (id == controller.docId) {
-                        if (next != null) nav.openDocumentById(next) else nav.back()
+                        // Leave this editor (it saves on the way out) and show the neighbour.
+                        nav.back()
+                        if (next != null) nav.openDocumentById(next)
                     }
                 },
             )

@@ -95,7 +95,7 @@ fun PagesPanelContent(controller: NotebookController, callbacks: PageCallbacks, 
     var selected by remember { mutableStateOf(setOf<String>()) }
     val gridState = rememberLazyGridState()
     val reorder = remember(gridState) { GridReorder(gridState) }
-    if (reorder.draggingKey == null) reorder.order = pages.map { it.id }
+    val order = if (reorder.draggingKey != null) reorder.order else pages.map { it.id }
     val byId = pages.associateBy { it.id }
     // Drop ids that no longer exist from the selection.
     LaunchedEffect(pages) { selected = selected.filterTo(HashSet()) { id -> pages.any { it.id == id } } }
@@ -136,7 +136,7 @@ fun PagesPanelContent(controller: NotebookController, callbacks: PageCallbacks, 
                 .then(
                     if (selecting) Modifier else Modifier.pointerInput(reorder) {
                         detectDragGesturesAfterLongPress(
-                            onDragStart = { reorder.start(it) },
+                            onDragStart = { reorder.start(it, controller.pages.map { p -> p.id }) },
                             onDragEnd = {
                                 val order = reorder.finish()
                                 if (order != null && PageRanges.isReorder(controller.pages, order)) {
@@ -151,7 +151,7 @@ fun PagesPanelContent(controller: NotebookController, callbacks: PageCallbacks, 
                     },
                 ),
         ) {
-            itemsIndexed(reorder.order.mapNotNull { byId[it] }, key = { _, p -> p.id }) { index, page ->
+            itemsIndexed(order.mapNotNull { byId[it] }, key = { _, p -> p.id }) { index, page ->
                 val dragging = reorder.draggingKey == page.id
                 PageCell(
                     controller = controller,
@@ -307,8 +307,9 @@ class GridReorder(private val grid: LazyGridState) {
         p.x >= it.offset.x && p.x <= it.offset.x + it.size.width && p.y >= it.offset.y && p.y <= it.offset.y + it.size.height
     }
 
-    fun start(p: Offset) {
+    fun start(p: Offset, ids: List<String>) {
         val item = itemAt(p) ?: return
+        order = ids
         draggingKey = item.key as? String ?: return
         currentIndex = item.index
         initialOffset = item.offset

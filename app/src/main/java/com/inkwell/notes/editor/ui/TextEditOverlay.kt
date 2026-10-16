@@ -9,6 +9,9 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
@@ -110,11 +113,17 @@ fun TextEditOverlay(request: TextEditRequest, onDone: (text: String, config: Tex
         color = Color(config.color),
     )
 
+    // Keep the editor above the on-screen keyboard.
+    val imeBottom = WindowInsets.ime.getBottom(density)
+    val navBottom = WindowInsets.navigationBars.getBottom(density)
+    val keyboardOverlap = (imeBottom - navBottom).coerceAtLeast(0)
     PlacedOverlay(place = { w, h, cw, ch ->
         val barH = with(density) { 52.dp.toPx() }
+        val visibleH = (ch - keyboardOverlap).coerceAtLeast(h)
         val x = rect.left.coerceIn(0f, max(0f, cw - w.toFloat()))
         val wantY = rect.top - barH
-        val y = if (wantY >= 0f) wantY else min(rect.top, max(0f, ch - h.toFloat()))
+        val y = (if (wantY >= 0f) wantY else min(rect.top, max(0f, ch - h.toFloat())))
+            .coerceAtMost(max(0f, visibleH - h.toFloat()))
         IntOffset(x.roundToInt(), y.roundToInt().coerceAtLeast(0))
     }) {
         Column {

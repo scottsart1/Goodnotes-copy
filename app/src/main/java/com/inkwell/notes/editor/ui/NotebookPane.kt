@@ -167,8 +167,11 @@ fun NotebookPane(
             }
         }
     }
+    // Report recording errors that happen while this pane is open (not stale ones).
+    val initialRecState = remember { graph.recording.state.value }
     LaunchedEffect(recState) {
-        (recState as? RecordingState.Error)?.let { controller.messages.show(it.message, long = true) }
+        val err = recState as? RecordingState.Error ?: return@LaunchedEffect
+        if (err !== initialRecState) controller.messages.show(err.message, long = true)
     }
     // Wrong kind (e.g. a stale link to a whiteboard): open it in its own screen instead.
     val doc = controller.doc
@@ -295,7 +298,7 @@ private fun CanvasArea(
             aiOpen = ui.right == RightPanel.AI,
             callbacks = ToolbarCallbacks(
                 onRecord = actions::onRecord,
-                onAi = { if (ui.right == RightPanel.AI) ui.right = null else ui.openAi(ui.aiContext?.takeIf { it.selectionText == null && it.selectionImage == null } ?: controller.pageAiContext()) },
+                onAi = { if (ui.right == RightPanel.AI) ui.right = null else ui.openAi(controller.pageAiContext()) },
                 onPrefs = actions::updateToolbar,
                 onMyElements = { ui.dialog = PaneDialog.MyElements },
                 options = ToolOptionsActions(

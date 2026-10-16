@@ -65,9 +65,9 @@ fun PaneDialogHost(controller: NotebookController, ui: PaneUiState, actions: Pan
         )
         is PaneDialog.Paper -> {
             val page = controller.pages.firstOrNull { it.id == dialog.pageIds.firstOrNull() } ?: controller.currentPageMeta
-            if (page == null) dismiss() else PaperDialog(page, dialog.pageIds.size, { actions.applyPaper(dialog.pageIds, it) }, dismiss)
+            if (page == null) DismissNow(ui) else PaperDialog(page, dialog.pageIds.size, { actions.applyPaper(dialog.pageIds, it) }, dismiss)
         }
-        PaneDialog.DocInfo -> if (doc != null) DocumentInfoDialog(graph, doc, controller.pages, controller.currentPage, dismiss) else dismiss()
+        PaneDialog.DocInfo -> if (doc != null) DocumentInfoDialog(graph, doc, controller.pages, controller.currentPage, dismiss) else DismissNow(ui)
         is PaneDialog.Export -> ExportDialog(controller.docId, dialog.indices, onDismiss = dismiss)
         PaneDialog.PickSplitPartner -> DocumentPickerDialog(
             graph, stringResource(R.string.editor_pick_side_by_side), setOf(controller.docId), setOf(DocKind.NOTEBOOK, DocKind.PDF),
@@ -207,7 +207,7 @@ fun PaneDialogHost(controller: NotebookController, ui: PaneUiState, actions: Pan
             val state by graph.recording.state.collectAsState()
             val active = state as? RecordingState.Active
             if (active == null) {
-                dismiss()
+                DismissNow(ui)
             } else {
                 AlertDialog(
                     onDismissRequest = dismiss,
@@ -234,4 +234,10 @@ fun PaneDialogHost(controller: NotebookController, ui: PaneUiState, actions: Pan
             }
         }
     }
+}
+
+/** Closes a dialog whose subject disappeared, outside of composition. */
+@Composable
+private fun DismissNow(ui: PaneUiState) {
+    androidx.compose.runtime.LaunchedEffect(Unit) { ui.dialog = null }
 }

@@ -59,7 +59,7 @@ fun FloatingSurface(
         color = color,
         contentColor = Inkwell.colors.ink,
         border = BorderStroke(1.dp, Inkwell.colors.outline),
-        shadowElevation = 2.dp,
+        shadowElevation = 1.dp,
         content = content,
     )
 }

@@ -5,7 +5,7 @@ import com.inkwell.notes.R
 import com.inkwell.notes.core.model.ToolType
 
 /** A named ink colour (ARGB). These are content colours, not UI chrome. */
-data class InkColor(val argb: Int, @StringRes val name: Int)
+data class InkColor(val argb: Int, @param:StringRes val name: Int)
 
 object Palettes {
     val pen = listOf(
