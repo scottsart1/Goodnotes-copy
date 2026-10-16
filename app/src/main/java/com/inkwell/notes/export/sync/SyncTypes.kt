@@ -86,6 +86,14 @@ interface SyncStateStore {
     var lastSuccessAt: Long
     var lastError: String?
     var vaultLockedUntil: Long
+    /**
+     * When the vault last refused the stored password (epoch ms; 0 = never). Vault uploads pause
+     * for [SyncEngine.CREDENTIALS_HOLD_MS] after that, or until the credentials change, so the
+     * app's own retries never trip the vault's failed-login lockout against the user.
+     */
+    var vaultCredentialsRefusedAt: Long
+        get() = 0L
+        set(@Suppress("UNUSED_PARAMETER") value) {}
     /** Where the document's files were last written inside the folder destination. */
     fun folderLocation(docId: String): List<String>?
     fun setFolderLocation(docId: String, segments: List<String>?)
@@ -100,6 +108,7 @@ class InMemorySyncState : SyncStateStore {
     override var lastSuccessAt: Long = 0
     override var lastError: String? = null
     override var vaultLockedUntil: Long = 0
+    override var vaultCredentialsRefusedAt: Long = 0
     private val locations = HashMap<String, List<String>>()
     override fun folderLocation(docId: String): List<String>? = synchronized(locations) { locations[docId] }
     override fun setFolderLocation(docId: String, segments: List<String>?) {

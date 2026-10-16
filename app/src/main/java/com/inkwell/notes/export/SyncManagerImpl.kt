@@ -181,6 +181,7 @@ class SyncManagerImpl(private val graph: AppGraph) : SyncManager {
                     // The saved settings work: reuse this session and release anything that waited.
                     safely { SecretVaultCredentials(graph.secrets, endpoint).saveSession(ok.session) }
                     stateStore.vaultLockedUntil = 0
+                    stateStore.vaultCredentialsRefusedAt = 0
                     if (stateStore.lastError != null) stateStore.lastError = null
                     refreshStatus()
                     kick()
@@ -223,6 +224,7 @@ class SyncManagerImpl(private val graph: AppGraph) : SyncManager {
         graph.appScope.launch(Dispatchers.IO) {
             safely { graph.secrets.put(SecretStore.VAULT_SESSION, null) }
             stateStore.vaultLockedUntil = 0
+            stateStore.vaultCredentialsRefusedAt = 0
             stateStore.lastError = null
             refreshStatus()
             if (graph.settings.current.destinations.autoSync) kick()
@@ -293,6 +295,7 @@ class SyncManagerImpl(private val graph: AppGraph) : SyncManager {
         val newVault = VaultUrl.normalize(new.vaultUrl)
         if (newVault != oldVault) {
             stateStore.vaultLockedUntil = 0
+            stateStore.vaultCredentialsRefusedAt = 0
             if (newVault != null) enqueued += engine.enqueueEverything(new, onlyTarget = OutputTarget.VAULT)
         }
         val newFormats = (new.notesFormat.includesPdf && !old.notesFormat.includesPdf) ||

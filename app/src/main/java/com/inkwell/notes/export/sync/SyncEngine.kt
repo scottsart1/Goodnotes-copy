@@ -249,6 +249,9 @@ class SyncEngine(
         Log.w(TAG, "Vault ${item.kind} failed: ${e.javaClass.simpleName}")
         ctx.error = e.message
         if (e is VaultException.Locked) state.vaultLockedUntil = clock() + e.retryAfterSeconds * 1000
+        // The vault counts failed logins per address and locks it after a few: once the stored
+        // password was refused, stop trying until it changes (or the lockout window has passed).
+        if (e is VaultException.WrongPassword && !ctx.heldForCredentials) state.vaultCredentialsRefusedAt = clock()
         if (e.blocksVault) {
             // Settings or connectivity problem: keep the item, stop vault work for this run.
             ctx.vaultBlocked = e
@@ -436,6 +439,8 @@ class SyncEngine(
         var lastSuccessAt = 0L
         var error: String? = null
         var vaultBlocked: VaultException? = null
+        /** True when this run's vault error came from the credentials hold, not from the vault. */
+        var heldForCredentials = false
         var folderBlocked: Exception? = null
         var knownVaultDocs: HashSet<String>? = null
         val placements = HashMap<String, Placement>()
@@ -461,6 +466,11 @@ class SyncEngine(
             val now = clock()
             val lockedUntil = state.vaultLockedUntil
             if (lockedUntil > now) throw VaultException.Locked((lockedUntil - now + 999) / 1000)
+            val refusedAt = state.vaultCredentialsRefusedAt
+            if (refusedAt > 0 && now - refusedAt < CREDENTIALS_HOLD_MS) {
+                heldForCredentials = true
+                throw VaultException.WrongPassword()
+            }
             client?.let { return it }
             val endpoint = endpointFor(prefs.vaultUrl) ?: throw VaultException.MissingLink()
             return vaultClient(endpoint).also { client = it }
@@ -478,6 +488,8 @@ class SyncEngine(
     companion object {
         private const val TAG = "InkwellSync"
         const val MAX_ATTEMPTS = 8
+        /** After the vault refused the password, no login is attempted for this long (the vault's lockout window). */
+        const val CREDENTIALS_HOLD_MS = 15L * 60 * 1000
         private const val QUERY_LIMIT = 5000
         /** A document counts as changed when edited more than this after its last copy. */
         const val CHANGE_TOLERANCE_MS = 2_000L

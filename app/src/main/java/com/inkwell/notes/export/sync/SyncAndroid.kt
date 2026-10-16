@@ -91,6 +91,10 @@ internal class PrefsSyncStateStore(context: Context) : SyncStateStore {
         get() = prefs.getLong(KEY_LOCKED_UNTIL, 0)
         set(value) = prefs.edit().putLong(KEY_LOCKED_UNTIL, value).apply()
 
+    override var vaultCredentialsRefusedAt: Long
+        get() = prefs.getLong(KEY_REFUSED_AT, 0)
+        set(value) = prefs.edit().putLong(KEY_REFUSED_AT, value).apply()
+
     override fun folderLocation(docId: String): List<String>? =
         locations.getString(docId, null)?.split(SEP)?.filter { it.isNotEmpty() }?.takeIf { it.isNotEmpty() }
 
@@ -104,6 +108,7 @@ internal class PrefsSyncStateStore(context: Context) : SyncStateStore {
         const val KEY_LAST_SUCCESS = "lastSuccessAt"
         const val KEY_LAST_ERROR = "lastError"
         const val KEY_LOCKED_UNTIL = "vaultLockedUntil"
+        const val KEY_REFUSED_AT = "vaultCredentialsRefusedAt"
         const val SEP = "\u001F"
     }
 }

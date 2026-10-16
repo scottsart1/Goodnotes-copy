@@ -349,6 +349,8 @@ class EngineHarness(
     val credentials: MemoryCredentials = MemoryCredentials(),
     val folderRoot: File? = null,
     val folderRename: Boolean = true,
+    /** Overrides the vault endpoint (a real server); by default the [vault] double is used. */
+    val endpoint: VaultEndpoint? = null,
 ) {
     val dao = FakeSyncQueueDao()
     val source = FakeSource(File(tmp, "exports").apply { mkdirs() })
@@ -371,6 +373,6 @@ class EngineHarness(
         onFolderRevoked = { revoked++; prefs = prefs.withoutFolder() },
         clock = { now },
         io = Dispatchers.Unconfined,
-        endpointFor = { url -> if (url.isNotBlank()) vault?.endpoint else null },
+        endpointFor = { url -> if (url.isNotBlank()) endpoint ?: vault?.endpoint else null },
     )
 }
