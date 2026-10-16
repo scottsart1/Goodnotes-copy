@@ -13,6 +13,7 @@ import com.inkwell.notes.core.settings.SettingsRepository
 import com.inkwell.notes.core.storage.db.FolderEntity
 import com.inkwell.notes.export.BackupReport
 import com.inkwell.notes.export.format.ExportErrors
+import com.inkwell.notes.export.format.SafStreams
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
@@ -44,12 +45,12 @@ internal class LibraryBackup(private val graph: AppGraph) {
 
     suspend fun backupTo(target: Uri, includeAudio: Boolean): BackupReport = withContext(Dispatchers.IO) {
         val now = System.currentTimeMillis()
-        val (fileUri, created) = resolveTarget(target, now)
+        var written: Uri? = null
         var ok = false
         try {
-            val out = context.contentResolver.openOutputStream(fileUri, "wt")
-                ?: context.contentResolver.openOutputStream(fileUri)
-                ?: throw ExportErrors.of(context, R.string.export_err_backup_target)
+            val fileUri = resolveTarget(target, now)
+            written = fileUri
+            val out = SafStreams.openForWrite(context, fileUri) ?: throw ExportErrors.of(context, R.string.export_err_backup_target)
             val counter = CountingOutputStream(BufferedOutputStream(out, 256 * 1024))
             var count = 0
             counter.use { stream ->
@@ -99,18 +100,20 @@ internal class LibraryBackup(private val graph: AppGraph) {
         } catch (t: Throwable) {
             throw if (t is CancellationException) t else ExportErrors.wrap(context, t)
         } finally {
-            if (!ok && created) withContext(NonCancellable) { runCatching { DocumentsContract.deleteDocument(context.contentResolver, fileUri) } }
+            // Never leave a partial backup behind that could later be mistaken for a good one.
+            val partial = written
+            if (!ok && partial != null) withContext(NonCancellable) { runCatching { DocumentsContract.deleteDocument(context.contentResolver, partial) } }
         }
     }
 
     /** A folder tree gets a new "Inkwell-backup-YYYYMMDD-HHmm.zip"; a document Uri is written directly. */
-    private fun resolveTarget(target: Uri, now: Long): Pair<Uri, Boolean> {
-        if (!isTree(target)) return target to false
+    private fun resolveTarget(target: Uri, now: Long): Uri {
+        if (!isTree(target)) return target
         val tree = DocumentFile.fromTreeUri(context, target)
         if (tree == null || !tree.canWrite()) throw ExportErrors.of(context, R.string.export_err_folder)
         val file = tree.createFile("application/zip", BackupNaming.fileName(now))
             ?: throw ExportErrors.of(context, R.string.export_err_backup_target)
-        return file.uri to true
+        return file.uri
     }
 
     private fun isTree(uri: Uri): Boolean = try {

@@ -134,6 +134,58 @@ class PdfStructureTest {
         }
     }
 
+    @Test fun originalPdfPagesAreImportedWithRotationAndIsolatedInk() {
+        // A source page with an offset crop box, /Rotate 90, inherited resources and a link.
+        val sourceFile = File(dir, "source.pdf")
+        PDDocument().use { doc ->
+            val page = PDPage(PDRectangle(620f, 840f))
+            page.cropBox = PDRectangle(10f, 20f, 600f, 800f)
+            page.rotation = 90
+            doc.addPage(page)
+            PDPageContentStream(doc, page).use { cs -> cs.moveTo(0f, 0f); cs.lineTo(50f, 50f); cs.stroke() }
+            page.annotations = listOf(com.tom_roush.pdfbox.pdmodel.interactive.annotation.PDAnnotationLink())
+            val res = page.cosObject.getDictionaryObject(COSName.RESOURCES) ?: com.tom_roush.pdfbox.cos.COSDictionary()
+            page.cosObject.removeItem(COSName.RESOURCES)
+            doc.pages.cosObject.setItem(COSName.RESOURCES, res)
+            doc.save(sourceFile)
+        }
+        val out = ByteArrayOutputStream()
+        PDDocument.load(sourceFile).use { src ->
+            PDDocument().use { target ->
+                // The editor shows the rotated page 800 x 600 and the user rotated it once more.
+                val meta = com.inkwell.notes.core.model.PageMeta("p", "d", 0, 800f, 600f, rotation = 90, pdfPageIndex = 0)
+                val (page, toUser) = com.inkwell.notes.export.format.PdfPages.importOriginal(target, src.getPage(0), meta)
+                assertEquals(180, page.rotation)
+                assertTrue(page.cosObject.containsKey(COSName.RESOURCES))
+                // Display top-left of a /Rotate 90 page is the crop box origin.
+                assertEquals(10f, toUser.mapX(0f, 0f), 1e-3f)
+                assertEquals(20f, toUser.mapY(0f, 0f), 1e-3f)
+                assertEquals(610f, toUser.mapX(0f, 600f), 1e-3f)
+
+                PDPageContentStream(target, page, PDPageContentStream.AppendMode.APPEND, true, true).use { cs ->
+                    cs.saveGraphicsState()
+                    cs.transform(PdfCanvas.matrix(toUser))
+                    cs.addRect(0f, 0f, 10f, 10f)
+                    cs.fill()
+                    cs.restoreGraphicsState()
+                }
+                page.annotations = ArrayList(page.annotations) + com.tom_roush.pdfbox.pdmodel.interactive.annotation.PDAnnotationLink()
+                assertEquals(1, src.getPage(0).annotations.size) // the source's /Annots array is untouched
+                target.save(out)
+            }
+        }
+        PDDocument.load(out.toByteArray()).use { doc ->
+            val page = doc.getPage(0)
+            assertEquals(2, page.annotations.size)
+            val ops = page.contents.readBytes().toString(Charsets.ISO_8859_1).split(Regex("\\s+")).filter { it.isNotEmpty() }
+            // q <original> Q q <ink> Q: the original drawing state never leaks into the ink.
+            assertEquals("q", ops.first())
+            val firstQ = ops.indexOf("Q")
+            assertTrue(firstQ > ops.indexOf("S"))
+            assertTrue(ops.lastIndexOf("cm") > firstQ)
+        }
+    }
+
     @Test fun coverageFallsBackForMissingGlyphs() {
         PDDocument().use { doc ->
             val fonts = PdfFonts(doc, font("figtree_regular.ttf"), font("figtree_bold.ttf"))

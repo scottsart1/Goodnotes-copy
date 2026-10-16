@@ -38,7 +38,8 @@ data class ExportChoices(
      * in the editor (null when none); [pageCount] the document's pages.
      */
     fun toOptions(pageCount: Int, selected: List<Int>?, paged: Boolean): Result {
-        val pages: List<Int>? = if (!paged) null else when (range) {
+        // Packages always hold the whole document; typed documents and boards have no page choice.
+        val pages: List<Int>? = if (!paged || format == ExportFormat.INKWELL) null else when (range) {
             RangeMode.ALL -> null
             RangeMode.SELECTED -> selected?.filter { it in 0 until pageCount }?.distinct()?.sorted()?.takeIf { it.isNotEmpty() }
             RangeMode.CUSTOM -> when (val r = PageRange.parse(custom, pageCount)) {

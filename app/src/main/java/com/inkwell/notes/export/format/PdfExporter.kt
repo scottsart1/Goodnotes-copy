@@ -159,19 +159,15 @@ internal class PdfExporter(private val graph: AppGraph, private val source: DocS
                 if (options.includeBackground) boardFill = b
             }
             srcPage != null -> {
-                pdPage = target.importPage(srcPage)
-                if (!pdPage.cosObject.containsKey(COSName.RESOURCES)) srcPage.resources?.let { pdPage.resources = it }
-                val box = pdPage.cropBox
-                val r0 = srcPage.rotation
-                toUser = PdfGeometry.displayToUser(box.lowerLeftX, box.lowerLeftY, box.upperRightX, box.upperRightY, r0, page.widthPt, page.heightPt)
-                pdPage.rotation = PdfGeometry.combinedRotation(r0, page.rotation)
+                val (p, t) = PdfPages.importOriginal(target, srcPage, page)
+                pdPage = p
+                toUser = t
                 hasTextLayer = true
             }
             else -> {
-                pdPage = PDPage(PDRectangle(page.widthPt.coerceAtLeast(1f), page.heightPt.coerceAtLeast(1f)))
-                target.addPage(pdPage)
-                pdPage.rotation = PdfGeometry.normalizeRotation(page.rotation)
-                toUser = PdfGeometry.pageToUser(page.widthPt, page.heightPt)
+                val (p, t) = PdfPages.newPage(target, page)
+                pdPage = p
+                toUser = t
                 if (options.includeBackground) {
                     if (page.pdfPageIndex != null) {
                         raster = rasterBackground(doc.id, page, options, res)
@@ -182,7 +178,11 @@ internal class PdfExporter(private val graph: AppGraph, private val source: DocS
         }
 
         val flatten = options.flattenAnnotations
-        PDPageContentStream(target, pdPage, PDPageContentStream.AppendMode.APPEND, true, true).use { cs ->
+        // Imported pages keep their content; ours is appended with the original graphics state
+        // saved and restored around it. New pages get a single fresh stream.
+        val stream = if (srcPage != null) PDPageContentStream(target, pdPage, PDPageContentStream.AppendMode.APPEND, true, true)
+        else PDPageContentStream(target, pdPage, PDPageContentStream.AppendMode.OVERWRITE, true)
+        stream.use { cs ->
             cs.saveGraphicsState()
             cs.transform(PdfCanvas.matrix(toUser))
             val canvas = PdfCanvas(cs, res, doc.id)

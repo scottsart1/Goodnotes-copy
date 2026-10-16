@@ -12,6 +12,7 @@ import com.inkwell.notes.R
 import com.inkwell.notes.app.AppGraph
 import com.inkwell.notes.core.model.DocKind
 import com.inkwell.notes.core.model.DocumentMeta
+import com.inkwell.notes.core.model.RecordingStatus
 import com.inkwell.notes.export.backup.PackageImporter
 import com.inkwell.notes.export.backup.PackageWriter
 import com.inkwell.notes.export.format.AudioJoiner
@@ -22,6 +23,7 @@ import com.inkwell.notes.export.format.ExportNaming
 import com.inkwell.notes.export.format.ImageExporter
 import com.inkwell.notes.export.format.PageRaster
 import com.inkwell.notes.export.format.PdfExporter
+import com.inkwell.notes.export.format.SafStreams
 import com.inkwell.notes.export.format.TextExporter
 import com.inkwell.notes.export.format.TypedBlocks
 import com.inkwell.notes.export.format.TypedLayout
@@ -32,7 +34,6 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import java.io.BufferedOutputStream
 import java.io.File
-import java.io.FileNotFoundException
 import java.io.OutputStream
 import java.util.UUID
 import kotlin.coroutines.coroutineContext
@@ -117,7 +118,7 @@ class ExportServiceImpl(private val graph: AppGraph) : ExportService {
     private suspend fun writeToUri(doc: DocumentMeta, options: ExportOptions, target: Uri, progress: Progress, deleteOnFailure: Boolean = true) {
         try {
             withContext(Dispatchers.IO) {
-                val os = openOutput(target) ?: throw ExportErrors.of(graph.context, R.string.export_err_write)
+                val os = SafStreams.openForWrite(graph.context, target) ?: throw ExportErrors.of(graph.context, R.string.export_err_write)
                 BufferedOutputStream(os, BUFFER).use { write(doc, options, it, progress) }
             }
         } catch (t: Throwable) {
@@ -125,20 +126,6 @@ class ExportServiceImpl(private val graph: AppGraph) : ExportService {
                 withContext(NonCancellable + Dispatchers.IO) { runCatching { DocumentsContract.deleteDocument(graph.context.contentResolver, target) } }
             }
             throw t
-        }
-    }
-
-    /** Truncating write where the provider supports it ("w" alone may leave old bytes behind). */
-    private fun openOutput(uri: Uri): OutputStream? {
-        val cr = graph.context.contentResolver
-        return try {
-            cr.openOutputStream(uri, "wt")
-        } catch (e: FileNotFoundException) {
-            cr.openOutputStream(uri, "w")
-        } catch (e: IllegalArgumentException) {
-            cr.openOutputStream(uri, "w")
-        } catch (e: UnsupportedOperationException) {
-            cr.openOutputStream(uri, "w")
         }
     }
 
@@ -174,7 +161,10 @@ class ExportServiceImpl(private val graph: AppGraph) : ExportService {
             cleanOldExports()
             val rec = graph.db.recordings().get(recordingId)?.toModel()
                 ?: throw ExportErrors.of(graph.context, R.string.export_err_no_audio)
-            val segments = rec.segmentFiles.map(::File).filter { it.isFile && it.length() > 0 }
+            // A segment still being recorded is not playable yet; only finished ones are exported.
+            val live = rec.status == RecordingStatus.RECORDING || rec.status == RecordingStatus.PAUSED
+            val finished = if (live) rec.segmentFiles.take(rec.segmentDurationsMs.size) else rec.segmentFiles
+            val segments = finished.map(::File).filter { it.isFile && it.length() > 0 }
             if (segments.isEmpty()) throw ExportErrors.of(graph.context, R.string.export_err_no_audio)
             val docTitle = source.document(rec.documentId).title
             val base = ExportNaming.sanitize(rec.title.ifBlank { "$docTitle ${graph.context.getString(R.string.export_label_recording)}" })
@@ -231,7 +221,8 @@ class ExportServiceImpl(private val graph: AppGraph) : ExportService {
     }
 
     override suspend fun documentMarkdown(docId: String, includeTranscripts: Boolean): String = guard {
-        text.markdown(source.document(docId), null, includeTranscripts)
+        val doc = source.document(docId)
+        withContext(Dispatchers.Default) { text.markdown(doc, null, includeTranscripts) }
     }
 
     // ------------------------------------------------------------------ Housekeeping

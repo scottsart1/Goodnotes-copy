@@ -229,7 +229,7 @@ fun ExportDialog(docId: String, initialPageIndices: List<Int>? = null, onDismiss
 
     Dialog(
         onDismissRequest = { running?.cancel(); onDismiss() },
-        properties = DialogProperties(usePlatformDefaultWidth = false),
+        properties = DialogProperties(usePlatformDefaultWidth = false, dismissOnClickOutside = running == null),
     ) {
         BoxWithConstraints(Modifier.padding(Dimens.gutter)) {
             val width = if (maxWidth < 600.dp) maxWidth else 560.dp
