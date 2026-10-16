@@ -26,6 +26,34 @@ interface RecordingDao {
 
     @Query("DELETE FROM recordings WHERE id = :id")
     suspend fun delete(id: String)
+
+    // ---- audio feature additions
+
+    @Query("SELECT * FROM recordings WHERE id = :id")
+    fun observe(id: String): Flow<RecordingEntity?>
+
+    @Query("SELECT COUNT(*) FROM recordings WHERE documentId = :docId")
+    suspend fun countForDocument(docId: String): Int
+
+    @Query("UPDATE recordings SET title = :title WHERE id = :id")
+    suspend fun rename(id: String, title: String)
+
+    /** Sets the transcript status; [status] is a TranscriptStatus name. */
+    @Query("UPDATE recordings SET transcriptStatus = :status WHERE id = :id")
+    suspend fun setTranscriptStatus(id: String, status: String)
+
+    /** Compare-and-set of the transcript status (names); returns the number of rows changed. */
+    @Query("UPDATE recordings SET transcriptStatus = :to WHERE id = :id AND transcriptStatus IN (:from)")
+    suspend fun setTranscriptStatusIf(id: String, from: List<String>, to: String): Int
+
+    /** Read-modify-write of one recording in a transaction, so concurrent renames are never lost. */
+    @Transaction
+    suspend fun mutate(id: String, transform: (RecordingEntity) -> RecordingEntity): RecordingEntity? {
+        val current = get(id) ?: return null
+        val next = transform(current)
+        if (next != current) upsert(next)
+        return next
+    }
 }
 
 @Dao
