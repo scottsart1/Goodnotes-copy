@@ -4,6 +4,7 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -11,6 +12,7 @@ import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -216,20 +218,22 @@ fun SlimTopBar(
         ) {
             KitIconButton(Icons.AutoMirrored.Outlined.ArrowBack, stringResource(R.string.cd_back), onBack)
             Spacer(Modifier.width(4.dp))
-            Column(
-                Modifier
-                    .weight(1f, fill = false)
-                    .widthIn(max = 560.dp)
-                    .clip(RoundedCornerShape(8.dp))
-                    .then(if (onTitleClick != null) Modifier.clickable(onClickLabel = stringResource(R.string.cd_rename), onClick = onTitleClick) else Modifier)
-                    .padding(horizontal = 8.dp, vertical = 4.dp),
-            ) {
-                Text(title, style = MaterialTheme.typography.titleMedium, color = c.ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                if (subtitle != null) {
-                    Text(subtitle, style = MaterialTheme.typography.labelSmall, color = c.inkMuted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
+                Column(
+                    Modifier
+                        .heightIn(min = Dimens.minTouch)
+                        .clip(RoundedCornerShape(8.dp))
+                        .then(if (onTitleClick != null) Modifier.clickable(onClickLabel = stringResource(R.string.cd_rename), onClick = onTitleClick) else Modifier)
+                        .padding(horizontal = 8.dp, vertical = 4.dp),
+                    verticalArrangement = Arrangement.Center,
+                ) {
+                    Text(title, style = MaterialTheme.typography.titleMedium, color = c.ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    if (subtitle != null) {
+                        Text(subtitle, style = MaterialTheme.typography.labelSmall, color = c.inkMuted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
                 }
             }
-            Spacer(Modifier.weight(1f))
+            Spacer(Modifier.width(4.dp))
             actions()
         }
         HorizontalDivider(thickness = 1.dp, color = c.outline)
@@ -246,7 +250,7 @@ fun KitMessageHost(state: SnackbarHostState, modifier: Modifier = Modifier) {
             shape = RoundedCornerShape(12.dp),
             containerColor = c.ink,
             contentColor = c.surface,
-            actionColor = if (c.isDark) c.accentContainer else c.accentContainer,
+            actionColor = c.accentContainer,
             actionContentColor = c.accentContainer,
             dismissActionContentColor = c.surface,
         )
