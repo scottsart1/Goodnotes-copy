@@ -6,8 +6,10 @@ import android.graphics.Matrix
 import android.graphics.pdf.PdfRenderer
 import android.os.ParcelFileDescriptor
 import android.util.Log
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -116,26 +118,54 @@ internal class PdfRenderEngine(
 
     suspend fun pageCount(docId: String): Int = withContext(dispatcher) { openPdf(docId)?.pageCount ?: 0 }
 
-    /** Opens an arbitrary PDF file (an import in progress) just to validate it and read its page sizes. */
-    suspend fun probe(file: File): Probe = withContext(dispatcher) {
-        var descriptor: ParcelFileDescriptor? = null
-        try {
-            descriptor = ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY)
-            val renderer = PdfRenderer(descriptor)
+    private class ProbeHandle(val descriptor: ParcelFileDescriptor, val renderer: PdfRenderer) {
+        val pageCount: Int = renderer.pageCount
+    }
+
+    /**
+     * Opens an arbitrary PDF file (an import in progress) to validate it and read its page
+     * sizes. Pages are read in small batches, each a separate task on the render thread, so
+     * on-screen renders queued meanwhile are not held up by a long document.
+     */
+    suspend fun probe(file: File): Probe {
+        var failure: Probe = Probe.Damaged
+        val handle = withContext(dispatcher) {
+            var descriptor: ParcelFileDescriptor? = null
             try {
-                Probe.Ok(readSizes(renderer))
-            } finally {
-                renderer.close()
+                descriptor = ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY)
+                ProbeHandle(descriptor, PdfRenderer(descriptor))
+            } catch (e: SecurityException) {
+                failure = Probe.Locked
+                runCatching { descriptor?.close() }
+                null
+            } catch (e: Exception) {
+                Log.w(TAG, "PDF probe failed (${e.javaClass.simpleName})")
+                runCatching { descriptor?.close() }
+                null
             }
-        } catch (e: SecurityException) {
-            Probe.Locked
-        } catch (e: IOException) {
-            Probe.Damaged
-        } catch (e: RuntimeException) {
-            Log.w(TAG, "PDF probe failed (${e.javaClass.simpleName})")
-            Probe.Damaged
+        } ?: return failure
+        try {
+            val count = handle.pageCount
+            val sizes = ArrayList<Pair<Float, Float>>(count)
+            while (sizes.size < count) {
+                withContext(dispatcher) {
+                    val end = minOf(count, sizes.size + PROBE_BATCH)
+                    for (i in sizes.size until end) {
+                        sizes += handle.renderer.openPage(i).use { page -> page.width.toFloat() to page.height.toFloat() }
+                    }
+                }
+            }
+            return Probe.Ok(sizes)
+        } catch (c: CancellationException) {
+            throw c
+        } catch (e: Exception) {
+            Log.w(TAG, "Reading pages failed (${e.javaClass.simpleName})")
+            return Probe.Damaged
         } finally {
-            runCatching { descriptor?.close() }
+            withContext(NonCancellable + dispatcher) {
+                runCatching { handle.renderer.close() }
+                runCatching { handle.descriptor.close() }
+            }
         }
     }
 
@@ -254,5 +284,8 @@ internal class PdfRenderEngine(
         private const val TAG = "PdfRender"
         /** Open renderers kept at once (each holds a file descriptor and native memory). */
         const val MAX_OPEN = 4
+
+        /** Pages whose size is read per render-thread task while probing a new file. */
+        const val PROBE_BATCH = 24
     }
 }

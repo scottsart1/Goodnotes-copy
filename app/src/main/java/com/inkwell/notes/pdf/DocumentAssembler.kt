@@ -59,18 +59,29 @@ internal class DocumentAssembler(
         val created = assemble(moved.map { Source(doc, it) }, PdfNames.extractTitle(doc.title, range.toList()), doc.folderId)
         // Non-destructive: the original keeps its PDF; only its page entries go. Deleting
         // from the end means no remaining page has to be renumbered.
-        var failed = 0
+        val remaining = ArrayList<PageMeta>()
         withContext(NonCancellable) {
-            for (page in moved.asReversed()) {
-                try {
-                    library.deletePage(page.id)
-                } catch (e: Exception) {
-                    failed++
-                }
+            for (page in moved.asReversed()) if (!tryDeletePage(page.id)) remaining += page
+            if (remaining.size == moved.size) {
+                // Nothing left the original: undo the copy rather than leave every page twice.
+                discard(created.id)
+                throw PdfErrors.create(context, PdfError.SAVE_FAILED)
             }
+            val retry = remaining.toList()
+            remaining.clear()
+            for (page in retry) if (!tryDeletePage(page.id)) remaining += page
         }
-        if (failed > 0) Log.w(TAG, "Split: $failed page(s) could not be removed from the original")
+        // Pages that still could not be removed exist in both documents; nothing is lost.
+        if (remaining.isNotEmpty()) Log.w(TAG, "Split: ${remaining.size} page(s) stayed in the original")
         return created
+    }
+
+    private suspend fun tryDeletePage(pageId: String): Boolean = try {
+        library.deletePage(pageId)
+        true
+    } catch (e: Exception) {
+        Log.w(TAG, "Removing a page failed (${e.javaClass.simpleName})")
+        false
     }
 
     suspend fun merge(docIds: List<String>, title: String?): DocumentMeta {

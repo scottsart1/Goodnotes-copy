@@ -7,6 +7,9 @@ import com.tom_roush.pdfbox.pdmodel.PDPage
 import com.tom_roush.pdfbox.pdmodel.common.PDRectangle
 import com.tom_roush.pdfbox.pdmodel.encryption.AccessPermission
 import com.tom_roush.pdfbox.pdmodel.encryption.StandardProtectionPolicy
+import com.tom_roush.pdfbox.pdmodel.interactive.annotation.PDAnnotationLink
+import com.tom_roush.pdfbox.pdmodel.interactive.documentnavigation.destination.PDPageDestination
+import com.tom_roush.pdfbox.pdmodel.interactive.documentnavigation.destination.PDPageFitDestination
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -107,6 +110,37 @@ class PdfBoxOpsTest {
             assertTrue(page.cosObject.containsKey(COSName.RESOURCES))
             assertTrue(page.resources.cosObject.containsKey(marker))
         }
+    }
+
+    /** Page 0 links to page 2 and to page 1. */
+    private fun linkedPdf(): File {
+        val f = File(dir, "linked.pdf")
+        PDDocument().use { doc ->
+            repeat(3) { i -> doc.addPage(PDPage(PDRectangle((100 + i).toFloat(), 500f))) }
+            fun linkTo(target: PDPage) = PDAnnotationLink().apply {
+                rectangle = PDRectangle(0f, 0f, 10f, 10f)
+                destination = PDPageFitDestination().apply { page = target }
+            }
+            doc.getPage(0).annotations = listOf(linkTo(doc.getPage(2)), linkTo(doc.getPage(1)))
+            doc.save(f)
+        }
+        return f
+    }
+
+    private fun linkTargets(file: File): List<Int?> = PDDocument.load(file).use { doc ->
+        doc.getPage(0).annotations.map { a ->
+            val target = ((a as PDAnnotationLink).destination as PDPageDestination).page
+            target?.let { t -> (0 until doc.numberOfPages).firstOrNull { doc.getPage(it).cosObject === t.cosObject } }
+        }
+    }
+
+    @Test fun linksBetweenCopiedPagesPointAtTheCopies() {
+        val out = File(dir, "subset.pdf")
+        val src = linkedPdf()
+        ops.subset(listOf(src to 0, src to 2), out)
+        // The link to old page 2 now targets new page 1; the link to old page 1 (not copied) is cut.
+        assertEquals(listOf(1, null), linkTargets(out))
+        assertEquals(listOf(100, 102), widths(out))
     }
 
     @Test fun subsetRejectsPagesOutOfRange() {

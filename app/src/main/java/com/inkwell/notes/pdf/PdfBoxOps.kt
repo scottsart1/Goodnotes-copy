@@ -3,6 +3,7 @@ package com.inkwell.notes.pdf
 import android.content.Context
 import android.util.Log
 import com.tom_roush.pdfbox.android.PDFBoxResourceLoader
+import com.tom_roush.pdfbox.cos.COSDictionary
 import com.tom_roush.pdfbox.cos.COSName
 import com.tom_roush.pdfbox.io.MemoryUsageSetting
 import com.tom_roush.pdfbox.multipdf.PDFMergerUtility
@@ -13,6 +14,7 @@ import com.tom_roush.pdfbox.pdmodel.interactive.annotation.PDAnnotationLink
 import com.tom_roush.pdfbox.pdmodel.interactive.documentnavigation.destination.PDPageDestination
 import java.io.File
 import java.io.IOException
+import java.util.IdentityHashMap
 
 /**
  * Structural PDF work with pdfbox-android: unlocking, repairing, appending and building
@@ -81,12 +83,11 @@ internal class PdfBoxOps(
             appendInto(existing, out, added) { dest ->
                 PDFMergerUtility().apply { isIgnoreAcroFormErrors = true }.appendDocument(dest, src)
             }
-        } catch (e: IOException) {
+        } catch (e: Exception) {
+            // A full disk fails the same way twice; anything else gets a plain page copy.
+            if (PdfErrors.isOutOfSpace(e)) throw e
             Log.w(TAG, "Full merge failed (${e.javaClass.simpleName}); copying pages only")
-            appendInto(existing, out, added) { dest -> for (i in 0 until added) importPage(dest, src.getPage(i)) }
-        } catch (e: RuntimeException) {
-            Log.w(TAG, "Full merge failed (${e.javaClass.simpleName}); copying pages only")
-            appendInto(existing, out, added) { dest -> for (i in 0 until added) importPage(dest, src.getPage(i)) }
+            appendInto(existing, out, added) { dest -> importPages(dest, List(added) { src.getPage(it) }) }
         }
     }
 
@@ -110,11 +111,12 @@ internal class PdfBoxOps(
         val open = LinkedHashMap<File, PDDocument>()
         try {
             newDocument().use { dest ->
-                for ((file, index) in pages) {
+                val sources = pages.map { (file, index) ->
                     val src = open.getOrPut(file) { open(file) }
                     if (index !in 0 until src.numberOfPages) throw IOException("Page $index out of range")
-                    importPage(dest, src.getPage(index))
+                    src.getPage(index)
                 }
+                importPages(dest, sources)
                 out.delete()
                 dest.save(out)
             }
@@ -124,26 +126,39 @@ internal class PdfBoxOps(
     }
 
     /**
-     * Copies one page with its inherited attributes. Links and annotation back-references to
-     * pages that are not part of the result are cut, so the whole source document is not
-     * dragged along into the new file.
+     * Copies pages with their inherited attributes, then points links between copied pages at
+     * the copies. Links to pages that were not copied are cut, so the rest of the source
+     * document is not dragged into the new file through them.
      */
-    private fun importPage(dest: PDDocument, page: PDPage): PDPage {
-        val imported = dest.importPage(page)
-        val resources = page.resources
-        if (resources != null && !page.cosObject.containsKey(COSName.RESOURCES)) imported.resources = resources
+    private fun importPages(dest: PDDocument, pages: List<PDPage>) {
+        val copies = IdentityHashMap<COSDictionary, PDPage>()
+        val imported = pages.map { page ->
+            val copy = dest.importPage(page)
+            // pdfbox-android's importPage only logs a warning for resources inherited from the
+            // page tree; without them the text and images of such pages would disappear.
+            val resources = page.resources
+            if (resources != null && !page.cosObject.containsKey(COSName.RESOURCES)) copy.resources = resources
+            copies[page.cosObject] = copy
+            copy
+        }
+        for (copy in imported) relink(copy, copies)
+    }
+
+    private fun relink(page: PDPage, copies: Map<COSDictionary, PDPage>) {
         try {
-            for (annotation in imported.annotations) {
+            for (annotation in page.annotations) {
                 if (annotation is PDAnnotationLink) {
                     val destination = annotation.destination ?: (annotation.action as? PDActionGoTo)?.destination
-                    if (destination is PDPageDestination) destination.setPage(null)
+                    if (destination is PDPageDestination) {
+                        val target = destination.page
+                        if (target != null) destination.setPage(copies[target.cosObject])
+                    }
                 }
-                annotation.setPage(null)
+                annotation.setPage(page)
             }
         } catch (e: IOException) {
             Log.w(TAG, "Annotations of a page could not be processed (${e.javaClass.simpleName})")
         }
-        return imported
     }
 
     companion object {

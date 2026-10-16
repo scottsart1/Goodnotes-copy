@@ -3,31 +3,36 @@ package com.inkwell.notes.pdf
 /**
  * Thread-safe LRU cache bounded by the total [sizeOf] of its values (bytes for bitmaps,
  * characters for text). Entries larger than [maxEntrySize] are not cached at all, so one huge
- * render never flushes everything else. Evicted values are simply dropped (never recycled):
- * callers may still be drawing them.
+ * render never flushes everything else. Sizes are recorded when an entry is added, so a value
+ * whose reported size changes later (a recycled bitmap reports 0 bytes) is still accounted
+ * correctly. Evicted values are simply dropped (never recycled): callers may still use them.
  */
 internal class SizedLruCache<K : Any, V : Any>(
     val maxSize: Long,
     private val maxEntrySize: Long = maxSize / 2,
     private val sizeOf: (V) -> Long,
 ) {
-    private val map = LinkedHashMap<K, V>(32, 0.75f, true)
+    private class Entry<V>(val value: V, val size: Long)
+
+    private val map = LinkedHashMap<K, Entry<V>>(32, 0.75f, true)
     private var size = 0L
 
-    @Synchronized fun get(key: K): V? = map[key]
+    @Synchronized fun get(key: K): V? = map[key]?.value
 
     @Synchronized fun put(key: K, value: V): Boolean {
         val s = sizeOf(value).coerceAtLeast(0)
-        val previous = map.remove(key)
-        if (previous != null) size -= sizeOf(previous).coerceAtLeast(0)
+        map.remove(key)?.let { size -= it.size }
         if (s > maxEntrySize || s > maxSize) return false
-        map[key] = value
+        map[key] = Entry(value, s)
         size += s
         trimTo(maxSize)
         return true
     }
 
-    @Synchronized fun remove(key: K): V? = map.remove(key)?.also { size -= sizeOf(it).coerceAtLeast(0) }
+    @Synchronized fun remove(key: K): V? = map.remove(key)?.let {
+        size -= it.size
+        it.value
+    }
 
     /** Removes every entry whose key matches [predicate]. */
     @Synchronized fun removeIf(predicate: (K) -> Boolean): Int {
@@ -36,7 +41,7 @@ internal class SizedLruCache<K : Any, V : Any>(
         while (it.hasNext()) {
             val e = it.next()
             if (predicate(e.key)) {
-                size -= sizeOf(e.value).coerceAtLeast(0)
+                size -= e.value.size
                 it.remove()
                 removed++
             }
@@ -61,8 +66,7 @@ internal class SizedLruCache<K : Any, V : Any>(
     private fun trimTo(limit: Long) {
         val it = map.entries.iterator()
         while (size > limit && it.hasNext()) {
-            val e = it.next()
-            size -= sizeOf(e.value).coerceAtLeast(0)
+            size -= it.next().value.size
             it.remove()
         }
     }

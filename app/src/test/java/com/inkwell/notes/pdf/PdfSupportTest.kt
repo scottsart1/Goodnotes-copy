@@ -44,6 +44,21 @@ class PdfSupportTest {
         assertEquals(1, cache.count())
     }
 
+    private class Shrinking(var bytes: Long)
+
+    @Test fun sizesAreRecordedWhenAdded() {
+        // A recycled bitmap reports 0 bytes; removing it must still free its full size.
+        val cache = SizedLruCache<String, Shrinking>(maxSize = 100, maxEntrySize = 100) { it.bytes }
+        val value = Shrinking(40)
+        cache.put("a", value)
+        value.bytes = 0
+        cache.remove("a")
+        assertEquals(0, cache.currentSize())
+        cache.put("b", Shrinking(60))
+        cache.put("c", Shrinking(40))
+        assertTrue(cache.containsKey("b") && cache.containsKey("c"))
+    }
+
     @Test fun removeIfDropsOneDocument() {
         val cache = SizedLruCache<RenderKey, String>(maxSize = 100) { it.length.toLong() }
         cache.put(RenderKey("d1", 0, 256), "x")

@@ -12,6 +12,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.util.concurrent.ConcurrentHashMap
 
 /**
  * Embedded text of source-PDF pages (pdfbox [PDFTextStripper], reading order by position).
@@ -32,10 +33,14 @@ internal class PdfTextExtractor(
     private var current: OpenText? = null
     private var idleClose: Job? = null
 
+    /** Bumped by [invalidate]; an extraction that started before keeps its result out of the cache. */
+    private val generations = ConcurrentHashMap<String, Int>()
+
     suspend fun pageText(docId: String, pdfPageIndex: Int): String {
         if (pdfPageIndex < 0) return ""
         val key = PdfText.cacheKey(docId, pdfPageIndex)
         cache.get(key)?.let { return it }
+        val generation = generations[docId] ?: 0
         return withContext(Dispatchers.IO) {
             mutex.withLock {
                 cache.get(key)?.let { return@withLock it }
@@ -59,7 +64,7 @@ internal class PdfTextExtractor(
                     null
                 }
                 scheduleIdleClose()
-                if (text != null) cache.put(key, text)
+                if (text != null && (generations[docId] ?: 0) == generation) cache.put(key, text)
                 text.orEmpty()
             }
         }
@@ -67,6 +72,7 @@ internal class PdfTextExtractor(
 
     /** Forgets cached text and closes the parsed document (source replaced or document closed). */
     fun invalidate(docId: String) {
+        generations.merge(docId, 1, Int::plus)
         cache.removeIf { PdfText.isKeyOf(it, docId) }
         scope.launch(Dispatchers.IO) {
             mutex.withLock { if (current?.docId == docId) closeLocked() }

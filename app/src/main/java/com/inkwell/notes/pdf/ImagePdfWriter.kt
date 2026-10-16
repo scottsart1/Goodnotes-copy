@@ -79,8 +79,9 @@ internal class ImagePdfWriter(private val context: Context, private val pdfBox: 
             LosslessFactory.createFromImage(doc, bitmap)
         }
         val page = PDPage(PDRectangle(w, h))
-        doc.addPage(page)
         PDPageContentStream(doc, page).use { it.drawImage(image, 0f, 0f, w, h) }
+        // Added only once its content is written, so a failure never leaves a blank page.
+        doc.addPage(page)
     }
 
     private fun decode(uri: Uri): Decoded? = try {

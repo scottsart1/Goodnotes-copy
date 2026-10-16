@@ -31,7 +31,11 @@ interface PdfService {
     /** Creates a PDF document from images (photos, scans, screenshots), one page per image. */
     suspend fun importImages(uris: List<Uri>, folderId: String? = null, title: String? = null): DocumentMeta
 
-    /** Renders one source-PDF page (white background) at the given pixel size. Cached. */
+    /**
+     * Renders one source-PDF page (white background) at the given pixel size. Cached.
+     * The returned bitmap is shared with the cache (and other callers): draw it, never recycle it.
+     * Its width may be rounded up a little (cache bucket); draw it into the destination rect.
+     */
     suspend fun renderPage(docId: String, pdfPageIndex: Int, widthPx: Int, heightPx: Int): Bitmap?
 
     /** Page sizes of the source PDF in points. */
@@ -96,7 +100,7 @@ class PdfServiceImpl(private val graph: AppGraph) : PdfService {
     }
 
     /** Imports a PDF written by the document scanner; it gets the standard date name. */
-    suspend fun importScannedPdf(uri: Uri, folderId: String?): DocumentMeta = importUri(uri, folderId, title = null)
+    internal suspend fun importScannedPdf(uri: Uri, folderId: String?): DocumentMeta = importUri(uri, folderId, title = null)
 
     override suspend fun importImages(uris: List<Uri>, folderId: String?, title: String?): DocumentMeta {
         if (uris.isEmpty()) throw PdfErrors.create(context, PdfError.NO_IMAGES)
