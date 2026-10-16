@@ -58,6 +58,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
@@ -184,6 +185,8 @@ private fun TypedEditor(controller: TypedDocController, nav: AppNavigator) {
     var replaceImageId by remember { mutableStateOf<String?>(null) }
     var wordCount by remember { mutableIntStateOf(0) }
     var charCount by remember { mutableIntStateOf(0) }
+    // Shortcuts only apply while the caret is in the document (not in the assistant's input).
+    var editorFocused by remember { mutableStateOf(false) }
 
     val listState = rememberLazyListState()
     val reorder = remember(listState) {
@@ -270,7 +273,7 @@ private fun TypedEditor(controller: TypedDocController, nav: AppNavigator) {
             .fillMaxSize()
             .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal))
             .onPreviewKeyEvent { e ->
-                if (e.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                if (e.type != KeyEventType.KeyDown || !editorFocused) return@onPreviewKeyEvent false
                 val mod = e.isCtrlPressed || e.isMetaPressed
                 when {
                     mod && e.key == Key.B -> { controller.toggleStyle(InlineStyle.BOLD); true }
@@ -336,7 +339,7 @@ private fun TypedEditor(controller: TypedDocController, nav: AppNavigator) {
                 Box(Modifier.weight(1f).fillMaxHeight()) {
                     LazyColumn(
                         state = listState,
-                        modifier = Modifier.fillMaxSize(),
+                        modifier = Modifier.fillMaxSize().onFocusChanged { editorFocused = it.hasFocus },
                         contentPadding = PaddingValues(top = 20.dp, bottom = 120.dp),
                         horizontalAlignment = Alignment.CenterHorizontally,
                     ) {
