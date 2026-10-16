@@ -32,6 +32,10 @@ import com.inkwell.notes.ocr.SearchIndex
 import com.inkwell.notes.ocr.SearchIndexImpl
 import com.inkwell.notes.pdf.PdfService
 import com.inkwell.notes.pdf.PdfServiceImpl
+import com.inkwell.notes.speakers.SpeakerAudio
+import com.inkwell.notes.speakers.SpeakerAudioImpl
+import com.inkwell.notes.speakers.SpeakerService
+import com.inkwell.notes.speakers.SpeakerServiceImpl
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -77,6 +81,8 @@ class AppGraph(val context: Context) {
     val thumbnails: ThumbnailService by lazy { ThumbnailServiceImpl(this) }
     val sync: SyncManager by lazy { SyncManagerImpl(this) }
     val backup: BackupService by lazy { BackupServiceImpl(this) }
+    val speakers: SpeakerService by lazy { SpeakerServiceImpl(this) }
+    val speakerAudio: SpeakerAudio by lazy { SpeakerAudioImpl(this) }
 
     companion object {
         @Volatile private var instance: AppGraph? = null

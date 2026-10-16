@@ -189,10 +189,13 @@ data class TranscriptSegmentEntity(
     val startMs: Long,
     val endMs: Long,
     val text: String,
+    /** Display name of the voice ("Priya", "Speaker 2"); written into exports, search and sync. */
     val speaker: String?,
     val source: String,
+    /** The voice's label within the recording ("S1"), see [RecordingSpeakerEntity]. Added in v2. */
+    val speakerLabel: String? = null,
 ) {
-    fun toModel() = TranscriptSegment(startMs, endMs, text, speaker)
+    fun toModel() = TranscriptSegment(startMs, endMs, text, speaker, speakerLabel)
 }
 
 /**
@@ -292,4 +295,59 @@ data class ReusableElementEntity(
     val heightPt: Float,
     val thumbnailPath: String?,
     val createdAt: Long,
+)
+
+/**
+ * A person whose voice the app knows. Only the name lives here; voiceprints are encrypted
+ * files outside the database and outside every backup (see speakers/VoiceprintStore).
+ */
+@Entity(tableName = "people", indices = [Index("name")])
+data class PersonEntity(
+    @PrimaryKey val id: String,
+    val name: String,
+    val isMe: Boolean,
+    val colorIndex: Int,
+    val createdAt: Long,
+    val updatedAt: Long,
+    /** Voiceprint samples stored for this person. */
+    val voiceSamples: Int,
+)
+
+/** One voice detected in one recording, and who it is once known. */
+@Entity(
+    tableName = "recording_speakers",
+    primaryKeys = ["recordingId", "label"],
+    foreignKeys = [
+        ForeignKey(entity = RecordingEntity::class, parentColumns = ["id"], childColumns = ["recordingId"], onDelete = ForeignKey.CASCADE),
+        ForeignKey(entity = PersonEntity::class, parentColumns = ["id"], childColumns = ["personId"], onDelete = ForeignKey.SET_NULL),
+    ],
+    indices = [Index("personId")],
+)
+data class RecordingSpeakerEntity(
+    val recordingId: String,
+    /** "S1", "S2", ... in order of first appearance. */
+    val label: String,
+    val personId: String?,
+    /** Voiceprint similarity when matched automatically; null when named by the user. */
+    val confidence: Float?,
+    val confirmed: Boolean,
+    val speechMs: Long,
+    val sampleStartMs: Long,
+    val sampleEndMs: Long,
+    /** "device:<embedding model>" or "openai:<model>". */
+    val engine: String,
+)
+
+/** Who spoke when: the diarization of a recording, independent of its transcript. */
+@Entity(
+    tableName = "speaker_turns",
+    foreignKeys = [ForeignKey(entity = RecordingEntity::class, parentColumns = ["id"], childColumns = ["recordingId"], onDelete = ForeignKey.CASCADE)],
+    indices = [Index("recordingId")],
+)
+data class SpeakerTurnEntity(
+    @PrimaryKey(autoGenerate = true) val rowId: Long = 0,
+    val recordingId: String,
+    val label: String,
+    val startMs: Long,
+    val endMs: Long,
 )

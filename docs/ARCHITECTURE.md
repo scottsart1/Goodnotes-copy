@@ -49,7 +49,8 @@ Rules for contracts:
 3. Get collaborators lazily from the graph (`graph.library`, `graph.ai`, ...). Never construct
    another feature's implementation yourself.
 4. `AppDatabase` (entities + DAOs) is shared. You may add queries to the DAO of your own
-   feature; adding columns/entities is allowed only if essential (keep `version = 1`).
+   feature; adding columns/entities is allowed only if essential. A schema change bumps
+   `version` with a non-destructive migration in `db/Migrations.kt` (see `MigrationSchemaTest`).
 5. `app/build.gradle.kts` already declares every dependency. Do not add new libraries unless
    impossible otherwise.
 6. `AndroidManifest.xml` already declares permissions, the recording service and the

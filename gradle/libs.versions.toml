@@ -27,6 +27,7 @@ pdfbox = "2.0.27.0"
 mlkitText = "16.0.1"
 mlkitInk = "18.1.0"
 mlkitDocScanner = "16.0.0"
+sherpaOnnx = "1.13.8"
 junit = "4.13.2"
 
 [libraries]
@@ -71,6 +72,7 @@ pdfbox-android = { group = "com.tom-roush", name = "pdfbox-android", version.ref
 mlkit-text-recognition = { group = "com.google.mlkit", name = "text-recognition", version.ref = "mlkitText" }
 mlkit-digital-ink = { group = "com.google.mlkit", name = "digital-ink-recognition", version.ref = "mlkitInk" }
 mlkit-document-scanner = { group = "com.google.android.gms", name = "play-services-mlkit-document-scanner", version.ref = "mlkitDocScanner" }
+sherpa-onnx = { group = "com.github.k2-fsa.sherpa-onnx", name = "sherpa-onnx", version.ref = "sherpaOnnx" }
 junit = { group = "junit", name = "junit", version.ref = "junit" }
 
 [plugins]

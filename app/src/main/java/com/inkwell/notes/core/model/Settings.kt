@@ -180,6 +180,7 @@ data class AppSettings(
     val library: LibraryPrefs = LibraryPrefs(),
     val notebookDefaults: NotebookDefaults = NotebookDefaults(),
     val recording: RecordingPrefs = RecordingPrefs(),
+    val speakers: SpeakerPrefs = SpeakerPrefs(),
     val ocr: OcrPrefs = OcrPrefs(),
     val ai: AiPrefs = AiPrefs(),
     val destinations: DestinationPrefs = DestinationPrefs(),

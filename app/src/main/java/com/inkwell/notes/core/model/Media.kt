@@ -35,7 +35,10 @@ data class TranscriptSegment(
     val startMs: Long,
     val endMs: Long,
     val text: String,
+    /** Display name of the voice ("Priya", "Speaker 2"), or null when speakers are unknown. */
     val speaker: String? = null,
+    /** The voice's label within its recording ("S1"); see RecordingSpeaker. */
+    val speakerLabel: String? = null,
 )
 
 @Serializable
