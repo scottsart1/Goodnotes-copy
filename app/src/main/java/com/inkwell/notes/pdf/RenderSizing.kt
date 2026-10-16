@@ -22,6 +22,7 @@ internal object RenderSizing {
     const val MAX_PIXELS = 24_000_000L
     private const val SMALL_STEP = 16
     private const val SMALL_LIMIT = 256
+    private const val EPSILON = 1e-6
 
     /** Rounds [widthPx] up: steps of 16 px up to 256 px, then 1/8 of the enclosing power of two. */
     fun widthBucket(widthPx: Int): Int {
@@ -45,7 +46,11 @@ internal object RenderSizing {
         val bySide = min(MAX_SIDE.toDouble() / w, MAX_SIDE.toDouble() / h)
         val byPixels = sqrt(MAX_PIXELS.toDouble() / size.pixels)
         val s = min(1.0, min(bySide, byPixels))
-        return PixelSize(floor(w * s).toInt().coerceAtLeast(1), floor(h * s).toInt().coerceAtLeast(1))
+        // The epsilon keeps exact results (8192.0) from flooring to 8191 through rounding error.
+        return PixelSize(
+            floor(w * s + EPSILON).toInt().coerceIn(1, MAX_SIDE),
+            floor(h * s + EPSILON).toInt().coerceIn(1, MAX_SIDE),
+        )
     }
 
     /** True when a cached bitmap of [cachedWidth] x [cachedHeight] can serve [target] (same bucket, same shape). */
