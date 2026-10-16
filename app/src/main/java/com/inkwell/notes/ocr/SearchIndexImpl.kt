@@ -13,6 +13,7 @@ import com.inkwell.notes.ocr.index.Retriever
 import com.inkwell.notes.ocr.index.SearchEngine
 import com.inkwell.notes.ocr.index.SearchOutcome
 import com.inkwell.notes.ocr.index.SemanticIndex
+import com.inkwell.notes.search.TranscriptSearchText
 
 /**
  * The local full-text index (Room FTS4 over `text_index`) of titles, tags, typed text,
@@ -41,8 +42,9 @@ class SearchIndexImpl(private val graph: AppGraph) : SearchIndex {
     override suspend fun replacePageText(docId: String, pageId: String, source: TextSource, blocks: List<RecognizedBlock>, engine: String) =
         writer.replacePage(docId, pageId, source, blocks.map { IndexEntry(it.text, it.bounds, it.confidence, engine) })
 
+    /** Blocks are stored as "Name: text" when a person is named, so searching a person finds where they speak. */
     override suspend fun replaceTranscript(docId: String, recordingId: String, segments: List<TranscriptSegment>, engine: String) =
-        writer.replaceTranscript(docId, recordingId, segments, engine)
+        writer.replaceTranscript(docId, recordingId, TranscriptSearchText.forIndex(segments), engine)
 
     override suspend fun removeDocument(docId: String) = writer.removeDocument(docId)
 

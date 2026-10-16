@@ -22,6 +22,8 @@ internal object Transcriptions {
     const val KEY_DONE = "done"
     const val KEY_TOTAL = "total"
     const val KEY_ERROR = "error"
+    /** Non-fatal note of a finished job (e.g. transcribed without the speaker labels that were asked for). */
+    const val KEY_SPEAKER_NOTE = "speakerNote"
     private const val TAG = "inkwell-transcription"
 
     fun uniqueName(recordingId: String) = "inkwell-transcribe-$recordingId"
@@ -75,4 +77,8 @@ internal object Transcriptions {
     /** User-facing failure message of a finished job, or null. */
     fun errorOf(info: WorkInfo?): String? =
         if (info?.state == WorkInfo.State.FAILED) info.outputData.getString(KEY_ERROR) else null
+
+    /** The speaker note of a job that succeeded, or null. */
+    fun speakerNoteOf(info: WorkInfo?): String? =
+        if (info?.state == WorkInfo.State.SUCCEEDED) info.outputData.getString(KEY_SPEAKER_NOTE)?.takeIf { it.isNotBlank() } else null
 }
