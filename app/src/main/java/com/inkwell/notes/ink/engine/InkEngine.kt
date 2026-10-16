@@ -343,6 +343,9 @@ internal class InkEngine(val view: InkCanvasView) : ToolHost, CommandTarget, Ren
     // ---------------------------------------------------------------- Invalidation
 
     override fun invalidateOverlay() { overlayView.postInvalidateOnAnimation() }
+    override fun invalidateOverlay(rect: RectF) {
+        overlayView.postInvalidateOnAnimation(rect.left.toInt() - 1, rect.top.toInt() - 1, rect.right.toInt() + 2, rect.bottom.toInt() + 2)
+    }
     override fun invalidatePages() { pageView.postInvalidateOnAnimation() }
 
     fun invalidateAll() {

@@ -20,6 +20,8 @@ internal interface WetInkHost {
     fun pageBoundsToView(pageIndex: Int, b: Bounds, out: RectF)
     fun pageClip(pageIndex: Int, out: RectF): Boolean
     fun invalidateOverlay()
+    /** Invalidates only [rect] (view pixels) of the overlay. */
+    fun invalidateOverlay(rect: RectF)
     /** Runs [action] once the next overlay frame has been committed to the display. */
     fun afterNextFrameCommitted(action: () -> Unit)
 }
@@ -79,9 +81,15 @@ class WetInkPresenter internal constructor(private val host: WetInkHost) {
         val front = host.frontLayer
         if (useFront && (front == null || front.hasFailed)) {
             useFront = false
+            full = true
         }
         if (!useFront) {
-            host.invalidateOverlay()
+            // Only the region whose outline changed needs redrawing.
+            if (full) host.invalidateOverlay() else {
+                computeDirty(dirtyView)
+                if (dirtyView.isEmpty) host.invalidateOverlay() else host.invalidateOverlay(dirtyView)
+            }
+            full = false
             drawnCount = stroke.count
             return
         }
@@ -100,6 +108,7 @@ class WetInkPresenter internal constructor(private val host: WetInkHost) {
         drawnCount = stroke.count
         if (!front.render(p)) {
             useFront = false
+            full = true
             host.invalidateOverlay()
         }
     }
