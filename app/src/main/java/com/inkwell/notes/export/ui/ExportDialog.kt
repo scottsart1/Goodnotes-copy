@@ -14,13 +14,3 @@ import androidx.compose.ui.Modifier
 fun ExportDialog(docId: String, initialPageIndices: List<Int>? = null, onDismiss: () -> Unit) {
     Box { Text("Export") }
 }
-
-/**
- * "Where outputs are saved": per output type (notes, transcripts, audio) choose this device
- * only, a folder (SAF), and/or the yourpitbox.com notes vault (URL + password, test connection),
- * sync now, backup/restore. SCAFFOLD STUB.
- */
-@Composable
-fun StorageSettingsContent(modifier: Modifier = Modifier) {
-    Box(modifier) { Text("Storage & sync") }
-}

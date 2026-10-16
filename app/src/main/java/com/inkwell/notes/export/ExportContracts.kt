@@ -3,9 +3,7 @@ package com.inkwell.notes.export
 import android.content.Intent
 import android.graphics.Bitmap
 import android.net.Uri
-import com.inkwell.notes.app.AppGraph
 import com.inkwell.notes.core.model.DocumentMeta
-import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import java.io.File
 
@@ -95,42 +93,4 @@ interface BackupService {
     suspend fun restoreFrom(uri: Uri): Int
     /** Schedules automatic backups into the chosen folder (null disables). */
     fun scheduleAutomatic(treeUri: Uri?, intervalDays: Int = 1)
-}
-
-/** SCAFFOLD STUB — replaced by the export implementation. */
-class ExportServiceImpl(private val graph: AppGraph) : ExportService {
-    private fun stub(): Nothing = throw NotImplementedError("ExportServiceImpl")
-    override suspend fun export(docId: String, options: ExportOptions): File = stub()
-    override suspend fun exportTo(docId: String, options: ExportOptions, target: Uri) = stub()
-    override suspend fun exportMany(docIds: List<String>, options: ExportOptions, treeUri: Uri): Int = stub()
-    override suspend fun exportRecording(recordingId: String): File = stub()
-    override fun shareIntent(file: File, mime: String): Intent = Intent(Intent.ACTION_SEND)
-    override suspend fun importPackage(uri: Uri, folderId: String?): DocumentMeta = stub()
-    override suspend fun renderPage(docId: String, pageIndex: Int, widthPx: Int): Bitmap = stub()
-    override suspend fun documentMarkdown(docId: String, includeTranscripts: Boolean): String = ""
-}
-
-/** SCAFFOLD STUB — replaced by the export implementation. */
-class ThumbnailServiceImpl(private val graph: AppGraph) : ThumbnailService {
-    override fun refresh(docId: String) {}
-    override suspend fun pageThumbnail(docId: String, pageId: String, widthPx: Int): Bitmap? = null
-}
-
-/** SCAFFOLD STUB — replaced by the sync implementation. */
-class SyncManagerImpl(private val graph: AppGraph) : SyncManager {
-    override val status: StateFlow<SyncStatus> = MutableStateFlow(SyncStatus())
-    override fun onDocumentChanged(docId: String) {}
-    override fun onTranscriptReady(docId: String, recordingId: String) {}
-    override fun onRecordingFinished(docId: String, recordingId: String) {}
-    override fun onDocumentDeleted(docId: String) {}
-    override suspend fun syncNow(): SyncStatus = status.value
-    override suspend fun testVault(url: String, password: String): Result<String> = Result.failure(NotImplementedError())
-    override suspend fun testFolder(treeUri: Uri): Result<String> = Result.failure(NotImplementedError())
-}
-
-/** SCAFFOLD STUB — replaced by the export implementation. */
-class BackupServiceImpl(private val graph: AppGraph) : BackupService {
-    override suspend fun backupTo(treeOrFileUri: Uri, includeAudio: Boolean): BackupReport = BackupReport(0, 0, null)
-    override suspend fun restoreFrom(uri: Uri): Int = 0
-    override fun scheduleAutomatic(treeUri: Uri?, intervalDays: Int) {}
 }
