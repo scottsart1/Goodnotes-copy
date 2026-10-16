@@ -185,7 +185,8 @@ internal class LibraryPages(
             val (copy, fresh) = db.withTransaction {
                 val current = db.pages().forDocument(targetDocId)
                 val source = db.pages().get(src.id) ?: throw IllegalStateException("Page was deleted")
-                val fresh = isIndexFresh(source) && background == null
+                // The text of a flattened PDF page is unchanged, so its index rows still apply.
+                val fresh = isIndexFresh(source)
                 val at = if (placeAfterSource) {
                     current.indexOfFirst { it.id == source.id }.let { if (it < 0) current.size else it + 1 }
                 } else {
@@ -204,6 +205,7 @@ internal class LibraryPages(
             return copy.toModel()
         } catch (e: Exception) {
             if (wroteContent) docFiles.deletePageFiles(targetDocId, newPageId)
+            backgroundAsset?.let { docFiles.deleteAsset(targetDocId, it) }
             throw e
         }
     }

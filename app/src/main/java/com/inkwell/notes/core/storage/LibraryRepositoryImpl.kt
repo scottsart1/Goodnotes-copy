@@ -12,6 +12,7 @@ import com.inkwell.notes.core.model.PageMeta
 import com.inkwell.notes.core.model.PageTemplate
 import com.inkwell.notes.core.model.PaperSpec
 import com.inkwell.notes.core.model.StorageInfo
+import com.inkwell.notes.core.naming.AutoNamingRules
 import com.inkwell.notes.core.naming.DateNaming
 import com.inkwell.notes.core.naming.TitleRules
 import com.inkwell.notes.core.settings.SettingsRepository
@@ -188,8 +189,8 @@ class LibraryRepositoryImpl internal constructor(
      * missing parent). Returns [folderId] if it exists, null otherwise. Runs inside a transaction.
      */
     private suspend fun ensureFolderChainLive(folderId: String?, childId: String? = null): String? {
-        val all = db.folders().getAllIncludingTrashed().associateBy { it.id }
         if (folderId == null) return null
+        val all = db.folders().getAllIncludingTrashed().associateBy { it.id }
         if (all[folderId] == null) {
             // The parent is gone: the child becomes a top-level folder.
             childId?.let { all[it] }?.let { db.folders().upsert(it.copy(parentId = null)) }
@@ -281,12 +282,21 @@ class LibraryRepositoryImpl internal constructor(
         return title
     }
 
+    /**
+     * Writes [doc] as given (inserting it if new, e.g. a restored backup), except for what a
+     * stale copy held by another screen must never undo on an existing document: the page count
+     * (owned by the page operations), the trash state (use trash/restore), a newer modifiedAt,
+     * and a name the document already got (DONE/MANUAL never fall back to an automatic state).
+     */
     override suspend fun updateDocument(doc: DocumentMeta) {
         db.withTransaction {
             val existing = db.documents().get(doc.id)
-            // pageCount is owned by the page operations; never let a stale copy overwrite it.
-            val pageCount = if (existing != null) db.pages().count(doc.id) else doc.pageCount
-            db.documents().upsert(DocumentEntity.from(doc.copy(pageCount = pageCount)))
+            if (existing == null) {
+                db.documents().upsert(DocumentEntity.from(doc))
+                return@withTransaction
+            }
+            val merged = mergeUpdate(existing.toModel(), doc, db.pages().count(doc.id))
+            db.documents().upsert(DocumentEntity.from(merged))
         }
     }
 
@@ -568,6 +578,21 @@ class LibraryRepositoryImpl internal constructor(
         private const val DEFAULT_FOLDER_ICON = "folder"
         private const val MAX_TAGS = 32
         private const val MAX_TAG_CHARS = 48
+
+        /** [incoming] over [existing], minus what a stale copy must not undo (see [updateDocument]). */
+        internal fun mergeUpdate(existing: DocumentMeta, incoming: DocumentMeta, pageCount: Int): DocumentMeta {
+            val merged = incoming.copy(
+                pageCount = pageCount,
+                trashedAt = existing.trashedAt,
+                modifiedAt = maxOf(existing.modifiedAt, incoming.modifiedAt),
+            )
+            val alreadyNamed = existing.autoNameStatus == AutoNameStatus.DONE || existing.autoNameStatus == AutoNameStatus.MANUAL
+            if (!alreadyNamed || incoming.autoNameStatus !in AutoNamingRules.AUTOMATIC) return merged
+            return merged.copy(
+                title = existing.title, autoNameStatus = existing.autoNameStatus,
+                topic = existing.topic, autoNameAttempts = existing.autoNameAttempts,
+            )
+        }
 
         /** Trimmed, de-duplicated (case-insensitive) tags without separator characters. */
         internal fun normalizeTags(tags: List<String>): List<String> {

@@ -71,6 +71,10 @@ internal class DocumentFiles(private val files: FileStore, private val pages: Pa
         FileStore.writeAtomically(files.assetFile(docId, assetId), keepBackup = false) { it.write(bytes) }
     }
 
+    suspend fun deleteAsset(docId: String, assetId: String) = withContext(Dispatchers.IO) {
+        File(File(dir(docId), "assets"), FileStore.safe(assetId)).delete()
+    }
+
     /** Copies the source PDF of [srcDoc] to [dstDoc] (replacing none: only when the target has none). */
     suspend fun copySourcePdf(srcDoc: String, dstDoc: String): Boolean = withContext(Dispatchers.IO) {
         val src = File(dir(srcDoc), "source.pdf")
