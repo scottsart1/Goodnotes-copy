@@ -54,6 +54,16 @@ internal class SyncScheduler(private val context: Context) {
         if (needs.unmetered) enqueue(WORK_AUDIO, SyncScope.VAULT_AUDIO, NetworkType.UNMETERED, 0)
     }
 
+    /** Drops scheduled background runs (automatic sync switched off); queued items stay for "Sync now". */
+    fun cancelAll() {
+        try {
+            val wm = WorkManager.getInstance(context)
+            listOf(WORK_MAIN, WORK_AUDIO, WORK_LOCAL, WORK_LATER).forEach { wm.cancelUniqueWork(it) }
+        } catch (e: Exception) {
+            Log.w("InkwellSync", "Couldn't cancel sync: ${e.javaClass.simpleName}")
+        }
+    }
+
     /** One run after [delayMs] (e.g. when a vault lockout ends). */
     fun scheduleAfter(delayMs: Long) {
         enqueue(WORK_LATER, SyncScope.ALL, NetworkType.CONNECTED, delayMs.coerceAtLeast(1_000), ExistingWorkPolicy.REPLACE)

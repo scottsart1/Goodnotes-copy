@@ -63,7 +63,7 @@ internal fun StorageSettingsScreen(modifier: Modifier = Modifier) {
 
     var folderFor by rememberSaveable { mutableStateOf<String?>(null) }
     var restoreUri by rememberSaveable { mutableStateOf<String?>(null) }
-    val pickerMissing = "No file picker is available on this device."
+    val pickerMissing = stringResource(R.string.sync_no_picker)
 
     val folderPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
         val kind = folderFor?.let { runCatching { SyncKind.valueOf(it) }.getOrNull() }

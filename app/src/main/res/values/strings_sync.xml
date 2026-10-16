@@ -75,4 +75,7 @@
     <string name="sync_restore_confirm">Restore</string>
     <string name="sync_cancel">Cancel</string>
     <string name="sync_dismiss">Dismiss</string>
+    <string name="sync_no_picker">No file picker is available on this device.</string>
+    <string name="sync_password_store_failed">The password couldn\'t be stored securely on this device.</string>
+    <string name="sync_backup_schedule_failed">Automatic backup couldn\'t be scheduled.</string>
 </resources>

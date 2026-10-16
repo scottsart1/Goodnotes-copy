@@ -299,6 +299,7 @@ class SyncManagerImpl(private val graph: AppGraph) : SyncManager {
             (new.notesFormat.includesMarkdown && !old.notesFormat.includesMarkdown)
         if (newFormats) enqueued += engine.enqueueEverything(new, onlyKind = SyncKind.NOTES)
         if (new.autoSync && !old.autoSync) enqueued += engine.enqueueChangedDocuments(new)
+        if (!new.autoSync && old.autoSync) scheduler.cancelAll()
         val conditionsChanged = enqueued > 0 || new.autoSync != old.autoSync ||
             new.audioOnUnmeteredOnly != old.audioOnUnmeteredOnly || newVault != oldVault || new.folderUri != old.folderUri
         if (new.autoSync && conditionsChanged) kick()

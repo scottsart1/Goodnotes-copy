@@ -290,6 +290,8 @@ class SyncEngine(
     private suspend fun syncNotes(item: SyncQueueEntity, target: OutputTarget, ctx: RunContext): Outcome {
         val doc = source.document(item.documentId)?.takeIf { it.trashedAt == null } ?: return Outcome.Skipped
         val format = ctx.prefs.notesFormat
+        // Edits made while this copy is being made must count as unsynced: stamp the start time.
+        val startedAt = clock()
         when (target) {
             OutputTarget.VAULT -> {
                 val client = ctx.vault()
@@ -314,7 +316,7 @@ class SyncEngine(
                 place.finishMove(doc, SyncKind.NOTES, null)
             }
         }
-        source.markSynced(doc.id, clock())
+        source.markSynced(doc.id, maxOf(startedAt, doc.modifiedAt))
         return Outcome.Done
     }
 

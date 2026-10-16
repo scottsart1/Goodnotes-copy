@@ -225,7 +225,7 @@ internal class StorageSettingsViewModel(private val graph: AppGraph) : ViewModel
             hasPassword = true
             impl?.onVaultCredentialsChanged()
         } else {
-            notice = "The password couldn't be stored securely on this device."
+            notice = context.getString(R.string.sync_password_store_failed)
         }
     }
 
@@ -291,7 +291,7 @@ internal class StorageSettingsViewModel(private val graph: AppGraph) : ViewModel
                 runCatching { graph.backup.scheduleAutomatic(uri, AUTO_BACKUP_DAYS) }.isSuccess
             }
             if (!ok) {
-                notice = "Automatic backup couldn't be scheduled."
+                notice = context.getString(R.string.sync_backup_schedule_failed)
                 return@launch
             }
             val pref = AutoBackupPref(uri.toString(), label)
