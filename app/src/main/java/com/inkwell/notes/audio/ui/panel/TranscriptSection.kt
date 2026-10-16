@@ -58,6 +58,7 @@ internal fun actionLabelRes(a: TranscriptAction): Int = when (a) {
     TranscriptAction.DECISIONS -> R.string.audio_ai_decisions
     TranscriptAction.KEY_TOPICS -> R.string.audio_ai_key_topics
     TranscriptAction.ACTION_ITEMS -> R.string.audio_ai_action_items
+    TranscriptAction.BY_SPEAKER -> R.string.audio_ai_by_speaker
     TranscriptAction.REVISION_NOTES -> R.string.audio_ai_revision_notes
     TranscriptAction.EXPLAIN -> R.string.audio_ai_explain
     TranscriptAction.COMPARE -> R.string.audio_ai_compare

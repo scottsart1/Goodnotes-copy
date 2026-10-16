@@ -107,6 +107,7 @@
     <string name="audio_ai_decisions">Decisions</string>
     <string name="audio_ai_key_topics">Key topics</string>
     <string name="audio_ai_action_items">Action items</string>
+    <string name="audio_ai_by_speaker">By person</string>
     <string name="audio_ai_revision_notes">Revision notes</string>
     <string name="audio_ai_explain">Explain a passage</string>
     <string name="audio_ai_compare">Compare with my notes</string>
