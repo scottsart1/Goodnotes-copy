@@ -160,7 +160,7 @@ class AiServiceImpl(private val graph: AppGraph) : AiService {
 
     /** Stores a key (Keystore-encrypted) and resets its validation state. */
     suspend fun saveKey(provider: AiProviderId, key: String) {
-        val k = key.trim()
+        val k = sanitizeKey(key)
         require(k.isNotEmpty())
         withContext(Dispatchers.IO) { graph.secrets.put(SecretStore.aiKey(provider), k) }
         setInvalid(provider, null)
@@ -197,6 +197,14 @@ class AiServiceImpl(private val graph: AppGraph) : AiService {
     companion object {
         /** Long edge for vision OCR images: enough for handwriting, within providers' native resolution. */
         const val MAX_VISION_EDGE = 1600
+
+        /**
+         * A pasted key with whitespace or invisible format characters (zero-width space, soft
+         * hyphen, word joiner: common when copying from mail or web pages) is cleaned, since no
+         * provider key contains them and such a value could not be sent as a header anyway.
+         */
+        fun sanitizeKey(raw: String): String =
+            raw.filterNot { it.isWhitespace() || Character.getType(it) == Character.FORMAT.toInt() }
 
         fun encodePng(src: Bitmap, maxEdge: Int): ByteArray {
             val long = max(src.width, src.height)

@@ -180,6 +180,7 @@ class AiEngine(
     suspend fun checkKey(p: AiProviderId, apiKey: String, baseUrl: String?): KeyCheck {
         val key = apiKey.trim()
         if (key.isEmpty()) return KeyCheck(false, "Enter an API key first.", rejected = false)
+        keyFailure(p, key)?.let { return KeyCheck(false, it.message, rejected = false) }
         return try {
             // null = the configured endpoint; "" = the official one.
             val (base, _) = endpoint(p, baseUrl)
@@ -216,6 +217,19 @@ class AiEngine(
         is AiException -> AiException(Redactor.redact(e.message, key), e.retryable, null)
         else -> ErrorMapper.io(p, e, key).toException()
     }
+
+    /**
+     * Failure for a stored key that cannot travel in an HTTP header (OkHttp rejects anything
+     * outside printable ASCII, e.g. a zero-width space picked up when copying the key), or null.
+     * Checked before any request is built so the rejection never surfaces as an exception
+     * carrying the key.
+     */
+    private fun keyFailure(p: AiProviderId, key: String): AiFailure? =
+        if (headerSafe(key)) null else AiFailure(
+            "The ${p.displayName} API key contains characters that cannot be sent (for example an invisible character " +
+                "picked up when copying it). Open Settings > AI providers and paste the key again.",
+            retryable = false, kind = AiFailure.Kind.CONFIG,
+        )
 
     // ------------------------------------------------------------------ budget
 
@@ -265,6 +279,7 @@ class AiEngine(
         if (!p.providerSettings(ref.provider).enabled) fail("${ref.provider.displayName} is turned off in AI settings.")
         val key = keys.get(ref.provider)?.takeIf { it.isNotBlank() }
             ?: fail("Add your ${ref.provider.displayName} API key in Settings > AI providers to use ${ref.modelId}.")
+        keyFailure(ref.provider, key)?.let { throw PrepareException(it) }
         val spec = models.spec(ref)
         if (!spec.has(AiCapability.TEXT)) fail("${spec.displayName} is not a chat model. Choose a text model.")
         val (base, official) = try { endpoint(ref.provider) } catch (e: AiException) { fail(e.message ?: "Invalid custom endpoint.") }
@@ -354,7 +369,8 @@ class AiEngine(
                         if (alt != null) { call = alt; variantSwitches++; continue }
                         ErrorMapper.http(prepared.ref.provider, outcome.status, outcome.body, outcome.retryAfter, prepared.ref.modelId, call.apiKey, clock())
                     }
-                    is Outcome.Stream -> outcome.failure
+                    // Decoders do not know the key: a gateway echoing it inside an error event is redacted here.
+                    is Outcome.Stream -> outcome.failure.copy(message = Redactor.redact(outcome.failure.message, call.apiKey))
                     is Outcome.Io -> ErrorMapper.io(prepared.ref.provider, outcome.error, call.apiKey)
                 }
                 if (failure.retryable && text.isEmpty() && reasoning.isEmpty() && attempt < MAX_RETRIES) {
@@ -410,8 +426,19 @@ class AiEngine(
         return u to (inTokens == null || outTokens == null)
     }
 
-    private suspend fun executeStream(call: ChatCall, adapter: ProviderAdapter, onPart: suspend (StreamPart) -> Unit): Outcome =
-        withCancellableCall(adapter.chatRequest(call)) { response ->
+    private suspend fun executeStream(call: ChatCall, adapter: ProviderAdapter, onPart: suspend (StreamPart) -> Unit): Outcome {
+        // Building the request can reject a header value (OkHttp's message may quote it): never let that escape the flow.
+        val request = try {
+            adapter.chatRequest(call)
+        } catch (e: IllegalArgumentException) {
+            return Outcome.Stream(
+                AiFailure(
+                    "The request to ${adapter.id.displayName} could not be built: " + Redactor.redact(e.message ?: "invalid value", call.apiKey).take(MAX_DETAIL_CHARS),
+                    retryable = false, kind = AiFailure.Kind.CONFIG,
+                ),
+            )
+        }
+        return withCancellableCall(request) { response ->
             if (!response.isSuccessful) {
                 return@withCancellableCall Outcome.Http(response.code, readLimited(response), response.header("Retry-After"))
             }
@@ -455,6 +482,7 @@ class AiEngine(
             if (ended || stopped) Outcome.Success
             else Outcome.Io(IOException("the connection closed before the answer was complete"))
         }
+    }
 
     /**
      * Executes [request] so that cancelling the coroutine cancels the HTTP call (which unblocks
@@ -592,6 +620,7 @@ class AiEngine(
         val adapter = providers.find(ref.provider) as? OpenAiAdapter ?: return null
         budgetFailure()?.let { throw it.toException() }
         val key = keys.get(ref.provider) ?: return null
+        keyFailure(ref.provider, key)?.let { throw it.toException() }
         val (base, _) = endpoint(ref.provider)
         val spec = models.spec(ref)
         val all = ArrayList<TranscriptSegment>()
@@ -637,6 +666,7 @@ class AiEngine(
         if (texts.isEmpty()) return emptyList()
         budgetFailure()?.let { throw it.toException() }
         val key = keys.get(ref.provider) ?: return null
+        keyFailure(ref.provider, key)?.let { throw it.toException() }
         val (base, _) = endpoint(ref.provider)
         val out = ArrayList<FloatArray>(texts.size)
         var tokens = 0
@@ -676,5 +706,9 @@ class AiEngine(
         const val MAX_EMBED_CHARS = 24_000
         const val REFUSAL_MESSAGE = "The model declined this request."
         const val FILTER_MESSAGE = "The provider's content filter stopped this answer."
+        private const val MAX_DETAIL_CHARS = 200
+
+        /** True when [value] can be sent as an HTTP header value (printable ASCII or tab, as OkHttp requires). */
+        fun headerSafe(value: String): Boolean = value.all { it == '\t' || it in ' '..'~' }
     }
 }
