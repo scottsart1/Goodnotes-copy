@@ -160,7 +160,8 @@ class DiarizationWorker(appContext: Context, params: WorkerParameters) : Corouti
 
     /** Decodes one window's pieces into contiguous 16 kHz audio aligned with the timeline. */
     private suspend fun decodeWindow(graph: AppGraph, audio: SpeakerAudioImpl?, files: List<File>, w: AnalysisWindow): FloatArray {
-        val out = FloatBuffer(Pcm.samplesFor(w.durationMs, SpeakerAudio.SAMPLE_RATE).coerceAtLeast(16))
+        val size = w.pieces.sumOf { Pcm.samplesFor(it.toMs, SpeakerAudio.SAMPLE_RATE) - Pcm.samplesFor(it.fromMs, SpeakerAudio.SAMPLE_RATE) }
+        val out = FloatBuffer(size.coerceAtLeast(16))
         for (p in w.pieces) {
             val expected = Pcm.samplesFor(p.toMs, SpeakerAudio.SAMPLE_RATE) - Pcm.samplesFor(p.fromMs, SpeakerAudio.SAMPLE_RATE)
             val file = files.getOrNull(p.segment)
@@ -171,7 +172,8 @@ class DiarizationWorker(appContext: Context, params: WorkerParameters) : Corouti
             }
             out.add(Pcm.fitTo(pcm ?: FloatArray(0), expected))
         }
-        return out.toArray()
+        // Sized exactly, so this hands over the buffer instead of copying ~38 MB.
+        return out.finish()
     }
 
     @Volatile private var lastReport = 0L

@@ -20,8 +20,15 @@ package com.inkwell.notes.speakers.logic
  *
  * Per-window clustering inside sherpa (complete linkage on cosine distance) was swept over
  * 0.3/0.4/0.5: 0.5 merged the two voices of one English test file, 0.3 split every file into
- * 4-8 voices, 0.4 with [LINK_THRESHOLD] 0.86 for joining window-local voices found the right
- * number of voices on all three English files (99-100 % agreement with the oracle count run).
+ * 4-8 voices; 0.4 keeps voices apart and lets [LINK_THRESHOLD] join the over-split ones.
+ *
+ * End to end (this pipeline, 1-2 windows per file, link threshold swept 0.80-0.88): voices
+ * the window clustering split off linked back at 0.80-0.85 (a 6 s piece at 0.84-0.86, a 3 s
+ * piece at 0.80-0.82); at 0.84 both two-speaker English conversations came out as two
+ * voices in every window layout but one (a 3 s piece stayed apart: under the 4 s needed to
+ * be asked about). Below 0.84 the Chinese four-speaker file collapsed into one voice.
+ * Recognition with the default threshold: second halves matched their own first-half voices
+ * at 0.71-0.88 (calibrated), every cross-recording score was at most 0.42.
  * Pure.
  */
 object VoiceScores {
@@ -29,7 +36,7 @@ object VoiceScores {
     const val WINDOW_CLUSTER_THRESHOLD = 0.4f
 
     /** Raw cosine at or above which two window-local voices are the same voice. */
-    const val LINK_THRESHOLD = 0.86f
+    const val LINK_THRESHOLD = 0.84f
 
     /** Raw cosine at or above which a new voiceprint sample adds nothing over a stored one. */
     const val DUPLICATE_SAMPLE = 0.97f

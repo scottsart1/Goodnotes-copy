@@ -70,6 +70,21 @@ object Pcm {
     /** Milliseconds of [samples] at [rate]. */
     fun msOf(samples: Int, rate: Int): Long = if (rate <= 0) 0 else samples.toLong() * 1000 / rate
 
+    /**
+     * The frames [from, to) of a decoded buffer of [frames] frames starting at [ptsUs] that
+     * fall inside [startUs, endUs) ([endUs] Long.MAX_VALUE: no end).
+     */
+    fun keepRange(ptsUs: Long, frames: Int, rate: Int, startUs: Long, endUs: Long): Pair<Int, Int> {
+        if (frames <= 0 || rate <= 0) return 0 to 0
+        val from = if (ptsUs >= startUs) 0 else ((startUs - ptsUs) * rate / 1_000_000).coerceAtMost(frames.toLong()).toInt()
+        val to = if (endUs == Long.MAX_VALUE) frames else ((endUs - ptsUs) * rate / 1_000_000).coerceIn(0, frames.toLong()).toInt()
+        return from to maxOf(from, to)
+    }
+
+    /** True when a buffer of [frames] at [ptsUs] reaches [endUs]. */
+    fun reaches(ptsUs: Long, frames: Int, rate: Int, endUs: Long): Boolean =
+        endUs != Long.MAX_VALUE && rate > 0 && ptsUs + frames * 1_000_000L / rate >= endUs
+
     /** Concatenates [parts] into one array. */
     fun concat(parts: List<FloatArray>): FloatArray {
         val total = parts.sumOf { it.size }
@@ -104,6 +119,12 @@ class FloatBuffer(initial: Int = 16_384) {
     }
 
     fun toArray(): FloatArray = data.copyOf(size)
+
+    /**
+     * The samples without a copy when the buffer is exactly full (sized up front), else a copy.
+     * The buffer must not be used afterwards.
+     */
+    fun finish(): FloatArray = if (size == data.size) data else data.copyOf(size)
 
     private fun ensure(capacity: Int) {
         if (capacity <= data.size) return

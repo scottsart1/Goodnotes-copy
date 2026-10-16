@@ -7,6 +7,7 @@ import com.inkwell.notes.core.model.Person
 import com.inkwell.notes.core.model.RecordingSpeaker
 import com.inkwell.notes.core.model.SpeakerEngine
 import com.inkwell.notes.core.model.SpeakerTurn
+import com.inkwell.notes.core.storage.FileStore
 import com.inkwell.notes.core.storage.db.PersonEntity
 import com.inkwell.notes.core.storage.db.RecordingSpeakerEntity
 import com.inkwell.notes.core.storage.db.SpeakerDao
@@ -771,12 +772,13 @@ class SpeakerServiceImpl(private val graph: AppGraph) : SpeakerService {
 
     /** Removes voice data of recordings that no longer exist (deleted with their document). */
     private suspend fun pruneDeletedRecordings() {
-        val ids = voiceLock.withLock { store.recordingIds() }
-        for (id in ids) {
-            if (graph.db.recordings().get(id) != null) continue
-            voiceLock.withLock {
-                store.deleteRecording(id)
-                store.deleteWork(id)
+        // Files are named by the sanitised id, so compare sanitised ids.
+        val existing = dao.allRecordingIds().map { FileStore.safe(it) }.toSet()
+        voiceLock.withLock {
+            for (name in store.recordingIds()) {
+                if (name in existing) continue
+                store.deleteRecording(name)
+                store.deleteWork(name)
             }
         }
     }

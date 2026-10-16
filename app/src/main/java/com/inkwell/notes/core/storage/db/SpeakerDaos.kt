@@ -54,8 +54,9 @@ interface SpeakerDao {
     @Query("UPDATE people SET voiceSamples = :count, updatedAt = :updatedAt WHERE id = :id")
     suspend fun setVoiceSamples(id: String, count: Int, updatedAt: Long)
 
-    @Query("SELECT DISTINCT recordingId FROM recording_speakers")
-    suspend fun recordingsWithSpeakers(): List<String>
+    /** Every recording id (to find voice data left behind by deleted recordings). */
+    @Query("SELECT id FROM recordings")
+    suspend fun allRecordingIds(): List<String>
 
     // ---- recording speakers
 

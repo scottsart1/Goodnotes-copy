@@ -54,7 +54,8 @@ class SpeakerAudioImpl(private val graph: AppGraph) : SpeakerAudio {
         val files = withContext(Dispatchers.IO) { AudioFiles.segments(graph.files, rec) }
         val pieces = AudioPlan.slice(rec.segmentDurationsMs, startMs.coerceAtLeast(0), endMs)
         if (pieces.isEmpty()) return null
-        val out = FloatBuffer(Pcm.samplesFor(endMs - startMs, SpeakerAudio.SAMPLE_RATE).coerceIn(16, 16 * 1024 * 1024))
+        val size = pieces.sumOf { Pcm.samplesFor(it.toMs, SpeakerAudio.SAMPLE_RATE) - Pcm.samplesFor(it.fromMs, SpeakerAudio.SAMPLE_RATE) }
+        val out = FloatBuffer(size.coerceAtLeast(16))
         var decodedAny = false
         for (p in pieces) {
             val expected = Pcm.samplesFor(p.toMs, SpeakerAudio.SAMPLE_RATE) - Pcm.samplesFor(p.fromMs, SpeakerAudio.SAMPLE_RATE)
@@ -63,7 +64,7 @@ class SpeakerAudioImpl(private val graph: AppGraph) : SpeakerAudio {
             if (pcm != null && pcm.isNotEmpty()) decodedAny = true
             out.add(Pcm.fitTo(pcm ?: FloatArray(0), expected))
         }
-        return if (decodedAny) out.toArray() else null
+        return if (decodedAny) out.finish() else null
     }
 
     /** [decode], with unreadable files reported as null (cancellation still propagates). */
@@ -90,13 +91,15 @@ class SpeakerAudioImpl(private val graph: AppGraph) : SpeakerAudio {
             val out = FloatBuffer(resampler.outputLength(lastFrame - firstFrame).coerceIn(16L, Int.MAX_VALUE.toLong()).toInt())
             val chunkFrames = (CHUNK_BYTES / align).coerceAtLeast(1)
             val buf = ByteArray(chunkFrames * align)
-            raf.seek(fmt.offsetOfFrame(firstFrame))
             var frame = firstFrame
             while (frame < lastFrame) {
                 currentCoroutineContext().ensureActive()
+                // Seek every time so a short read never leaves the next one mid-frame.
+                raf.seek(fmt.offsetOfFrame(frame))
                 val want = (minOf(chunkFrames.toLong(), lastFrame - frame) * align).toInt()
                 val n = raf.read(buf, 0, want)
-                if (n <= 0) break
+                // End of file (or a truncated last frame).
+                if (n < align) break
                 val mono = fmt.toMono(buf, n - n % align)
                 out.add(resampler.process(mono))
                 frame += n / align
@@ -187,13 +190,12 @@ class SpeakerAudioImpl(private val graph: AppGraph) : SpeakerAudio {
                             }
                             // Keep only frames inside [startUs, endUs).
                             val pts = info.presentationTimeUs
-                            val from = if (pts >= startUs) 0 else ((startUs - pts) * rate / 1_000_000).coerceAtMost(mono.size.toLong()).toInt()
-                            val to = if (endUs == Long.MAX_VALUE) mono.size else ((endUs - pts) * rate / 1_000_000).coerceIn(0, mono.size.toLong()).toInt()
+                            val (from, to) = Pcm.keepRange(pts, mono.size, rate, startUs, endUs)
                             if (to > from) {
                                 val r = resampler ?: Resampler(rate, SpeakerAudio.SAMPLE_RATE).also { resampler = it }
                                 out.add(r.process(mono, from, to - from))
                             }
-                            if (endUs != Long.MAX_VALUE && pts + mono.size * 1_000_000L / rate >= endUs) {
+                            if (Pcm.reaches(pts, mono.size, rate, endUs)) {
                                 c.releaseOutputBuffer(outIndex, false)
                                 break
                             }
