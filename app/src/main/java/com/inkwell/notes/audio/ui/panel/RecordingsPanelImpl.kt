@@ -39,6 +39,8 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.State
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -126,13 +128,25 @@ private fun PanelHeader(
     HorizontalDivider(color = c.outline, thickness = 1.dp)
 }
 
+/** The live recording at one-second resolution, so 20 Hz level updates don't recompose the panel. */
+internal data class LiveInfo(val recordingId: String, val elapsedMs: Long, val paused: Boolean)
+
+@Composable
+private fun rememberLive(vm: RecordingsViewModel): State<LiveInfo?> {
+    val state = vm.recordingState.collectAsStateWithLifecycle()
+    return remember {
+        derivedStateOf {
+            (state.value as? RecordingState.Active)?.let { LiveInfo(it.recordingId, it.elapsedMs / 1000 * 1000, it.paused) }
+        }
+    }
+}
+
 @Composable
 private fun ListContent(vm: RecordingsViewModel, onClose: () -> Unit) {
-    val c = Inkwell.colors
     val context = LocalContext.current
     val recordings by vm.recordings.collectAsStateWithLifecycle()
     val loaded by vm.loaded.collectAsStateWithLifecycle()
-    val live by vm.recordingState.collectAsStateWithLifecycle()
+    val live by rememberLive(vm)
     Column(Modifier.fillMaxSize()) {
         PanelHeader(stringResource(R.string.audio_panel_title), onClose)
         when {
@@ -144,7 +158,7 @@ private fun ListContent(vm: RecordingsViewModel, onClose: () -> Unit) {
                 verticalArrangement = Arrangement.spacedBy(2.dp),
             ) {
                 items(recordings, key = { it.id }) { rec ->
-                    val active = (live as? RecordingState.Active)?.takeIf { it.recordingId == rec.id }
+                    val active = live?.takeIf { it.recordingId == rec.id }
                     RecordingRow(
                         rec = rec,
                         liveElapsedMs = active?.elapsedMs,
@@ -194,7 +208,7 @@ private fun DetailContent(
 ) {
     val c = Inkwell.colors
     val context = LocalContext.current
-    val live by vm.recordingState.collectAsStateWithLifecycle()
+    val live by rememberLive(vm)
     val playback by vm.playback.collectAsStateWithLifecycle()
     val waveform by vm.waveform.collectAsStateWithLifecycle()
     val availability by vm.availability.collectAsStateWithLifecycle()
@@ -202,7 +216,7 @@ private fun DetailContent(
     val matches by vm.matches.collectAsStateWithLifecycle()
     val query by vm.query.collectAsStateWithLifecycle()
     val work by vm.work.collectAsStateWithLifecycle()
-    val active = (live as? RecordingState.Active)?.takeIf { it.recordingId == rec.id }
+    val active = live?.takeIf { it.recordingId == rec.id }
     val phase = TranscriptPhase.of(rec.transcriptStatus, work)
     val loaded = playback.recording?.id == rec.id
     val activeIndex = if (loaded) TranscriptFilter.activeIndex(transcript, playback.positionMs) else -1
@@ -286,7 +300,7 @@ private fun DetailContent(
 }
 
 @Composable
-private fun LiveCard(active: RecordingState.Active) {
+private fun LiveCard(active: LiveInfo) {
     val c = Inkwell.colors
     Column(
         Modifier.fillMaxWidth().clip(R12).border(1.dp, c.outline, R12).padding(16.dp),
