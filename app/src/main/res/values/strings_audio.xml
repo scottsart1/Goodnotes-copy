@@ -75,6 +75,7 @@
     <string name="audio_transcribe_estimate">%1$d min of audio · est. %2$s with %3$s (estimate, not a bill)</string>
     <string name="audio_transcribe_estimate_unknown">%1$d min of audio · %2$s</string>
     <string name="audio_transcribe_needs_key">Transcripts use OpenAI speech-to-text with your own API key. Add an OpenAI key in Settings, AI providers, to transcribe recordings. Everything else works without it.</string>
+    <string name="audio_transcribe_ai_off">AI features are turned off, so nothing leaves this device. Turn on \"Use AI features\" in Settings, AI providers, to transcribe recordings with your own OpenAI key.</string>
     <string name="audio_transcribing_progress">Transcribing part %1$d of %2$d</string>
     <string name="audio_transcribing_start">Starting transcription</string>
     <string name="audio_transcribing_waiting">Waiting for a network connection</string>

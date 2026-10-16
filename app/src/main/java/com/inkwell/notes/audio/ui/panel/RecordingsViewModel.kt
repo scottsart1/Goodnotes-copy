@@ -57,6 +57,8 @@ import java.util.UUID
 
 /** What the transcription and AI features can do right now (no key = both false). */
 internal data class AiAvailability(
+    /** The "Use AI features" master switch. */
+    val aiEnabled: Boolean = true,
     val transcribe: Boolean = false,
     val summarize: Boolean = false,
     val transcriptionModel: ModelRef? = null,
@@ -188,7 +190,7 @@ internal class RecordingsViewModel(private val graph: AppGraph, val docId: Strin
         val name = model?.let { runCatching { ai.modelInfo(it)?.displayName }.getOrNull() ?: it.modelId }
         // Speech-to-text is billed per audio minute; the price table lives in the AI engine.
         val perMinute = model?.let { ref -> runCatching { (ai as? AiServiceImpl)?.engine?.models?.spec(ref)?.usdPerAudioMinute }.getOrNull() }
-        return AiAvailability(transcribe, summarize, model, name, perMinute)
+        return AiAvailability(graph.settings.current.ai.enabled, transcribe, summarize, model, name, perMinute)
     }
 
     // ------------------------------------------------------------------ navigation
@@ -321,16 +323,18 @@ internal class RecordingsViewModel(private val graph: AppGraph, val docId: Strin
                 aiResult = AiResultState(action, rec, running = false, error = context.getString(R.string.audio_ai_no_notes))
                 return@launch
             }
-            val ai = graph.ai
-            val model = runCatching { ai.modelFor(AiTask.SUMMARIZE) }.getOrNull()
-            val contextTokens = model?.let { runCatching { ai.modelInfo(it)?.contextTokens }.getOrNull() }
-            val passage = passageIndex?.let { TranscriptPrompts.passageAround(segments, it) }
-            val request = withContext(Dispatchers.Default) {
-                TranscriptPrompts.request(action, rec.title, segments, docId, contextTokens, passage, notes)
+            // Routing reads key presence and the model cache: keep it off the main thread.
+            val pending = withContext(Dispatchers.IO) {
+                val ai = graph.ai
+                val model = runCatching { ai.modelFor(AiTask.SUMMARIZE) }.getOrNull()
+                val contextTokens = model?.let { runCatching { ai.modelInfo(it)?.contextTokens }.getOrNull() }
+                val passage = passageIndex?.let { TranscriptPrompts.passageAround(segments, it) }
+                val request = TranscriptPrompts.request(action, rec.title, segments, docId, contextTokens, passage, notes)
+                val tokens = runCatching { ai.estimateTokens(request) }.getOrDefault(0)
+                val cost = runCatching { ai.estimateCostUsd(request, 900) }.getOrNull()
+                PendingAsk(action, rec, request, model?.provider, tokens, cost)
             }
-            val tokens = runCatching { ai.estimateTokens(request) }.getOrDefault(0)
-            val cost = runCatching { ai.estimateCostUsd(request, 900) }.getOrNull()
-            proceed(PendingAsk(action, rec, request, model?.provider, tokens, cost))
+            proceed(pending)
         }
     }
 
@@ -369,7 +373,7 @@ internal class RecordingsViewModel(private val graph: AppGraph, val docId: Strin
         aiResult = AiResultState(p.action, p.recording, estimatedTokens = p.estimatedTokens, estimatedCostUsd = p.estimatedCostUsd)
         aiJob = viewModelScope.launch {
             try {
-                graph.ai.stream(p.request).collect { e ->
+                graph.ai.stream(p.request).flowOn(Dispatchers.IO).collect { e ->
                     val cur = aiResult ?: return@collect
                     aiResult = when (e) {
                         is AiEvent.Delta -> cur.copy(text = cur.text + e.text)
@@ -405,22 +409,23 @@ internal class RecordingsViewModel(private val graph: AppGraph, val docId: Strin
         aiResult = r.copy(saving = true, saveError = null)
         viewModelScope.launch {
             try {
-                val docTitle = runCatching { graph.library.getDocument(docId)?.title }.getOrNull().orEmpty()
-                val doc = graph.library.createDocument(DocKind.TYPED)
-                val id = { UUID.randomUUID().toString() }
-                val blocks = buildList {
-                    add(TypedBlock(id(), BlockType.HEADING, "$actionLabel · ${r.recording.title}", level = 1))
-                    add(TypedBlock(id(), BlockType.PARAGRAPH, context.getString(R.string.audio_ai_typed_source, r.recording.title, docTitle)))
-                    addAll(MarkdownBlocks.parse(r.text, id))
-                }
-                val json = TYPED_JSON.encodeToString(TypedDocument.serializer(), TypedDocument(blocks = blocks))
-                withContext(Dispatchers.IO) {
+                val title = withContext(Dispatchers.IO) {
+                    val docTitle = runCatching { graph.library.getDocument(docId)?.title }.getOrNull().orEmpty()
+                    val doc = graph.library.createDocument(DocKind.TYPED)
+                    val id = { UUID.randomUUID().toString() }
+                    val blocks = buildList {
+                        add(TypedBlock(id(), BlockType.HEADING, "$actionLabel · ${r.recording.title}", level = 1))
+                        add(TypedBlock(id(), BlockType.PARAGRAPH, context.getString(R.string.audio_ai_typed_source, r.recording.title, docTitle)))
+                        addAll(MarkdownBlocks.parse(r.text, id))
+                    }
+                    val json = TYPED_JSON.encodeToString(TypedDocument.serializer(), TypedDocument(blocks = blocks))
                     FileStore.writeAtomically(graph.files.typedFile(doc.id)) { it.write(json.toByteArray()) }
+                    runCatching { graph.library.touch(doc.id) }
+                    runCatching { graph.indexing.documentMetaChanged(doc.id) }
+                    runCatching { graph.sync.onDocumentChanged(doc.id) }
+                    doc.title
                 }
-                runCatching { graph.library.touch(doc.id) }
-                runCatching { graph.indexing.documentMetaChanged(doc.id) }
-                runCatching { graph.sync.onDocumentChanged(doc.id) }
-                aiResult = aiResult?.copy(saving = false, savedTitle = doc.title)
+                aiResult = aiResult?.copy(saving = false, savedTitle = title)
             } catch (e: CancellationException) {
                 throw e
             } catch (t: Throwable) {

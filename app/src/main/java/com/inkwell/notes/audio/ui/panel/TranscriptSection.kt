@@ -44,44 +44,14 @@ import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
-import androidx.work.WorkInfo
 import com.inkwell.notes.R
 import com.inkwell.notes.audio.logic.AudioText
 import com.inkwell.notes.audio.logic.TranscriptAction
 import com.inkwell.notes.audio.logic.TranscriptFilter
-import com.inkwell.notes.audio.transcription.Transcriptions
+import com.inkwell.notes.audio.transcription.TranscriptPhase
 import com.inkwell.notes.core.model.Recording
-import com.inkwell.notes.core.model.TranscriptStatus
 import com.inkwell.notes.ui.theme.Dimens
 import com.inkwell.notes.ui.theme.Inkwell
-
-/** Where transcription of one recording stands, combining the row status with the job. */
-internal sealed interface TranscriptPhase {
-    data object None : TranscriptPhase
-    data object Queued : TranscriptPhase
-    data class Running(val done: Int, val total: Int) : TranscriptPhase
-    data object Done : TranscriptPhase
-    data class Failed(val message: String?) : TranscriptPhase
-    data object Interrupted : TranscriptPhase
-
-    val busy: Boolean get() = this is Queued || this is Running
-
-    companion object {
-        fun of(rec: Recording, info: WorkInfo?): TranscriptPhase {
-            val state = info?.state
-            return when {
-                state == WorkInfo.State.RUNNING -> Transcriptions.progressOf(info)?.let { Running(it.first, it.second) } ?: Running(0, 0)
-                state == WorkInfo.State.ENQUEUED || state == WorkInfo.State.BLOCKED -> Queued
-                rec.transcriptStatus == TranscriptStatus.DONE -> Done
-                state == WorkInfo.State.FAILED -> Failed(Transcriptions.errorOf(info))
-                rec.transcriptStatus == TranscriptStatus.FAILED -> Failed(null)
-                rec.transcriptStatus == TranscriptStatus.QUEUED -> Queued
-                rec.transcriptStatus == TranscriptStatus.RUNNING -> Interrupted
-                else -> None
-            }
-        }
-    }
-}
 
 internal fun actionLabelRes(a: TranscriptAction): Int = when (a) {
     TranscriptAction.SUMMARIZE -> R.string.audio_ai_summarize
@@ -189,7 +159,11 @@ private fun TranscribeCard(vm: RecordingsViewModel, rec: Recording, availability
                 onClick = { vm.requestTranscription(rec) },
             )
         } else {
-            Text(stringResource(R.string.audio_transcribe_needs_key), style = MaterialTheme.typography.bodyMedium, color = c.inkMuted)
+            Text(
+                stringResource(if (availability.aiEnabled) R.string.audio_transcribe_needs_key else R.string.audio_transcribe_ai_off),
+                style = MaterialTheme.typography.bodyMedium,
+                color = c.inkMuted,
+            )
         }
     }
 }

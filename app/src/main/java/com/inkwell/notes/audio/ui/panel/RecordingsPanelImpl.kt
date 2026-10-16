@@ -59,6 +59,7 @@ import com.inkwell.notes.audio.RecordingState
 import com.inkwell.notes.audio.logic.AudioText
 import com.inkwell.notes.audio.logic.TranscriptAction
 import com.inkwell.notes.audio.logic.TranscriptFilter
+import com.inkwell.notes.audio.transcription.TranscriptPhase
 import com.inkwell.notes.audio.ui.dock.RecordingDot
 import com.inkwell.notes.core.model.Recording
 import com.inkwell.notes.core.model.RecordingStatus
@@ -202,7 +203,7 @@ private fun DetailContent(
     val query by vm.query.collectAsStateWithLifecycle()
     val work by vm.work.collectAsStateWithLifecycle()
     val active = (live as? RecordingState.Active)?.takeIf { it.recordingId == rec.id }
-    val phase = TranscriptPhase.of(rec, work)
+    val phase = TranscriptPhase.of(rec.transcriptStatus, work)
     val loaded = playback.recording?.id == rec.id
     val activeIndex = if (loaded) TranscriptFilter.activeIndex(transcript, playback.positionMs) else -1
 
