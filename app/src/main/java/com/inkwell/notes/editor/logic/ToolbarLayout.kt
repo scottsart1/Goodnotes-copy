@@ -23,6 +23,7 @@ enum class ToolbarMode { FULL, HANDLE, HIDDEN }
 data class ToolbarSpec(
     val mode: ToolbarMode,
     val orientation: ToolbarOrientation,
+    /** Visible button size; every button sits in a [ToolbarLayout.SLOT_DP] touch target. */
     val buttonDp: Float,
     val iconDp: Float,
     /** Visible items in groups separated by dividers; the overflow button is the last group. */
@@ -52,8 +53,12 @@ object ToolbarLayout {
     const val COMPACT_BUTTON_DP = 32f
     const val ICON_DP = 20f
     const val COMPACT_ICON_DP = 18f
-    const val GAP_DP = 2f
+    /** Touch target of each button (>= 44dp in both directions). */
+    const val SLOT_DP = 44f
     const val DIVIDER_DP = 9f
+
+    /** Compact mode keeps the insert tools in the overflow menu. */
+    val COMPACT_OVERFLOW = listOf(ToolbarItem.SHAPE, ToolbarItem.TEXT, ToolbarItem.IMAGE)
     const val END_PADDING_DP = 6f
     /** Space kept free around the pill along its axis. */
     const val OUTER_MARGIN_DP = 16f
@@ -77,11 +82,14 @@ object ToolbarLayout {
         }
         val visible = (TOOLS + HISTORY + EXTRAS).toMutableList()
         val overflow = mutableListOf<ToolbarItem>()
+        if (compact) {
+            visible.removeAll(COMPACT_OVERFLOW)
+            overflow += COMPACT_OVERFLOW
+        }
         val budget = availableDp - 2 * OUTER_MARGIN_DP
         for (item in DROP_ORDER) {
-            if (lengthDp(groupsOf(visible), button) <= budget) break
-            visible.remove(item)
-            overflow += item
+            if (lengthDp(groupsOf(visible)) <= budget) break
+            if (visible.remove(item)) overflow += item
         }
         return ToolbarSpec(ToolbarMode.FULL, orientation, button, icon, groupsOf(visible), overflow.sortedBy { (TOOLS + HISTORY + EXTRAS).indexOf(it) })
     }
@@ -90,14 +98,13 @@ object ToolbarLayout {
         listOf(TOOLS, HISTORY, EXTRAS).map { g -> g.filter { it in visible } }.filter { it.isNotEmpty() } + listOf(listOf(ToolbarItem.OVERFLOW))
 
     /** Length of the pill along its axis for [groups]. */
-    fun lengthDp(groups: List<List<ToolbarItem>>, buttonDp: Float): Float {
+    fun lengthDp(groups: List<List<ToolbarItem>>): Float {
         val items = groups.sumOf { it.size }
         if (items == 0) return 0f
-        val gaps = (items - groups.size).coerceAtLeast(0)
-        return 2 * END_PADDING_DP + items * buttonDp + gaps * GAP_DP + (groups.size - 1) * DIVIDER_DP
+        return 2 * END_PADDING_DP + items * SLOT_DP + (groups.size - 1) * DIVIDER_DP
     }
 
-    fun lengthDp(spec: ToolbarSpec): Float = lengthDp(spec.groups, spec.buttonDp)
+    fun lengthDp(spec: ToolbarSpec): Float = lengthDp(spec.groups)
 
     /**
      * Top-left of a floating toolbar of [barW]x[barH] whose centre sits at the fractional position

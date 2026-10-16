@@ -45,11 +45,13 @@ class LayoutLogicTest {
     }
 
     @Test
-    fun `compact mode uses smaller buttons and fits more`() {
-        val normal = ToolbarLayout.compute(ToolbarPosition.TOP, compact = false, availableDp = 520f)
-        val compact = ToolbarLayout.compute(ToolbarPosition.TOP, compact = true, availableDp = 520f)
+    fun `compact mode uses smaller buttons and keeps insert tools in the overflow`() {
+        val compact = ToolbarLayout.compute(ToolbarPosition.TOP, compact = true, availableDp = 1480f)
         assertEquals(32f, compact.buttonDp)
-        assertTrue(compact.overflow.size <= normal.overflow.size)
+        assertEquals(ToolbarLayout.COMPACT_OVERFLOW, compact.overflow)
+        assertTrue(ToolbarItem.RECORD in compact.visibleItems)
+        val normal = ToolbarLayout.compute(ToolbarPosition.TOP, compact = false, availableDp = 1480f)
+        assertTrue(ToolbarLayout.lengthDp(compact) < ToolbarLayout.lengthDp(normal))
     }
 
     @Test
