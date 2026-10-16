@@ -168,3 +168,22 @@ fun NotebookController.generateOutline(request: AiRequest, existingCount: Int) {
         }
     }
 }
+
+/** Copies a page's text (PDF text layer or recognised text) to the system clipboard. */
+fun NotebookController.copyPageTextToClipboard(index: Int) {
+    uiScope.launch {
+        val text = busy.run(str(R.string.editor_busy_text)) { pageText(index) }
+        if (text.isBlank()) {
+            messages.show(str(R.string.editor_page_text_empty))
+        } else {
+            ImageImporter.copyTextToClipboard(appContext, str(R.string.editor_page_text_label), text)
+            if (!ImageImporter.systemShowsCopyConfirmation) messages.show(str(R.string.editor_page_text_copied))
+        }
+    }
+}
+
+/** Copies recognised selection text to the system clipboard. */
+fun NotebookController.copyTextToClipboard(text: String) {
+    ImageImporter.copyTextToClipboard(appContext, str(R.string.editor_page_text_label), text)
+    if (!ImageImporter.systemShowsCopyConfirmation) messages.show(str(R.string.editor_text_copied))
+}

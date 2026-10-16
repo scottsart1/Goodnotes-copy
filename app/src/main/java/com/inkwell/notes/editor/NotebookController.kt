@@ -91,6 +91,8 @@ class NotebookController(
     val messages = EditorMessages(uiScope)
     val busy = BusyTracker()
     val elements = ElementsStore(graph)
+    /** Page thumbnails keyed by "pageId@modifiedAt". */
+    val thumbCache = android.util.LruCache<String, Bitmap>(48)
 
     var doc by mutableStateOf<DocumentMeta?>(null); private set
     /** The document does not exist (deleted, or a stale link). */
@@ -242,6 +244,12 @@ class NotebookController(
         runCatching { graph.library.pageContentChanged(docId, p.page.id) }.onFailure { Log.w(TAG, "pageContentChanged failed", it) }
         runCatching { graph.indexing.pageChanged(docId, p.page.id) }.onFailure { Log.w(TAG, "indexing failed", it) }
         runCatching { graph.sync.onDocumentChanged(docId) }.onFailure { Log.w(TAG, "sync notify failed", it) }
+    }
+
+    /** Commits the canvas and waits until every pending page is on disk (before exports and copies). */
+    suspend fun saveNow() {
+        if (bound && !disposed) runCatching { canvas.flush() }
+        saver.flushAll().join()
     }
 
     /** Forgets unsaved content of pages that are being deleted. */
@@ -497,6 +505,7 @@ class NotebookController(
             if (!missing) runCatching { graph.thumbnails.refresh(docId) }
         }
         canvas.listener = null
+        thumbCache.evictAll()
         runCatching { canvas.setPlaybackHighlight(null, 0) }
         runCatching { canvas.release() }
         bound = false
