@@ -154,6 +154,13 @@ class ExportServiceImpl(private val graph: AppGraph) : ExportService {
         out.flush()
     }
 
+    /** File name and documents-provider MIME type for saving this export ("Save to…"). */
+    suspend fun targetName(docId: String, options: ExportOptions): Pair<String, String> = guard {
+        val doc = source.document(docId)
+        val count = outputCount(doc, options)
+        ExportNaming.fileName(doc.title, options.format, count) to ExportNaming.safMime(options.format, count)
+    }
+
     /** Pages in the output (decides between one image and a zip of images). */
     private suspend fun outputCount(doc: DocumentMeta, options: ExportOptions): Int = when (options.format) {
         ExportFormat.PNG, ExportFormat.JPEG -> images.imageCount(doc, options)
