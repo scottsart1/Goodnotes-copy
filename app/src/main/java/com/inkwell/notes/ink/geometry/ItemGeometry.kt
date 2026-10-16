@@ -234,18 +234,13 @@ object ItemGeometry {
         return bestS
     }
 
-    /** Sample points of an item for "mostly inside" lasso tests, as x,y pairs. */
+    /**
+     * Sample points of an item for "mostly inside" lasso tests, as x,y pairs. Strokes are sampled
+     * evenly along their arc length (not by sample index), so a stroke written slowly at one end
+     * and quickly at the other is still judged by how much of its *ink* lies inside.
+     */
     fun samplePoints(item: Any, content: PageContent? = null, maxSamples: Int = 48): FloatArray = when (item) {
-        is Stroke -> {
-            val n = item.pointCount
-            val step = max(1, n / maxSamples)
-            val count = (n + step - 1) / step
-            val out = FloatArray(count * 2)
-            var k = 0
-            var i = 0
-            while (i < n && k < count) { out[k * 2] = item.points[i * InkPoints.STRIDE]; out[k * 2 + 1] = item.points[i * InkPoints.STRIDE + 1]; k++; i += step }
-            out
-        }
+        is Stroke -> strokeSamples(item, maxSamples)
         is ShapeItem -> shapeOutline(item)
         is TextItem -> boxSamples(item.x, item.y, item.width, item.height, item.rotation)
         is ImageItem -> boxSamples(item.x, item.y, item.width, item.height, item.rotation)
@@ -255,6 +250,41 @@ object ItemGeometry {
             floatArrayOf(e[0], e[1], (e[0] + e[2]) / 2f, (e[1] + e[3]) / 2f, e[2], e[3])
         }
         else -> FloatArray(0)
+    }
+
+    /**
+     * Up to [maxSamples] points of [s] evenly spaced along its arc length (both ends included).
+     * A stroke without extent (one sample, or every sample at the same spot) gives one point.
+     */
+    fun strokeSamples(s: Stroke, maxSamples: Int = 48): FloatArray {
+        val st = InkPoints.STRIDE
+        val p = s.points
+        val n = s.pointCount
+        if (n == 0) return FloatArray(0)
+        val total = Geo.polylineLength(p, st, n)
+        if (n == 1 || !(total > 0f) || !total.isFinite()) return floatArrayOf(p[0], p[1])
+        val count = min(max(2, maxSamples), n)
+        val out = FloatArray(count * 2)
+        out[0] = p[0]; out[1] = p[1]
+        val step = total / (count - 1)
+        var k = 1
+        var acc = 0f
+        var target = step
+        for (i in 1 until n) {
+            val ax = p[(i - 1) * st]; val ay = p[(i - 1) * st + 1]
+            val bx = p[i * st]; val by = p[i * st + 1]
+            val seg = Geo.dist(ax, ay, bx, by)
+            while (seg > 0f && acc + seg >= target && k < count - 1) {
+                val t = (target - acc) / seg
+                out[k * 2] = ax + (bx - ax) * t; out[k * 2 + 1] = ay + (by - ay) * t
+                k++
+                target += step
+            }
+            acc += seg
+        }
+        // Rounding slack: the remaining slots take the end point.
+        while (k < count) { out[k * 2] = p[(n - 1) * st]; out[k * 2 + 1] = p[(n - 1) * st + 1]; k++ }
+        return out
     }
 
     private fun boxSamples(x: Float, y: Float, w: Float, h: Float, rotation: Float): FloatArray {

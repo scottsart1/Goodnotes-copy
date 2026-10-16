@@ -402,18 +402,10 @@ internal class SelectionController(private val e: InkEngine) {
     private fun moveToPage(mm: Manipulation, session: EditSession, baked: List<Any>, target: Int) {
         val tgt = e.page(target) ?: run { session.cancel(); return }
         val toTarget = docAffine(mm.pageIndex).then(docAffine(target).inverse() ?: run { session.cancel(); return })
-        val moving = mm.ids
-        // Connectors whose ends all move go along; the others keep a free end where the item was.
-        val along = mm.attached.filter { c -> (c.fromItemId == null || c.fromItemId in moving) && (c.toItemId == null || c.toItemId in moving) }
-        val stay = mm.attached - along.toSet()
-        val staying = ContentOps.allItems(mm.before).map { Items.id(it) }.filterTo(HashSet()) { it !in moving }
-        val detached = stay.associate { c -> c.id to SelectionClipboard.detachOutside(c, mm.before, staying) as Any }
-        val movedRaw = baked + along.map { TransformBaker.bake(it, mm.transform) }
-        var z = e.nextZ(target)
-        val moved = movedRaw.sortedBy { Items.z(it) }.map { item -> Items.withZ(TransformBaker.bake(item, toTarget), z++) }
-        val removeIds = HashSet(moving).also { s -> along.forEach { s += it.id } }
-        val srcFinal = ContentOps.replace(ContentOps.remove(mm.before, removeIds), detached)
-        val tgtFinal = ContentOps.add(tgt.content, moved)
+        val r = CrossPageMove.compute(mm.before, tgt.content, mm.items, baked, mm.attached, mm.transform, toTarget, e.nextZ(target))
+        val moved = r.moved
+        val srcFinal = r.source
+        val tgtFinal = r.target
         val srcChanged = mm.boundsPage.copy()
         for (c in mm.attached) srcChanged.union(ItemGeometry.bounds(c, tmpBounds, mm.before))
         val tgtChanged = Bounds()
