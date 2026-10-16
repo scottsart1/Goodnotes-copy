@@ -2,6 +2,7 @@ package com.inkwell.notes.app
 
 import android.net.Uri
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.navigation.NavHostController
@@ -119,7 +120,12 @@ fun InkwellNavHost(graph: AppGraph, pendingNavigation: PendingNavigation) {
     val nav = rememberNavController()
     val scope = rememberCoroutineScope()
     val navigator: AppNavigator = remember(nav) { NavControllerNavigator(nav, graph, scope) }
-    pendingNavigation.attach(navigator)
+    // Attached only while this nav host is composed (the app lock disposes it), so
+    // navigation requested while locked waits for the unlocked host instead of being lost.
+    DisposableEffect(navigator) {
+        pendingNavigation.attach(navigator)
+        onDispose { pendingNavigation.detach(navigator) }
+    }
 
     NavHost(navController = nav, startDestination = Routes.LIBRARY) {
         composable(Routes.LIBRARY, arguments = listOf(navArgument("folder") { type = NavType.StringType; defaultValue = "" })) {
@@ -165,7 +171,11 @@ class PendingNavigation {
 
     fun attach(n: AppNavigator) {
         navigator = n
-        pending?.let { it(n); pending = null }
+        pending?.let { pending = null; it(n) }
+    }
+
+    fun detach(n: AppNavigator) {
+        if (navigator === n) navigator = null
     }
 
     fun post(action: (AppNavigator) -> Unit) {
