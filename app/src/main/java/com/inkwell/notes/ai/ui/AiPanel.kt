@@ -77,6 +77,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.ClipEntry
 import androidx.compose.ui.platform.LocalClipboard
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -119,14 +120,16 @@ internal fun AiPanelImpl(
     var showPicker by remember { mutableStateOf(false) }
     val c = Inkwell.colors
 
+    // Phones get the full width; tablets a 420dp side panel (or the slot the editor gives it).
+    val phone = LocalConfiguration.current.screenWidthDp < 600
     BoxWithConstraints(modifier) {
-        val narrow = maxWidth < 600.dp
+        val width = if (phone) maxWidth else minOf(Dimens.panelWidth, maxWidth)
         Surface(
-            Modifier.align(Alignment.TopEnd).then(if (narrow) Modifier.fillMaxWidth() else Modifier.width(Dimens.panelWidth)).fillMaxHeight(),
+            Modifier.align(Alignment.TopEnd).width(width).fillMaxHeight(),
             color = c.surface,
         ) {
             Row(Modifier.fillMaxSize()) {
-                if (!narrow) VerticalDivider(color = c.outline, thickness = 1.dp)
+                if (!phone) VerticalDivider(color = c.outline, thickness = 1.dp)
                 Column(Modifier.fillMaxSize().imePadding()) {
                     PanelHeader(vm, onClose, onOpenSettings = { showSettings = true })
                     HorizontalDivider(color = c.outline, thickness = 1.dp)
