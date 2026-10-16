@@ -76,8 +76,10 @@ class DiarizationWorker(appContext: Context, params: WorkerParameters) : Corouti
 
         val paths = files.map { it.absolutePath }
         val checkpointFile = File(graph.files.audioDir(docId, recordingId), CHECKPOINT)
-        val remember = prefs.rememberVoices
-        val resumed = if (remember) loadCheckpoint(service, checkpointFile, recordingId, paths, rec.segmentDurationsMs, windows.size) else null
+        // Window embeddings are checkpointed even when voices are not remembered: they are
+        // temporary (encrypted, deleted when the job ends), and without them a recording that
+        // takes longer than one job run to analyse would start over forever.
+        val resumed = loadCheckpoint(service, checkpointFile, recordingId, paths, rec.segmentDurationsMs, windows.size)
         var checkpoint = resumed?.first
             ?: DiarizationCheckpoint(modelId = SpeakerModelSpecs.EMBEDDING_MODEL_ID, files = paths, durations = rec.segmentDurationsMs)
         val embeddings = HashMap<String, FloatArray>(resumed?.second.orEmpty())
@@ -110,7 +112,7 @@ class DiarizationWorker(appContext: Context, params: WorkerParameters) : Corouti
                     turns = checkpoint.turns + result.turns,
                     voices = checkpoint.voices + result.voices,
                 )
-                if (remember) saveCheckpoint(service, checkpointFile, recordingId, checkpoint, embeddings)
+                saveCheckpoint(service, checkpointFile, recordingId, checkpoint, embeddings)
                 report(windows, w.index + 1, 0f, force = true)
             }
         } catch (e: CancellationException) {
@@ -121,10 +123,10 @@ class DiarizationWorker(appContext: Context, params: WorkerParameters) : Corouti
             return failure(R.string.speaker_engine_error_unsupported)
         } catch (e: OutOfMemoryError) {
             Log.e(TAG, "Out of memory while identifying speakers")
-            return retryOrFail()
+            return retryOrFail { discard(service, checkpointFile, recordingId) }
         } catch (e: Exception) {
             Log.e(TAG, "Identification failed", e)
-            return retryOrFail()
+            return retryOrFail { discard(service, checkpointFile, recordingId) }
         } finally {
             withContext(NonCancellable + dispatcher) { engine?.close() }
             dispatcher.close()
@@ -144,17 +146,14 @@ class DiarizationWorker(appContext: Context, params: WorkerParameters) : Corouti
         }
         return try {
             service.saveDiarization(docId, result)
-            withContext(Dispatchers.IO) {
-                checkpointFile.delete()
-                service.store.deleteWork(recordingId)
-            }
+            discard(service, checkpointFile, recordingId)
             runCatching { service.notifyIfNamesNeeded(docId, recordingId) }.onFailure { Log.w(TAG, "Naming notification failed", it) }
             Result.success()
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
             Log.e(TAG, "Saving the speakers failed", e)
-            retryOrFail()
+            retryOrFail { discard(service, checkpointFile, recordingId) }
         }
     }
 
@@ -229,8 +228,18 @@ class DiarizationWorker(appContext: Context, params: WorkerParameters) : Corouti
 
     private fun failure(res: Int) = Result.failure(workDataOf(Diarizations.KEY_ERROR to applicationContext.getString(res)))
 
-    private fun retryOrFail(): Result =
-        if (runAttemptCount < MAX_ATTEMPTS) Result.retry() else failure(R.string.speaker_engine_error_failed)
+    /** Retries a few times; on giving up runs [cleanup] (temporary voice data must not linger). */
+    private suspend fun retryOrFail(cleanup: suspend () -> Unit = {}): Result {
+        if (runAttemptCount < MAX_ATTEMPTS) return Result.retry()
+        runCatching { cleanup() }
+        return failure(R.string.speaker_engine_error_failed)
+    }
+
+    /** Deletes the checkpoint and the window embeddings of [recordingId]. */
+    private suspend fun discard(service: SpeakerServiceImpl, checkpointFile: File, recordingId: String) = withContext(Dispatchers.IO) {
+        checkpointFile.delete()
+        service.store.deleteWork(recordingId)
+    }
 
     private companion object {
         const val TAG = "Diarization"
