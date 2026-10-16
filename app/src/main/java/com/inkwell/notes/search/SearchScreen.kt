@@ -95,6 +95,14 @@ fun SearchScreen(initialQuery: String, nav: AppNavigator) {
         vm.onQueryChange(q)
     }
 
+    // Search opened again on top of itself with another query (single-top navigation).
+    var appliedInitial by rememberSaveable { mutableStateOf(initialQuery) }
+    LaunchedEffect(initialQuery) {
+        if (initialQuery != appliedInitial) {
+            appliedInitial = initialQuery
+            setQuery(initialQuery)
+        }
+    }
     LaunchedEffect(Unit) {
         // Let the screen settle before focusing so the keyboard opens reliably.
         delay(120)

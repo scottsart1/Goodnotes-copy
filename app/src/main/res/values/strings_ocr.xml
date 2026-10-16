@@ -33,7 +33,7 @@
     <string name="search_kind_notebook">Notebook</string>
     <string name="search_kind_pdf">PDF</string>
     <string name="search_kind_whiteboard">Whiteboard</string>
-    <string name="search_kind_typed">Document</string>
+    <string name="search_kind_typed">Typed</string>
     <string name="search_root_folder">Library</string>
     <string name="search_source_handwriting">Handwriting</string>
     <string name="search_source_typed">Typed text</string>
