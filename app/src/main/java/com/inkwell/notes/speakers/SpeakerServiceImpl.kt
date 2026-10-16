@@ -85,9 +85,11 @@ class SpeakerServiceImpl(private val graph: AppGraph) : SpeakerService {
     private val recordingLocks = ConcurrentHashMap<String, Mutex>()
 
     init {
-        graph.appScope.launch {
+        graph.appScope.launch(Dispatchers.IO) {
             // Models that finished downloading while recordings waited (also after process death).
-            models.state.filter { it is SpeakerModelState.Ready }.collect { runCatching { onModelsReady() } }
+            models.state.filter { it is SpeakerModelState.Ready }.collect {
+                runCatching { onModelsReady() }.onFailure { e -> Log.w(TAG, "Queueing waiting recordings failed", e) }
+            }
         }
         graph.appScope.launch(Dispatchers.IO) {
             delay(PRUNE_DELAY_MS)
@@ -101,7 +103,8 @@ class SpeakerServiceImpl(private val graph: AppGraph) : SpeakerService {
 
     override suspend fun downloadModels() {
         if (withContext(Dispatchers.IO) { models.present() }) {
-            models.changed()
+            // Already here (perhaps just finished): anything still waiting can go.
+            onModelsReady()
             return
         }
         models.enqueue(prefs.downloadOnUnmeteredOnly)
@@ -110,9 +113,9 @@ class SpeakerServiceImpl(private val graph: AppGraph) : SpeakerService {
     override suspend fun deleteModels() = models.delete()
 
     /** The download finished: queue every recording that waited for it. */
-    internal fun onModelsReady() {
+    internal suspend fun onModelsReady() = withContext(Dispatchers.IO) {
         models.changed()
-        if (!models.present()) return
+        if (!models.present()) return@withContext
         for (e in awaiting.drain()) {
             runCatching { Diarizations.enqueue(graph.context, e.docId, e.recordingId, replace = false) }
                 .onFailure { Log.w(TAG, "Could not queue a waiting recording", it) }

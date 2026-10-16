@@ -59,7 +59,13 @@ class DiarizationWorker(appContext: Context, params: WorkerParameters) : Corouti
         val rec = entity.toModel()
 
         if (!service.models.present() || !service.models.verifyOnce()) {
+            if (service.models.present()) {
+                // Present but unreadable (I/O error): downloading again would not help.
+                return retryOrFail()
+            }
             service.awaitModels(docId, recordingId)
+            // Arrived meanwhile: run again shortly instead of waiting for a download that is done.
+            if (service.models.present()) return Result.retry()
             return Result.success(workDataOf(Diarizations.KEY_WAITING to true))
         }
 
