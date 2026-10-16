@@ -245,7 +245,7 @@ internal class InputRouter(private val e: InkEngine) {
         if (e.inputPrefs.motionPrediction && !stylusIsMouse && stylusTool?.isInking == true) {
             ensurePredictor()?.let { p -> try { p.record(event) } catch (t: Throwable) { predictor = null } }
         }
-        if (stylusTool?.isInking != true) handler.postDelayed(longPress, longPressMs)
+        if (allowsStylusLongPress(type, stylusTool?.isInking == true)) handler.postDelayed(longPress, longPressMs)
     }
 
     private fun startStylusTool(type: ToolType) {
@@ -366,7 +366,8 @@ internal class InputRouter(private val e: InkEngine) {
     private val longPress = Runnable {
         val x: Float; val y: Float
         if (stylusId != -1) {
-            if (stylusMoved || stylusTool?.isInking == true) return@Runnable
+            val type = stylusToolType ?: return@Runnable
+            if (stylusMoved || !allowsStylusLongPress(type, stylusTool?.isInking == true)) return@Runnable
             x = lastSX; y = lastSY
             stylusTool?.onCancel(e)
             stylusConsumed = true
@@ -586,7 +587,11 @@ internal class InputRouter(private val e: InkEngine) {
             fingerToolStarted = false
             pendingSamples.clear()
             if (mode != Mode.MULTI) {
-                if (!taps.active) taps.begin(firstFingerTime)
+                // PENDING / SCROLL / TOOL already began (and, when moved, invalidated) the tracker for
+                // this gesture. Otherwise, e.g. when the first finger was ignored because the stylus
+                // was near, start it fresh: single-finger gestures never end the tracker, so a stale
+                // "active" state from an earlier scroll would silently swallow two-finger taps.
+                if (mode != Mode.PENDING && mode != Mode.SCROLL && mode != Mode.TOOL) taps.begin(firstFingerTime)
                 e.viewportCtl.beginPinch()
                 mode = Mode.MULTI
             }
@@ -797,6 +802,7 @@ internal class InputRouter(private val e: InkEngine) {
         pendingSamples.clear()
         if (mode == Mode.MULTI) e.viewportCtl.endPinch()
         mode = Mode.NONE
+        taps.cancel()
         velocity?.recycle()
         velocity = null
     }
@@ -874,6 +880,13 @@ internal class InputRouter(private val e: InkEngine) {
 
     companion object {
         private const val TAG = "InkInput"
+
+        /**
+         * Whether a stylus contact with this tool may turn into a long press. Inking tools hold
+         * their own gestures, and the eraser edits live: cancelling it after a long press would
+         * restore what it just erased and pop a menu whenever the pen rests on a speck.
+         */
+        fun allowsStylusLongPress(type: ToolType, isInking: Boolean): Boolean = !isInking && type != ToolType.ERASER
         /** MotionEvent.FLAG_CANCELED (API 33): the pointer was cancelled, e.g. a palm. */
         private const val FLAG_CANCELED = 0x20
         private const val EXCLUSION_HEIGHT_DP = 200f
