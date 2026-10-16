@@ -75,7 +75,8 @@ class PdfServiceImpl(private val graph: AppGraph) : PdfService {
 
     private val workDir: File get() = File(files.cacheDir, WORK_DIR).apply { mkdirs() }
 
-    private val engine by lazy { PdfRenderEngine(sourceFile = { files.sourcePdf(it) }, scope = graph.appScope) }
+    private val engineLazy = lazy { PdfRenderEngine(sourceFile = { files.sourcePdf(it) }, scope = graph.appScope) }
+    private val engine by engineLazy
     private val pdfBox by lazy { PdfBoxOps(context) { workDir } }
     private val text by lazy { PdfTextExtractor(pdfBox, sourceFile = { files.sourcePdf(it) }, scope = graph.appScope) }
     private val importer by lazy { PdfImporter(context, engine, pdfBox) { workDir } }
@@ -298,6 +299,7 @@ class PdfServiceImpl(private val graph: AppGraph) : PdfService {
         @Suppress("DEPRECATION")
         override fun onTrimMemory(level: Int) {
             when {
+                !engineLazy.isInitialized() -> Unit
                 level >= ComponentCallbacks2.TRIM_MEMORY_BACKGROUND -> engine.trimCache(0f)
                 level >= ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW -> engine.trimCache(0.25f)
             }
@@ -306,7 +308,9 @@ class PdfServiceImpl(private val graph: AppGraph) : PdfService {
         override fun onConfigurationChanged(newConfig: Configuration) {}
 
         @Deprecated("Deprecated in Java")
-        override fun onLowMemory() = engine.trimCache(0f)
+        override fun onLowMemory() {
+            if (engineLazy.isInitialized()) engine.trimCache(0f)
+        }
     }
 
     companion object {
