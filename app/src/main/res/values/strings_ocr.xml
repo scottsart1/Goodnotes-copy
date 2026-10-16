@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Search screen -->
+    <string name="search_placeholder">Search notes, handwriting, PDFs, transcripts</string>
+    <string name="search_back">Back</string>
+    <string name="search_clear_query">Clear search</string>
+    <string name="search_filter_all">All</string>
+    <string name="search_filter_handwriting">Handwriting</string>
+    <string name="search_filter_typed">Typed</string>
+    <string name="search_filter_pdf_ocr">PDF &amp; OCR</string>
+    <string name="search_filter_transcripts">Transcripts</string>
+    <string name="search_filter_titles">Titles</string>
+    <string name="search_filter_with_count">%1$s %2$d</string>
+    <string name="search_semantic">Semantic</string>
+    <string name="search_semantic_on">Semantic matching on</string>
+    <string name="search_semantic_off">Semantic matching off</string>
+    <string name="search_semantic_failed">Semantic matches are unavailable right now. Showing word matches only.</string>
+    <string name="search_summary">%1$s · %2$s</string>
+    <plurals name="search_result_count">
+        <item quantity="one">%d match</item>
+        <item quantity="other">%d matches</item>
+    </plurals>
+    <plurals name="search_document_count">
+        <item quantity="one">%d document</item>
+        <item quantity="other">%d documents</item>
+    </plurals>
+    <plurals name="search_show_more">
+        <item quantity="one">Show %d more match</item>
+        <item quantity="other">Show %d more matches</item>
+    </plurals>
+    <string name="search_show_less">Show fewer</string>
+    <string name="search_open_document">Open %1$s</string>
+    <string name="search_kind_notebook">Notebook</string>
+    <string name="search_kind_pdf">PDF</string>
+    <string name="search_kind_whiteboard">Whiteboard</string>
+    <string name="search_kind_typed">Typed</string>
+    <string name="search_root_folder">Library</string>
+    <string name="search_source_handwriting">Handwriting</string>
+    <string name="search_source_typed">Typed text</string>
+    <string name="search_source_pdf">PDF text</string>
+    <string name="search_source_ocr">Scanned text</string>
+    <string name="search_source_transcript">Transcript</string>
+    <string name="search_source_title">Title</string>
+    <string name="search_source_tag">Tag</string>
+    <string name="search_source_folder">Folder</string>
+    <string name="search_related">Related</string>
+    <string name="search_page_preview">Preview of page %1$d</string>
+    <string name="search_recent_title">Recent searches</string>
+    <string name="search_recent_clear">Clear</string>
+    <string name="search_recent_remove">Remove %1$s from recent searches</string>
+    <string name="search_empty_title">Search everything you have written</string>
+    <string name="search_empty_body">Handwriting, typed notes, PDFs, scanned pages, titles and transcripts. Everything is searched on this device and works offline.</string>
+    <string name="search_no_results_title">No matches for “%1$s”</string>
+    <string name="search_no_results_body">Check the spelling or try fewer or shorter words.</string>
+    <string name="search_no_results_filtered">Nothing in this category.</string>
+    <string name="search_show_all_types">Search all types</string>
+    <plurals name="search_pending_pages">
+        <item quantity="one">%d page is still being read. New handwriting becomes searchable a few seconds after you stop writing.</item>
+        <item quantity="other">%d pages are still being read. New handwriting becomes searchable a few seconds after you stop writing.</item>
+    </plurals>
+    <string name="search_failed">Search could not run. Please try again.</string>
+    <string name="search_retry">Try again</string>
+    <string name="search_document_missing">That document is no longer in your library.</string>
+</resources>

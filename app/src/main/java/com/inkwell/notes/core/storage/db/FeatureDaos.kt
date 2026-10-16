@@ -90,6 +90,20 @@ data class TextMatchRow(
     val bounds: String?,
 )
 
+/** Full-text match with the index of its page (null for transcripts, typed text and titles). */
+data class TextSearchRow(
+    val rowId: Long,
+    val documentId: String,
+    val pageId: String?,
+    val recordingId: String?,
+    val source: String,
+    val text: String,
+    val confidence: Float?,
+    val timestampMs: Long?,
+    val bounds: String?,
+    val pageIndex: Int?,
+)
+
 @Dao
 interface TextIndexDao {
     @Query(
@@ -122,6 +136,88 @@ interface TextIndexDao {
         deleteFor(docId, pageId, source)
         return insertAll(rows)
     }
+
+    // ---- ocr/search additions
+
+    /** Full-text matches with their page index, most recently edited documents first, excluding the trash. */
+    @Query(
+        """SELECT t.rowId AS rowId, t.documentId AS documentId, t.pageId AS pageId, t.recordingId AS recordingId,
+                  t.source AS source, t.text AS text, t.confidence AS confidence, t.timestampMs AS timestampMs,
+                  t.bounds AS bounds, p.pageIndex AS pageIndex
+           FROM text_index t
+           JOIN documents d ON d.id = t.documentId
+           LEFT JOIN pages p ON p.id = t.pageId
+           WHERE t.rowId IN (SELECT rowid FROM text_index_fts WHERE text_index_fts MATCH :ftsQuery)
+             AND d.trashedAt IS NULL
+           ORDER BY d.modifiedAt DESC, t.rowId
+           LIMIT :limit"""
+    )
+    suspend fun searchLive(ftsQuery: String, limit: Int): List<TextSearchRow>
+
+    /** Substring fallback when a MATCH expression is rejected; [needle] is LIKE-escaped with '\'. */
+    @Query(
+        """SELECT t.rowId AS rowId, t.documentId AS documentId, t.pageId AS pageId, t.recordingId AS recordingId,
+                  t.source AS source, t.text AS text, t.confidence AS confidence, t.timestampMs AS timestampMs,
+                  t.bounds AS bounds, p.pageIndex AS pageIndex
+           FROM text_index t
+           JOIN documents d ON d.id = t.documentId
+           LEFT JOIN pages p ON p.id = t.pageId
+           WHERE t.text LIKE '%' || :needle || '%' ESCAPE '\' AND d.trashedAt IS NULL
+           ORDER BY d.modifiedAt DESC, t.rowId
+           LIMIT :limit"""
+    )
+    suspend fun searchLiveLike(needle: String, limit: Int): List<TextSearchRow>
+
+    /** Rows by id with their page index (semantic search results). */
+    @Query(
+        """SELECT t.rowId AS rowId, t.documentId AS documentId, t.pageId AS pageId, t.recordingId AS recordingId,
+                  t.source AS source, t.text AS text, t.confidence AS confidence, t.timestampMs AS timestampMs,
+                  t.bounds AS bounds, p.pageIndex AS pageIndex
+           FROM text_index t
+           JOIN documents d ON d.id = t.documentId
+           LEFT JOIN pages p ON p.id = t.pageId
+           WHERE t.rowId IN (:rowIds) AND d.trashedAt IS NULL"""
+    )
+    suspend fun liveRowsByIds(rowIds: List<Long>): List<TextSearchRow>
+
+    /** Last time [source] text of a document was written (null = never). */
+    @Query("SELECT MAX(updatedAt) FROM text_index WHERE documentId = :docId AND source = :source")
+    suspend fun lastUpdated(docId: String, source: String): Long?
+
+    /** Content rows of [model] that have no embedding yet, oldest first. */
+    @Query(
+        """SELECT * FROM text_index
+           WHERE source NOT IN ('TITLE', 'TAG', 'FOLDER') AND length(text) >= 3
+             AND documentId IN (SELECT id FROM documents WHERE trashedAt IS NULL)
+             AND rowId NOT IN (SELECT textRowId FROM embeddings WHERE model = :model)
+           ORDER BY rowId LIMIT :limit"""
+    )
+    suspend fun withoutEmbedding(model: String, limit: Int): List<TextIndexEntity>
+
+    /** Ids of documents (not in the trash) whose title is not indexed yet. */
+    @Query(
+        """SELECT id FROM documents WHERE trashedAt IS NULL
+           AND id NOT IN (SELECT documentId FROM text_index WHERE source = 'TITLE')"""
+    )
+    suspend fun documentsMissingTitle(): List<String>
+
+    /** Removes rows of documents, pages and recordings that no longer exist. */
+    @Query(
+        """DELETE FROM text_index WHERE documentId NOT IN (SELECT id FROM documents)
+           OR (recordingId IS NOT NULL AND recordingId NOT IN (SELECT id FROM recordings))
+           OR (pageId IS NOT NULL AND pageId != 'typed' AND pageId NOT IN (SELECT id FROM pages))"""
+    )
+    suspend fun deleteOrphans(): Int
+
+    @Query("SELECT COUNT(*) FROM text_index")
+    suspend fun count(): Int
+
+    /** Pages (of documents not in the trash) that were never indexed, e.g. imported without a modification time. */
+    @Query(
+        """SELECT p.* FROM pages p JOIN documents d ON d.id = p.documentId
+           WHERE p.indexedAt = 0 AND d.trashedAt IS NULL ORDER BY p.modifiedAt DESC LIMIT :limit"""
+    )
+    suspend fun pagesNeverIndexed(limit: Int): List<PageEntity>
 }
 
 @Dao
@@ -137,6 +233,25 @@ interface EmbeddingDao {
 
     @Query("SELECT textRowId FROM embeddings WHERE model = :model")
     suspend fun embeddedRowIds(model: String): List<Long>
+
+    // ---- ocr/search additions
+
+    /** One page of [model]'s vectors after [afterRowId], for streaming similarity search. */
+    @Query("SELECT * FROM embeddings WHERE model = :model AND rowId > :afterRowId ORDER BY rowId LIMIT :limit")
+    suspend fun page(model: String, afterRowId: Long, limit: Int): List<EmbeddingEntity>
+
+    @Query("SELECT * FROM embeddings WHERE model = :model AND documentId = :docId")
+    suspend fun forDocument(model: String, docId: String): List<EmbeddingEntity>
+
+    /** Drops vectors of a document's text rows that were replaced or removed. */
+    @Query(
+        """DELETE FROM embeddings WHERE documentId = :docId
+           AND textRowId NOT IN (SELECT rowId FROM text_index WHERE documentId = :docId)"""
+    )
+    suspend fun deleteStaleForDocument(docId: String)
+
+    @Query("DELETE FROM embeddings WHERE textRowId NOT IN (SELECT rowId FROM text_index)")
+    suspend fun deleteOrphans(): Int
 }
 
 /** Monthly/total usage aggregates. */
