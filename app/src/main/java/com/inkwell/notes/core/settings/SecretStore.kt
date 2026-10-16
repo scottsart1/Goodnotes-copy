@@ -8,6 +8,7 @@ import android.util.Log
 import java.security.KeyStore
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
+import javax.crypto.AEADBadTagException
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 
@@ -39,15 +40,28 @@ class SecretStore(context: Context) {
         val stored = prefs.getString(name, null) ?: return null
         return try {
             val blob = Base64.decode(stored, Base64.NO_WRAP)
+            if (blob.size < IV_BYTES) throw IllegalArgumentException("blob too short")
             val iv = blob.copyOfRange(0, IV_BYTES)
             val ct = blob.copyOfRange(IV_BYTES, blob.size)
             val cipher = Cipher.getInstance(TRANSFORMATION)
             cipher.init(Cipher.DECRYPT_MODE, key(), GCMParameterSpec(128, iv))
             cipher.doFinal(ct).decodeToString()
-        } catch (e: Exception) {
-            // Key invalidated (e.g. device credential reset). Do not log the value.
+        } catch (e: AEADBadTagException) {
+            // Encrypted with a key that no longer exists (Keystore wiped, e.g. device credential
+            // reset): the value is unrecoverable. Do not log the value.
             Log.w(TAG, "Secret '$name' could not be decrypted; clearing it")
             prefs.edit().remove(name).apply()
+            null
+        } catch (e: IllegalArgumentException) {
+            // Malformed ciphertext: unrecoverable.
+            Log.w(TAG, "Secret '$name' is malformed; clearing it")
+            prefs.edit().remove(name).apply()
+            null
+        } catch (e: Exception) {
+            // Keystore hiccups (KeyStoreException, ProviderException, UnrecoverableKeyException
+            // while the device is locked...) are transient: keep the ciphertext for the next call
+            // instead of silently deleting the user's API key or vault password.
+            Log.w(TAG, "Secret '$name' temporarily unavailable: ${e.javaClass.simpleName}")
             null
         }
     }

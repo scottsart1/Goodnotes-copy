@@ -32,6 +32,20 @@ class TitleRulesTest {
         assertEquals("20261015_Genetics", TitleRules.auto(created, "Genetics", listOf("20261014_Genetics"), zone))
     }
 
+    @Test fun autoNameKeepsThePrefixTheDocumentAlreadyShows() {
+        // Created 23:30 New York time on 15 Oct; the device is now set to London where that instant is 16 Oct.
+        val lateEvening = LocalDateTime.of(2026, 10, 15, 23, 30).atZone(ZoneId.of("America/New_York")).toInstant().toEpochMilli()
+        assertEquals("20261016_Physics", TitleRules.auto(lateEvening, "Physics", emptyList(), zone))
+        assertEquals("20261015_Physics", TitleRules.auto(lateEvening, "Physics", emptyList(), zone, currentTitle = "20261015_Untitled"))
+        assertEquals("20261015_Physics", TitleRules.auto(lateEvening, "Physics", emptyList(), zone, currentTitle = "20261015_Untitled (3)"))
+        assertEquals("20261015_Physics (2)", TitleRules.auto(lateEvening, "Physics", listOf("20261015_physics"), zone, currentTitle = "20261015_Untitled"))
+        // A title without the convention (imported or manual) gets the prefix from the creation time.
+        assertEquals("20261016_Physics", TitleRules.auto(lateEvening, "Physics", emptyList(), zone, currentTitle = "Lecture slides"))
+        assertEquals("20261015", DateNaming.prefixOf("20261015_Untitled"))
+        assertNull(DateNaming.prefixOf("2026101_Untitled"))
+        assertNull(DateNaming.prefixOf("Untitled"))
+    }
+
     @Test fun unusableTopicsAreRejected() {
         assertNull(TitleRules.auto(created, "Notes", emptyList(), zone))
         assertNull(TitleRules.auto(created, "  \"\"  ", emptyList(), zone))
