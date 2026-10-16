@@ -183,4 +183,23 @@ class ShapeRecognizerTest {
         val tiny = SyntheticInk(1, jitter = 0.05f, wobble = 0.05f).polyline(0f, 0f, 15f, 0f, step = 1f)
         assertNull(recognize(tiny))
     }
+
+    @Test fun sloppyShapesStillRecognised() {
+        // Rounded corners, bowed sides and heavier jitter, as drawn quickly by hand.
+        val ink = SyntheticInk(11, jitter = 1.6f, wobble = 3.5f)
+        val roundRect = ink.smooth(floatArrayOf(
+            30f, 10f, 120f, 6f, 200f, 12f, 214f, 26f, 216f, 70f, 212f, 120f, 198f, 134f, 110f, 138f, 26f, 132f, 12f, 120f, 8f, 70f, 12f, 24f, 32f, 9f, 60f, 8f,
+        ))
+        assertEquals(ShapeKind.RECTANGLE, recognize(roundRect)?.kind)
+        val wobblyCircle = SyntheticInk(12, jitter = 1.5f, wobble = 4f).ellipse(0f, 0f, 90f, 84f, sweepDeg = 375f)
+        assertEquals(ShapeKind.ELLIPSE, recognize(wobblyCircle)?.kind)
+        val tri = SyntheticInk(13, jitter = 1.5f, wobble = 3f).polyline(*SyntheticInk.closed(110f, 0f, 205f, 160f, 5f, 158f), 108f, 4f)
+        assertEquals(ShapeKind.TRIANGLE, recognize(tri)?.kind)
+    }
+
+    @Test fun arrowWithAnOpenVHead() {
+        // Shaft, then one barb out, back along it, and the other barb (no return).
+        val xy = SyntheticInk(14).polyline(0f, 100f, 160f, 20f, 128f, 22f, 160f, 20f, 150f, 50f)
+        assertEquals(ShapeKind.ARROW, recognize(xy)?.kind)
+    }
 }

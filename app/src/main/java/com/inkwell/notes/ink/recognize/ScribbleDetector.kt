@@ -30,6 +30,7 @@ object ScribbleDetector {
     const val MIN_COVERAGE = 0.15f
     /** Items need this fraction of their samples inside the scribble's hull. */
     const val ITEM_INSIDE = 0.5f
+    private const val TOUCH_SAMPLES = 160
 
     class Analysis(
         val reversals: Int,
@@ -107,6 +108,8 @@ object ScribbleDetector {
         val hb = PathOps.bounds(hull)
         val hullArea = PathOps.polygonArea(hull)
         if (hullArea <= 0f) return emptySet()
+        // A bounded copy of the path for the touch tests (scribbles can have many samples).
+        val path = if (PathOps.count(xy) > TOUCH_SAMPLES) PathOps.resample(xy, TOUCH_SAMPLES) else xy
         val out = LinkedHashSet<String>()
         var covered = 0f
         val tmp = Bounds()
@@ -117,7 +120,7 @@ object ScribbleDetector {
             val samples = ItemGeometry.samplePoints(item, content, 64)
             if (samples.isEmpty()) return@query
             if (ItemGeometry.fractionInside(samples, hull, hn) < ITEM_INSIDE) return@query
-            if (!touches(item, xy, scribbleWidth, content)) return@query
+            if (!touches(item, path, scribbleWidth, content)) return@query
             out += Items.id(item)
             val ib = ItemGeometry.bounds(item, tmp, content).copy().intersect(hb)
             covered += ib.width * ib.height

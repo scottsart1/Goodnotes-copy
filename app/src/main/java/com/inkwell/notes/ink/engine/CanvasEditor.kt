@@ -146,10 +146,15 @@ internal class CanvasEditor(private val e: InkEngine) {
             val cfg = config ?: TextConfig(old.fontSizePt, old.color, old.bold, old.italic)
             val pageW = pageWidthOr(i, 0f)
             val maxWidth = if (pageW > 0f) max(old.width, pageW - old.x - 24f).coerceAtLeast(60f) else max(old.width, 520f)
-            val (w, ht) = measureText(text, cfg, maxWidth)
+            // A box the user narrowed (its text wrapped) keeps its width; others grow with the text.
+            val oldCfg = TextConfig(old.fontSizePt, old.color, old.bold, old.italic)
+            val wrapped = old.text.isNotEmpty() && measureText(old.text, oldCfg, maxWidth).first > old.width + 2f
+            val width = if (wrapped) old.width else max(measureText(text, cfg, maxWidth).first, min(old.width, maxWidth))
+            // The height always fits the text.
+            val ht = measureText(text, cfg, width, fixedWidth = width).second
             val updated = old.copy(
                 text = text, fontSizePt = cfg.fontSizePt, color = cfg.color, bold = cfg.bold, italic = cfg.italic,
-                width = max(w, min(old.width, maxWidth)), height = ht,
+                width = width, height = ht,
             )
             if (updated == old) c else ContentOps.replace(c, mapOf(old.id to updated))
         }
@@ -285,11 +290,16 @@ internal class CanvasEditor(private val e: InkEngine) {
         return c
     }
 
+    /** Copies the selection 16pt down and to the right and selects the copy. */
     fun duplicateSelection() {
         e.flushTools()
-        val sel = buildSelection() ?: return
-        val b = sel.boundsPage
-        insertItems(sel.pageIndex, sel.content, PointF(b.centerX() + DUPLICATE_OFFSET, b.centerY() + DUPLICATE_OFFSET), select = true)
+        val i = selectionPage()
+        val h = e.page(i) ?: return
+        if (!h.isLoaded) return
+        val ids = e.selectedIds
+        val fragment = SelectionClipboard.copy(h.content, ids) ?: return
+        val b = SelectionClipboard.boundsOf(ContentOps.fragment(h.content, ids), h.content) ?: return
+        insertItems(i, fragment, PointF(b.centerX + DUPLICATE_OFFSET, b.centerY + DUPLICATE_OFFSET), select = true)
     }
 
     fun recolorSelection(color: Int) { editSelection("Recolor") { c, ids -> ContentOps.mapItems(c, ids) { Items.recolor(it, color) } } }

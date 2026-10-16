@@ -536,6 +536,8 @@ internal class InkEngine(val view: InkCanvasView) : ToolHost, CommandTarget, Ren
 
     override fun commitNewItems(pageIndex: Int, items: List<Any>, label: String, select: Boolean) {
         if (items.isEmpty()) return
+        // Pending keyboard nudges become their own undo step first.
+        keys.flush()
         val h = page(pageIndex) ?: return
         when (h.state) {
             LoadState.FAILED -> { showMessage(R.string.ink_page_not_editable); return }
@@ -579,6 +581,7 @@ internal class InkEngine(val view: InkCanvasView) : ToolHost, CommandTarget, Ren
     }
 
     override fun applyEdit(pageIndex: Int, label: String, transform: (PageContent) -> PageContent): Boolean {
+        keys.flush()
         val h = page(pageIndex) ?: return false
         if (!h.isLoaded) return false
         val before = h.content
@@ -595,7 +598,10 @@ internal class InkEngine(val view: InkCanvasView) : ToolHost, CommandTarget, Ren
         return true
     }
 
-    override fun beginEdit(label: String): EditSession = Session(label)
+    override fun beginEdit(label: String): EditSession {
+        keys.flush()
+        return Session(label)
+    }
 
     private inner class Session(private val label: String) : EditSession {
         private val before = LinkedHashMap<String, PageContent>()
@@ -641,6 +647,7 @@ internal class InkEngine(val view: InkCanvasView) : ToolHost, CommandTarget, Ren
     }
 
     override fun pushCommand(command: InkCommand) {
+        keys.flush()
         history.push(command)
         for (id in command.pageIds) byId[id]?.let { notifyContentChanged(it) }
         notifyUndoRedo()

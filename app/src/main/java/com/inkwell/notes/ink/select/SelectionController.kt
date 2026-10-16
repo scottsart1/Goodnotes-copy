@@ -317,8 +317,14 @@ internal class SelectionController(private val e: InkEngine) {
             if (r.dx != 0f || r.dy != 0f) t = t.then(Affine.translate(r.dx, r.dy))
             mm.guides = r.guides
         }
-        mm.transform = t
         mm.target = if (mm.handle == Handle.BODY && !e.layout.isInfinite) targetPage(mm, t) else -1
+        if (mm.handle == Handle.BODY && !e.layout.isInfinite && mm.target < 0) {
+            // Off every page: keep the selection's centre on its own page so nothing gets lost.
+            val cx = t.mapX(mm.visual.centerX, mm.visual.centerY); val cy = t.mapY(mm.visual.centerX, mm.visual.centerY)
+            val ccx = cx.coerceIn(0f, e.layout.pageWidth(mm.pageIndex)); val ccy = cy.coerceIn(0f, e.layout.pageHeight(mm.pageIndex))
+            if (ccx != cx || ccy != cy) t = t.then(Affine.translate(ccx - cx, ccy - cy))
+        }
+        mm.transform = t
         e.invalidateOverlay()
         if (mm.handle == Handle.BODY) autoScroll()
     }
@@ -378,8 +384,7 @@ internal class SelectionController(private val e: InkEngine) {
     }
 
     private fun moveToPage(mm: Manipulation, session: EditSession, baked: List<Any>, target: Int) {
-        val src = e.page(mm.pageIndex) ?: return
-        val tgt = e.page(target) ?: return
+        val tgt = e.page(target) ?: run { session.cancel(); return }
         val toTarget = docAffine(mm.pageIndex).then(docAffine(target).inverse() ?: run { session.cancel(); return })
         val moving = mm.ids
         // Connectors whose ends all move go along; the others keep a free end where the item was.
@@ -394,14 +399,15 @@ internal class SelectionController(private val e: InkEngine) {
         val srcFinal = ContentOps.replace(ContentOps.remove(mm.before, removeIds), detached)
         val tgtFinal = ContentOps.add(tgt.content, moved)
         val srcChanged = mm.boundsPage.copy()
-        for (c in stay) srcChanged.union(ItemGeometry.bounds(c, tmpBounds, mm.before))
+        for (c in mm.attached) srcChanged.union(ItemGeometry.bounds(c, tmpBounds, mm.before))
         val tgtChanged = Bounds()
         for (item in moved) tgtChanged.union(ItemGeometry.bounds(item, tmpBounds, tgtFinal))
-        session.update(mm.pageIndex, srcFinal, srcChanged)
+        // Target first and the selection with it, so the selection never points at missing items.
         session.update(target, tgtFinal, tgtChanged)
+        e.setSelection(target, moved.mapTo(LinkedHashSet()) { Items.id(it) })
+        session.update(mm.pageIndex, srcFinal, srcChanged)
         e.render.addPending(tgt, moved)
         session.commit()
-        if (src.id != tgt.id) e.setSelection(target, moved.mapTo(LinkedHashSet()) { Items.id(it) })
     }
 
     private fun isNoOp(t: Affine): Boolean =

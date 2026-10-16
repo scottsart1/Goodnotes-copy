@@ -485,7 +485,7 @@ class PenTool(override val type: ToolType) : InkTool {
         const val LOOP_HOLD_MS = 380L
         /** Movement below this (dp) still counts as holding still. */
         const val HOLD_SLOP_DP = 4f
-        const val MIN_LINE_DP = 24f
+        const val MIN_LINE_DP = 32f
         const val MIN_SHAPE_DP = 36f
         const val MIN_AUTO_SHAPE_DP = 48f
         const val MIN_LOOP_DP = 28f
