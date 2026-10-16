@@ -73,25 +73,33 @@ internal class SearchEngine(private val graph: AppGraph, private val semantic: S
         SearchOutcome(hits, used, failed)
     }
 
+    /**
+     * Full-text rows for [tokens]: the union of every case variant of the MATCH expression (the
+     * simple tokenizer folds ASCII only, see [FtsQuery.variants]), each row once.
+     */
     private suspend fun keywordRows(tokens: List<String>, raw: String, limit: Int): List<TextSearchRow> {
-        val match = FtsQuery.build(tokens) ?: return emptyList()
+        val expressions = FtsQuery.variants(tokens)
+        if (expressions.isEmpty()) return emptyList()
         val dao = graph.db.textIndex()
-        return try {
-            dao.searchLive(match, limit)
+        val rows = LinkedHashMap<Long, TextSearchRow>()
+        try {
+            for (match in expressions) {
+                for (r in dao.searchLive(match, limit)) rows.putIfAbsent(r.rowId, r)
+            }
         } catch (c: CancellationException) {
             throw c
         } catch (e: Exception) {
             // A MATCH expression the SQLite build rejects: fall back to a plain substring scan.
             Log.w(TAG, "Full-text query rejected, using substring search: ${e.javaClass.simpleName}")
             try {
-                dao.searchLiveLike(FtsQuery.escapeLike(raw), limit)
+                for (r in dao.searchLiveLike(FtsQuery.escapeLike(raw), limit)) rows.putIfAbsent(r.rowId, r)
             } catch (c: CancellationException) {
                 throw c
             } catch (e2: Exception) {
                 Log.w(TAG, "Substring search failed: ${e2.javaClass.simpleName}")
-                emptyList()
             }
         }
+        return rows.values.toList()
     }
 
     private suspend fun semanticCandidates(raw: String, docs: Map<String, DocInfo>): List<Candidate> {

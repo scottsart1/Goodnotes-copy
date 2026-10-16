@@ -251,7 +251,8 @@ internal class DocumentAssembler(
             }
             val kept = entries.filter { it.pageId in pageMap }
             val ids = kept.associate { it.id to UUID.randomUUID().toString() }
-            for (e in kept) {
+            // The library keeps a parent reference only when the parent already exists.
+            for (e in parentsFirst(kept)) {
                 library.upsertOutlineEntry(
                     OutlineEntry(
                         id = ids.getValue(e.id),
@@ -286,6 +287,24 @@ internal class DocumentAssembler(
     companion object {
         private const val TAG = "PdfAssemble"
         private const val OUTLINE_GROUP_STRIDE = 100_000
+
+        /**
+         * [entries] with every parent before its children (otherwise in the given order), so
+         * nested outline entries keep their nesting when they are inserted one by one. Entries
+         * whose parent is not among [entries], or that sit in a cycle, are treated as roots.
+         */
+        fun parentsFirst(entries: List<OutlineEntry>): List<OutlineEntry> {
+            val byId = entries.associateBy { it.id }
+            val out = ArrayList<OutlineEntry>(entries.size)
+            val done = HashSet<String>()
+            fun visit(e: OutlineEntry) {
+                if (!done.add(e.id)) return
+                e.parentId?.let { byId[it] }?.let { visit(it) }
+                out += e
+            }
+            for (e in entries) visit(e)
+            return out
+        }
 
         fun sizeOf(page: PageMeta): Pair<Float, Float> =
             if (page.widthPt > 0f && page.heightPt > 0f) page.widthPt to page.heightPt

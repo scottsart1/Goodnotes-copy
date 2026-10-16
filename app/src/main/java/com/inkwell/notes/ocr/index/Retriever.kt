@@ -2,6 +2,7 @@ package com.inkwell.notes.ocr.index
 
 import android.util.Log
 import com.inkwell.notes.app.AppGraph
+import com.inkwell.notes.core.storage.db.TextSearchRow
 import com.inkwell.notes.ocr.IndexedPassage
 import com.inkwell.notes.ocr.text.Chunk
 import com.inkwell.notes.ocr.text.Chunker
@@ -41,16 +42,21 @@ internal class Retriever(
         if (terms.isEmpty()) return emptyList()
         val counts = HashMap<String, Int>()
         for (t in terms.take(MAX_TERMS)) {
-            val match = FtsQuery.build(listOf(t)) ?: continue
-            val rows = try {
-                graph.db.textIndex().searchLive(match, PER_TERM_ROWS)
-            } catch (c: CancellationException) {
-                throw c
-            } catch (e: Exception) {
-                emptyList()
+            // The terms are fully lower-cased for in-memory matching; the index folds ASCII
+            // only, so every case variant of a non-ASCII term is queried.
+            val rows = ArrayList<TextSearchRow>()
+            for (match in FtsQuery.variants(listOf(t))) {
+                try {
+                    rows += graph.db.textIndex().searchLive(match, PER_TERM_ROWS)
+                } catch (c: CancellationException) {
+                    throw c
+                } catch (e: Exception) {
+                    break
+                }
             }
             // Documents matching more of the question's words rank first; repeats count a little.
-            rows.groupingBy { it.documentId }.eachCount().forEach { (d, n) -> counts[d] = (counts[d] ?: 0) + minOf(n, 5) }
+            rows.distinctBy { it.rowId }.groupingBy { it.documentId }.eachCount()
+                .forEach { (d, n) -> counts[d] = (counts[d] ?: 0) + minOf(n, 5) }
         }
         return counts.entries.sortedByDescending { it.value }.take(MAX_DOCS).map { it.key }
     }

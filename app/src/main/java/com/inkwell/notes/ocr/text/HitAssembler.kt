@@ -26,7 +26,8 @@ data class Candidate(
         }
 
         fun titleKey(documentId: String) = "title:$documentId"
-        fun tagKey(documentId: String, tag: String) = "tag:$documentId:${tag.trim().lowercase()}"
+        /** Indexed tags are normalised by [IndexText], so the live tag is normalised the same way. */
+        fun tagKey(documentId: String, tag: String) = "tag:$documentId:${IndexText.normalize(tag).trim().lowercase()}"
         fun folderKey(documentId: String) = "folder:$documentId"
     }
 }

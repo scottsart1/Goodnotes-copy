@@ -26,8 +26,14 @@ object TextMatch {
         while (i < n) {
             if (!FtsQuery.isTermChar(text[i])) { i++; continue }
             val start = i
-            while (i < n && FtsQuery.isTermChar(text[i])) i++
-            out += WordSpan(start, i, text.substring(start, i).lowercase())
+            var transparent = false
+            while (i < n && (FtsQuery.isTermChar(text[i]) || FtsQuery.isTransparent(text[i]))) {
+                if (FtsQuery.isTransparent(text[i])) transparent = true
+                i++
+            }
+            // Invisible format characters (soft hyphens, joiners) are not part of the word, like in queries.
+            val raw = text.substring(start, i)
+            out += WordSpan(start, i, (if (transparent) raw.filterNot { FtsQuery.isTransparent(it) } else raw).lowercase())
         }
         return out
     }

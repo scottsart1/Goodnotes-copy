@@ -195,7 +195,7 @@ object Chunker {
     /** [c] cut to [maxChars] at a word boundary. */
     fun truncated(c: Chunk, maxChars: Int): Chunk {
         if (c.text.length <= maxChars) return c
-        val cut = c.text.lastIndexOf(' ', maxChars).takeIf { it > maxChars / 2 } ?: maxChars
+        val cut = c.text.lastIndexOf(' ', maxChars).takeIf { it > maxChars / 2 } ?: IndexText.safeCut(c.text, maxChars)
         val text = c.text.substring(0, cut).trimEnd()
         return c.copy(parts = listOf(c.parts.first().copy(text = text)))
     }

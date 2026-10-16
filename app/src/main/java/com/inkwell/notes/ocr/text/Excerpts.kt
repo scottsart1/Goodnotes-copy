@@ -33,6 +33,9 @@ object Excerpts {
         var end = (start + maxLength).coerceAtMost(len)
         if (end < len) end = snapBackward(clean, end, mEnd)
         if (end < mEnd) end = mEnd.coerceAtMost(len)
+        // Never cut through an emoji (surrogate pair) at either edge.
+        start = IndexText.safeCut(clean, start)
+        if (IndexText.safeCut(clean, end) != end) end++
 
         val prefix = if (start > 0) ELLIPSIS else ""
         val suffix = if (end < len) ELLIPSIS else ""
@@ -49,7 +52,7 @@ object Excerpts {
     /** The opening of [clean] when nothing matched. */
     private fun head(clean: String, maxLength: Int): Excerpt {
         if (clean.length <= maxLength) return Excerpt(clean, -1, -1)
-        val end = snapBackward(clean, maxLength, 0)
+        val end = IndexText.safeCut(clean, snapBackward(clean, maxLength, 0))
         return Excerpt(clean.substring(0, end).trimEnd() + ELLIPSIS, -1, -1)
     }
 
