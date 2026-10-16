@@ -23,8 +23,6 @@ class EraserTool : InkTool {
     private var config = EraserConfig()
     private val engine = EraserEngine { UUID.randomUUID().toString() }
     private val changed = Bounds()
-    private val ring = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE }
-    private val fill = Paint(Paint.ANTI_ALIAS_FLAG)
 
     override val isActive: Boolean get() = session != null
 

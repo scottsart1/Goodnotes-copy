@@ -3,7 +3,6 @@ package com.inkwell.notes.ink.render
 import com.inkwell.notes.core.model.InkPoints
 import com.inkwell.notes.core.model.PenType
 import com.inkwell.notes.ink.geometry.Geo
-import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.sqrt
 
@@ -177,7 +176,5 @@ class StrokeGeometry {
         const val SPLIT_ANGLE = 0.87f
         /** Accumulated turn within one run before splitting (~120 degrees). */
         const val SPLIT_ACCUMULATED = 2.1f
-
-        fun absf(v: Float) = abs(v)
     }
 }

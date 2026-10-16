@@ -81,7 +81,8 @@ object HandwritingLayout {
 
     /**
      * Moves (stroke id -> dx, dy) that re-wrap the words into lines of [width] starting at
-     * ([left], first line's position). Null when nothing would move.
+     * [left]; the first line keeps its vertical position (clamped to at least [top]). Null when
+     * nothing would move.
      */
     fun reflow(strokes: List<Stroke>, left: Float, top: Float, width: Float): Map<String, Pair<Float, Float>>? {
         val ls = lines(words(strokes))
@@ -96,7 +97,7 @@ object HandwritingLayout {
         val centers = ls.map { l -> l.map { it.bounds.centerY }.average().toFloat() }
         val spacings = (1 until centers.size).map { centers[it] - centers[it - 1] }.filter { it > h * 0.8f }.sorted()
         val lineHeight = if (spacings.isEmpty()) h * 1.6f else spacings[spacings.size / 2]
-        var y = centers[0]
+        var y = maxOf(centers[0], top + h / 2f)
         var x = left
         val out = HashMap<String, Pair<Float, Float>>()
         var moved = false
@@ -107,7 +108,6 @@ object HandwritingLayout {
             for (id in w.ids) out[id] = dx to dy
             x += w.bounds.width + gap
         }
-        @Suppress("UNUSED_VARIABLE") val unusedTop = top
         return if (moved) out else null
     }
 

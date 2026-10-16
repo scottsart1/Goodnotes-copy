@@ -9,7 +9,6 @@ import android.text.StaticLayout
 import android.text.TextPaint
 import android.util.Log
 import com.inkwell.notes.core.model.ImageItem
-import com.inkwell.notes.core.model.InkPoints
 import com.inkwell.notes.core.model.PageContent
 import com.inkwell.notes.core.model.PenType
 import com.inkwell.notes.core.model.StickyItem
@@ -67,8 +66,11 @@ internal class CanvasEditor(private val e: InkEngine) {
         val zs = items.map { Items.z(it) }.distinct().sorted()
         val base = e.nextZ(i)
         val zMap = zs.withIndex().associate { (k, z) -> z to base + k }
+        // Inserted while recording: the copies belong to "now" on the recording's timeline.
+        val anchor = e.audioAnchor()
         val out = items.map { item ->
             var x = Items.withId(item, idMap.getValue(Items.id(item)))
+            if (anchor != null) x = Items.withAudio(x, anchor)
             x = Items.translate(x, dx, dy)
             x = Items.withZ(x, zMap.getValue(Items.z(item)))
             Items.groupId(item)?.let { g -> x = Items.withGroup(x, groupMap.getOrPut(g) { e.newId() }) }
@@ -413,6 +415,5 @@ internal class CanvasEditor(private val e: InkEngine) {
         private const val TAG = "InkEditor"
         private const val DUPLICATE_OFFSET = 16f
         private const val TEXT_MARGIN = 48f
-        @Suppress("unused") private val unusedPoints = InkPoints.STRIDE
     }
 }

@@ -45,9 +45,11 @@ internal interface RenderHost {
  * Rendering happens on [TileWorker]; this class only schedules and draws. Main thread only.
  */
 internal class RenderManager(private val host: RenderHost, scope: CoroutineScope) {
-    val images = ImageCache(scope, maxBytes = 96 * 1024 * 1024)
+    val images = ImageCache(scope, maxBytes = 64 * 1024 * 1024)
     val backgrounds = BackgroundCache(scope)
-    private val worker = TileWorker(images)
+    private var workerRef: TileWorker? = null
+    private val worker: TileWorker
+        get() = workerRef ?: TileWorker(images).also { workerRef = it }
 
     val tileSize = 512
 
@@ -103,7 +105,10 @@ internal class RenderManager(private val host: RenderHost, scope: CoroutineScope
 
     private fun startLevel(pt: PageTiles, s: Float) {
         val cur = pt.level
-        if (cur != null && cur.tiles.values.any { it.bitmap != null }) {
+        val curCount = cur?.tiles?.values?.count { it.bitmap != null } ?: 0
+        val prevCount = pt.prev?.tiles?.values?.count { it.bitmap != null } ?: 0
+        // Keep whichever level covers more as the fallback while the new level renders.
+        if (cur != null && curCount > 0 && curCount >= prevCount / 2) {
             pt.prev = cur; pt.prevScale = pt.levelScale
         }
         pt.level = TileBook()
@@ -485,7 +490,7 @@ internal class RenderManager(private val host: RenderHost, scope: CoroutineScope
     fun retainPages(keep: Set<String>) {
         pages.keys.retainAll(keep)
         backgrounds.retain(keep)
-        worker.forgetPages(keep)
+        workerRef?.forgetPages(keep)
         pending.removeAll { it.pageId !in keep }
     }
 
@@ -506,7 +511,7 @@ internal class RenderManager(private val host: RenderHost, scope: CoroutineScope
         }
         backgrounds.retain(keep)
         images.trimToHalf()
-        worker.trimMemory()
+        workerRef?.trimMemory()
     }
 
     fun clear() {
@@ -517,10 +522,27 @@ internal class RenderManager(private val host: RenderHost, scope: CoroutineScope
         levelScale = 0f
     }
 
+    /**
+     * Stops the worker thread while the view is detached (a new one starts on demand). Jobs in
+     * flight are abandoned, so their tiles are marked renderable again.
+     */
+    fun pause() {
+        val w = workerRef ?: return
+        workerRef = null
+        w.quit()
+        inFlight = 0
+        for (pt in pages.values) {
+            pt.snapshotInFlight = false
+            pt.level?.tiles?.values?.forEach { it.inFlight = false }
+            pt.prev?.tiles?.values?.forEach { it.inFlight = false }
+        }
+    }
+
     fun release() {
         released = true
         clear()
-        worker.quit()
+        workerRef?.quit()
+        workerRef = null
     }
 
     companion object {

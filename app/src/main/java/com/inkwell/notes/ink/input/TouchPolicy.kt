@@ -33,10 +33,10 @@ class TouchPolicy {
         else -> FingerPermission.NONE
     }
 
+    /** Stylus-only ink blocks finger drawing; finger selection stays available. */
     fun fingerRole(): FingerRole = when {
-        prefs.stylusOnlyInk -> FingerRole.NAVIGATE
-        prefs.fingerAction == FingerAction.DRAW -> FingerRole.INK
         prefs.fingerAction == FingerAction.SELECT -> FingerRole.SELECT
+        prefs.fingerAction == FingerAction.DRAW && !prefs.stylusOnlyInk -> FingerRole.INK
         else -> FingerRole.NAVIGATE
     }
 

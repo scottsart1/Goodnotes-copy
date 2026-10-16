@@ -2,7 +2,6 @@ package com.inkwell.notes.ink.tools
 
 import android.graphics.Canvas
 import android.graphics.Matrix
-import android.graphics.Paint
 import android.graphics.RectF
 import com.inkwell.notes.core.model.ConnectorItem
 import com.inkwell.notes.core.model.ImageItem
@@ -266,7 +265,4 @@ class ToolRegistry(stickies: StickyHost) {
     operator fun get(type: ToolType): InkTool = tools[type] ?: tools.getValue(ToolType.PEN)
 
     val all: Collection<InkTool> get() = tools.values
-
-    @Suppress("unused")
-    private val keepPaint = Paint()
 }

@@ -215,6 +215,7 @@ internal class InkEngine(val view: InkCanvasView) : ToolHost, CommandTarget, Ren
         flushTools()
         // Keep the SurfaceView child; only its renderer goes (re-created on the next attach).
         front?.detach(view, removeView = false)
+        render.pause()
     }
 
     /** Creates or removes the low-latency layer to match the preference. */
@@ -299,11 +300,16 @@ internal class InkEngine(val view: InkCanvasView) : ToolHost, CommandTarget, Ren
     }
 
     private val affine = FloatArray(6)
+    private val matrixValues = FloatArray(9).also { it[8] = 1f }
 
     override fun pageMatrix(pageIndex: Int, out: Matrix) {
         if (!layoutIndexValid(pageIndex)) { out.reset(); return }
         viewport.pageToViewAffine(layout, pageIndex, affine)
-        out.setValues(floatArrayOf(affine[0], affine[2], affine[4], affine[1], affine[3], affine[5], 0f, 0f, 1f))
+        val v = matrixValues
+        v[0] = affine[0]; v[1] = affine[2]; v[2] = affine[4]
+        v[3] = affine[1]; v[4] = affine[3]; v[5] = affine[5]
+        v[6] = 0f; v[7] = 0f; v[8] = 1f
+        out.setValues(v)
     }
 
     override fun pageClip(pageIndex: Int, out: RectF): Boolean {
