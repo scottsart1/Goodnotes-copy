@@ -52,6 +52,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.Dp
@@ -74,10 +75,21 @@ import kotlinx.coroutines.withContext
 /**
  * The top-bar Record control: a mic while idle (or while another document records), a live
  * dot with the elapsed time while this board records. Tapping it always goes through
- * [BoardAudio.onRecord], which picks start, controls or "recording elsewhere".
+ * [BoardAudio.onRecord], which picks start, controls or "recording elsewhere". It observes
+ * the recording itself, so only this button recomposes as the time ticks.
  */
 @Composable
-fun BoardRecordButton(control: RecordControl, onClick: () -> Unit, modifier: Modifier = Modifier) {
+fun BoardRecordButton(docId: String, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    val context = LocalContext.current
+    val graph = remember(context) { AppGraph.get(context) }
+    val state = graph.recording.state.collectAsStateWithLifecycle()
+    // Whole seconds: the 20 Hz level updates of the recorder don't recompose anything.
+    val control by remember(docId) { derivedStateOf { RecordLogic.control(state.value, docId) } }
+    RecordButtonContent(control, onClick, modifier)
+}
+
+@Composable
+private fun RecordButtonContent(control: RecordControl, onClick: () -> Unit, modifier: Modifier) {
     if (control !is RecordControl.Here) {
         KitIconButton(Icons.Outlined.Mic, stringResource(R.string.wb_audio_record), onClick, modifier)
         return
@@ -97,6 +109,7 @@ fun BoardRecordButton(control: RecordControl, onClick: () -> Unit, modifier: Mod
     ) {
         Row(
             Modifier
+                .clearAndSetSemantics { } // the button's description already says the time
                 .clip(RoundedCornerShape(50))
                 .background(if (control.paused) c.surfaceAlt else c.record.copy(alpha = if (c.isDark) 0.20f else 0.10f))
                 .padding(horizontal = 10.dp, vertical = 6.dp),

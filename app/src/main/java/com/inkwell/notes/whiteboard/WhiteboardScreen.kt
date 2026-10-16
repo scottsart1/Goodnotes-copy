@@ -43,7 +43,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
-import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -89,7 +88,6 @@ import com.inkwell.notes.whiteboard.kit.RenameDialog
 import com.inkwell.notes.whiteboard.kit.SlimTopBar
 import com.inkwell.notes.whiteboard.kit.UiMessage
 import com.inkwell.notes.whiteboard.logic.BoardAnchors
-import com.inkwell.notes.whiteboard.logic.RecordLogic
 import com.inkwell.notes.whiteboard.ui.AddNotebookPageDialog
 import com.inkwell.notes.whiteboard.ui.BoardRecordButton
 import com.inkwell.notes.whiteboard.ui.BoardRecordingDialogs
@@ -232,8 +230,6 @@ private fun WhiteboardContent(controller: WhiteboardController, nav: AppNavigato
     BackHandler(enabled = panel != null && !exportMode) { panel = null }
 
     val audio = controller.audio
-    val recState = graph.recording.state.collectAsStateWithLifecycle()
-    val recordControl by remember(controller) { derivedStateOf { RecordLogic.control(recState.value, controller.docId) } }
     val phone = LocalConfiguration.current.screenWidthDp < 600
     val density = LocalDensity.current
     MicPermissionEffect(audio)
@@ -259,7 +255,7 @@ private fun WhiteboardContent(controller: WhiteboardController, nav: AppNavigato
                     onBack = nav::back,
                     onTitleClick = { dialog = BoardDialog.RENAME },
                 ) {
-                    BoardRecordButton(recordControl, audio::onRecord)
+                    BoardRecordButton(controller.docId, audio::onRecord)
                     KitIconButton(
                         Icons.Outlined.GraphicEq, stringResource(R.string.wb_audio_recordings), toggleRecordings,
                         selected = panel == SidePanel.RECORDINGS,
