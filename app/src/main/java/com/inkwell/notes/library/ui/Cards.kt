@@ -125,7 +125,7 @@ internal fun DocumentListRow(
             SelectionMark(selected)
             Spacer(Modifier.width(12.dp))
         }
-        DocThumbnail(doc, decor, env.defaultPaper, Modifier.width(44.dp), selected = selected, corner = 6.dp)
+        DocThumbnail(doc, decor, env.defaultPaper, Modifier.width(44.dp), selected = selected, corner = 6.dp, decodeWidthPx = 160)
         Spacer(Modifier.width(14.dp))
         Column(Modifier.weight(1f)) {
             Text(doc.title, style = MaterialTheme.typography.titleSmall, color = c.ink, maxLines = 1, overflow = TextOverflow.Ellipsis)

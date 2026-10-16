@@ -554,10 +554,11 @@ class LibraryViewModel(private val graph: AppGraph, initialFolderId: String?) : 
         val leaveTo: Pair<Boolean, String?> = openFolder?.let { open ->
             n.folderIds.firstOrNull { s.index.isWithin(open, it) }?.let { true to s.index.parentOf(it)?.id }
         } ?: (false to null)
+        // Leave a folder that is about to disappear before it does, so the view never shows it missing.
+        if (leaveTo.first) _events.trySend(LibraryEvent.ShowFolder(leaveTo.second))
         launchSafely(R.string.lib_err_delete) {
             n.documentIds.forEach { graph.library.trashDocument(it) }
             n.folderIds.forEach { graph.library.trashFolder(it) }
-            if (leaveTo.first) _events.send(LibraryEvent.ShowFolder(leaveTo.second))
             message(UiText.Plural(R.plurals.lib_msg_moved_trash, n.size), action = UiText.Res(R.string.lib_undo)) {
                 launchSafely(R.string.lib_err_restore) {
                     n.folderIds.forEach { graph.library.restoreFolder(it) }

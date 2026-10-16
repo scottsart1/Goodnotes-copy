@@ -6,7 +6,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -28,7 +27,6 @@ import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImagePainter
@@ -66,13 +64,13 @@ internal fun DocThumbnail(
     frameAspect: Float = 0.8f,
     selected: Boolean = false,
     corner: Dp = 8.dp,
+    decodeWidthPx: Int = 640,
     overlay: @Composable BoxScope.() -> Unit = {},
 ) {
     val c = Inkwell.colors
     val shape: Shape = androidx.compose.foundation.shape.RoundedCornerShape(corner)
-    BoxWithConstraints(modifier.aspectRatio(frameAspect), contentAlignment = Alignment.BottomCenter) {
-        val density = LocalDensity.current
-        val widthPx = with(density) { maxWidth.roundToPx() }.coerceIn(48, 1200)
+    Box(modifier.aspectRatio(frameAspect), contentAlignment = Alignment.BottomCenter) {
+        val widthPx = decodeWidthPx.coerceIn(48, 1600)
         val path = decor?.thumbnailPath
         val context = LocalContext.current
         val painter = if (path != null) {

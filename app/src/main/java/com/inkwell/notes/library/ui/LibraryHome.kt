@@ -10,7 +10,12 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.only
+import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.safeDrawingPadding
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.DrawerValue
@@ -129,8 +134,8 @@ internal fun LibraryHome(vm: LibraryViewModel, nav: AppNavigator) {
         val key = state.location.key()
         if (key != shownLocation) {
             shownLocation = key
-            runCatching { gridState.scrollToItem(0) }
-            runCatching { listState.scrollToItem(0) }
+            launch { runCatching { gridState.scrollToItem(0) } }
+            launch { runCatching { listState.scrollToItem(0) } }
         }
     }
 
@@ -190,8 +195,8 @@ internal fun LibraryHome(vm: LibraryViewModel, nav: AppNavigator) {
             .fillMaxSize()
             .background(c.ground)
             .onGloballyPositioned { rootOffset = it.positionInRoot() }
-            .focusRequester(rootFocus)
-            .focusable()
+            // Key handling sits above the focus target so it sees events whether the screen
+            // itself or a child (the search field) has focus.
             .onPreviewKeyEvent { e ->
                 if (e.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
                 val ctrl = e.isCtrlPressed || e.isMetaPressed
@@ -218,13 +223,18 @@ internal fun LibraryHome(vm: LibraryViewModel, nav: AppNavigator) {
                     }
                     else -> false
                 }
-            },
+            }
+            .focusRequester(rootFocus)
+            .focusable(),
     ) {
         val windowWidth = maxWidth.value
         val mode = LibraryLayout.railMode(windowWidth)
+        val railInsets = WindowInsets.safeDrawing.only(WindowInsetsSides.Start + WindowInsetsSides.Vertical)
         val pane: @Composable (Modifier, Boolean) -> Unit = { m, menuButton ->
             MainPane(
-                modifier = m,
+                modifier = m.windowInsetsPadding(
+                    WindowInsets.safeDrawing.only(if (mode == RailMode.DRAWER) WindowInsetsSides.Horizontal + WindowInsetsSides.Vertical else WindowInsetsSides.End + WindowInsetsSides.Vertical),
+                ),
                 windowWidth = windowWidth,
                 controller = controller,
                 drag = drag,
@@ -246,7 +256,7 @@ internal fun LibraryHome(vm: LibraryViewModel, nav: AppNavigator) {
         val toggleExpanded: (String) -> Unit = { id -> expanded = if (id in expanded) expanded - id else expanded + id }
         if (mode == RailMode.FULL) {
             Row(Modifier.fillMaxSize()) {
-                LibraryRail(state, storage, controller, drag, expanded, toggleExpanded, Modifier.safeDrawingPadding())
+                LibraryRail(state, storage, controller, drag, expanded, toggleExpanded, Modifier.windowInsetsPadding(railInsets))
                 VerticalDivider(thickness = 1.dp, color = c.outline)
                 pane(Modifier.weight(1f), false)
             }
@@ -254,16 +264,16 @@ internal fun LibraryHome(vm: LibraryViewModel, nav: AppNavigator) {
             ModalNavigationDrawer(
                 drawerState = drawerState,
                 gesturesEnabled = mode == RailMode.DRAWER || drawerState.isOpen,
-                scrimColor = c.ink.copy(alpha = 0.32f),
+                scrimColor = if (c.isDark) c.ground.copy(alpha = 0.6f) else c.ink.copy(alpha = 0.32f),
                 drawerContent = {
                     ModalDrawerSheet(
                         drawerContainerColor = c.ground,
                         drawerShape = RoundedCornerShape(topEnd = 16.dp, bottomEnd = 16.dp),
-                        modifier = Modifier.width(Dimens.railWidth + 16.dp),
+                        modifier = Modifier.width(Dimens.railWidth),
                     ) {
                         LibraryRail(
                             state, storage, controller, drag, expanded, toggleExpanded,
-                            Modifier.safeDrawingPadding(),
+                            Modifier,
                             onNavigated = { scope.launch { drawerState.close() } },
                         )
                     }
@@ -271,7 +281,7 @@ internal fun LibraryHome(vm: LibraryViewModel, nav: AppNavigator) {
             ) {
                 Row(Modifier.fillMaxSize()) {
                     if (mode == RailMode.COMPACT) {
-                        CompactRail(state, controller, drag, { scope.launch { drawerState.open() } }, Modifier.safeDrawingPadding())
+                        CompactRail(state, controller, drag, { scope.launch { drawerState.open() } }, Modifier.windowInsetsPadding(railInsets))
                         VerticalDivider(thickness = 1.dp, color = c.outline)
                     }
                     pane(Modifier.weight(1f), mode == RailMode.DRAWER)
@@ -318,31 +328,27 @@ private fun MainPane(
 ) {
     val vm = controller.vm
     val state = controller.state
-    BoxWithConstraints(modifier.fillMaxHeight().safeDrawingPadding()) {
+    BoxWithConstraints(modifier.fillMaxHeight()) {
         val width = maxWidth.value
         val pad = LibraryLayout.contentPadding(windowWidth)
         val singleRow = LibraryLayout.singleRowTopBar(width)
         val columns = LibraryLayout.gridColumns(width - 2 * (pad - 8f), LibraryLayout.minCardWidth(windowWidth), 8f)
         Column(Modifier.fillMaxSize()) {
-            if (vm.selection.active) {
-                SelectionTopBar(controller, singleRow, pad.dp)
-            } else {
-                LibraryTopBar(
-                    state = state,
-                    controller = controller,
-                    drag = drag,
-                    queryText = vm.queryText,
-                    onQueryChange = vm::setQuery,
-                    onSubmitSearch = { q -> if (q.isNotBlank()) onDeepSearch(q) },
-                    searchFocus = searchFocus,
-                    onSearchFocused = onSearchFocused,
-                    singleRow = singleRow,
-                    showMenuButton = showMenuButton,
-                    onMenu = onMenu,
-                    horizontalPadding = pad.dp,
-                    onNew = onNew,
-                )
-            }
+            LibraryTopBar(
+                state = state,
+                controller = controller,
+                drag = drag,
+                queryText = vm.queryText,
+                onQueryChange = vm::setQuery,
+                onSubmitSearch = { q -> if (q.isNotBlank()) onDeepSearch(q) },
+                searchFocus = searchFocus,
+                onSearchFocused = onSearchFocused,
+                singleRow = singleRow,
+                showMenuButton = showMenuButton,
+                onMenu = onMenu,
+                horizontalPadding = pad.dp,
+                onNew = onNew,
+            )
             if (progress != null) JobProgressBar(progress, vm::cancelJob, pad.dp)
             LibraryContent(
                 state = state,

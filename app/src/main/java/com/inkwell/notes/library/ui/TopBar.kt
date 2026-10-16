@@ -102,7 +102,11 @@ internal fun collectionLabel(c: LibraryCollection): Int = when (c) {
     LibraryCollection.ARCHIVE -> R.string.lib_nav_archive
 }
 
-/** Normal top bar: title or breadcrumb, search, view and sort controls, New. */
+/**
+ * Top bar: title or breadcrumb, search, view and sort controls, New. While items are
+ * selected the first row shows the selection actions instead; on narrow widths the search row
+ * stays in place so the content does not jump when selection starts.
+ */
 @Composable
 internal fun LibraryTopBar(
     state: LibraryUiState,
@@ -123,32 +127,36 @@ internal fun LibraryTopBar(
         SearchField(queryText, onQueryChange, onSubmitSearch, searchFocus, onSearchFocused, m)
     }
     Column(Modifier.fillMaxWidth().padding(horizontal = horizontalPadding)) {
-        Row(
-            Modifier.fillMaxWidth().heightIn(min = 64.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            if (showMenuButton) {
-                LibIconButton(Icons.Outlined.Menu, stringResource(R.string.lib_open_navigation), onMenu)
-                Spacer(Modifier.width(4.dp))
-            }
-            if (state.location is LibraryLocation.InFolder) {
-                val parent = state.currentFolder?.let { state.index.parentOf(it.id) }
-                val parentName = parent?.name ?: stringResource(R.string.lib_nav_library)
-                LibIconButton(Icons.Outlined.ChevronLeft, stringResource(R.string.lib_back_to, parentName), { controller.openFolder(parent?.id) })
-                Spacer(Modifier.width(4.dp))
-            }
-            Breadcrumb(state, controller, drag, Modifier.weight(1f))
-            if (singleRow) {
-                Spacer(Modifier.width(16.dp))
-                search(Modifier.widthIn(min = 220.dp, max = 400.dp).weight(1.4f, fill = false))
+        if (controller.selectionMode) {
+            SelectionRow(controller, singleRow)
+        } else {
+            Row(
+                Modifier.fillMaxWidth().heightIn(min = 64.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                if (showMenuButton) {
+                    LibIconButton(Icons.Outlined.Menu, stringResource(R.string.lib_open_navigation), onMenu)
+                    Spacer(Modifier.width(4.dp))
+                }
+                if (state.location is LibraryLocation.InFolder) {
+                    val parent = state.currentFolder?.let { state.index.parentOf(it.id) }
+                    val parentName = parent?.name ?: stringResource(R.string.lib_nav_library)
+                    LibIconButton(Icons.Outlined.ChevronLeft, stringResource(R.string.lib_back_to, parentName), { controller.openFolder(parent?.id) })
+                    Spacer(Modifier.width(4.dp))
+                }
+                Breadcrumb(state, controller, drag, showTrail = singleRow, modifier = Modifier.weight(1f))
+                if (singleRow) {
+                    Spacer(Modifier.width(16.dp))
+                    search(Modifier.widthIn(min = 220.dp, max = 400.dp).weight(1.4f, fill = false))
+                    Spacer(Modifier.width(8.dp))
+                    ViewToggle(state.view, controller)
+                } else {
+                    ViewToggleCompact(state.view, controller)
+                }
+                if (LibraryFilters.allowsSort(state.location)) SortMenu(state.sort, compact = !singleRow, onSort = controller.vm::setSort)
                 Spacer(Modifier.width(8.dp))
-                ViewToggle(state.view, controller)
-            } else {
-                ViewToggleCompact(state.view, controller)
+                NewButton(compact = !singleRow, onNew = onNew)
             }
-            if (LibraryFilters.allowsSort(state.location)) SortMenu(state.sort, compact = !singleRow, onSort = controller.vm::setSort)
-            Spacer(Modifier.width(8.dp))
-            NewButton(compact = !singleRow, onNew = onNew)
         }
         if (!singleRow) {
             search(Modifier.fillMaxWidth().padding(bottom = 8.dp))
@@ -157,7 +165,7 @@ internal fun LibraryTopBar(
 }
 
 @Composable
-private fun Breadcrumb(state: LibraryUiState, controller: LibraryController, drag: DragDropState, modifier: Modifier) {
+private fun Breadcrumb(state: LibraryUiState, controller: LibraryController, drag: DragDropState, showTrail: Boolean, modifier: Modifier) {
     val c = Inkwell.colors
     val title: String
     val trail: List<Pair<String, DropTarget>>
@@ -172,10 +180,11 @@ private fun Breadcrumb(state: LibraryUiState, controller: LibraryController, dra
         }
         is LibraryLocation.InFolder -> {
             title = state.currentFolder?.name ?: ""
-            val crumbs = state.breadcrumb.dropLast(1)
+            val crumbs = if (showTrail) state.breadcrumb.dropLast(1) else emptyList()
             val shown = if (crumbs.size > 2) crumbs.takeLast(2) else crumbs
-            trail = buildList {
-                add(stringResource(R.string.lib_nav_library) to DropTarget.Root)
+            val libraryLabel = stringResource(R.string.lib_nav_library)
+            trail = if (!showTrail) emptyList() else buildList {
+                add(libraryLabel to DropTarget.Root)
                 if (crumbs.size > 2) add("…" to DropTarget.Root)
                 shown.forEach { add(it.name to DropTarget.IntoFolder(it.id)) }
             }
@@ -198,7 +207,7 @@ private fun Breadcrumb(state: LibraryUiState, controller: LibraryController, dra
                     .clickable(role = Role.Button) {
                         controller.openFolder((target as? DropTarget.IntoFolder)?.folderId)
                     }
-                    .padding(horizontal = 6.dp, vertical = 12.dp),
+                    .padding(horizontal = 6.dp, vertical = 13.dp),
             )
             Text("/", style = MaterialTheme.typography.labelLarge, color = c.outline)
         }
@@ -388,19 +397,15 @@ private fun NewButton(compact: Boolean, onNew: (NewAction) -> Unit) {
     }
 }
 
-/** Top bar while items are selected: count and bulk actions. */
+/** First top-bar row while items are selected: count and bulk actions. */
 @Composable
-internal fun SelectionTopBar(
-    controller: LibraryController,
-    singleRow: Boolean,
-    horizontalPadding: androidx.compose.ui.unit.Dp,
-) {
+private fun SelectionRow(controller: LibraryController, singleRow: Boolean) {
     val c = Inkwell.colors
     val sel = controller.selection
     val docs = sel.hasDocuments
     var overflow by remember { mutableStateOf(false) }
     Row(
-        Modifier.fillMaxWidth().heightIn(min = 64.dp).padding(horizontal = horizontalPadding),
+        Modifier.fillMaxWidth().heightIn(min = 64.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         LibIconButton(Icons.Outlined.Close, stringResource(R.string.lib_clear_selection), controller.vm::clearSelection)
@@ -492,7 +497,7 @@ internal fun JobProgressBar(progress: com.inkwell.notes.library.LibraryJobs.Prog
                 stringResource(R.string.lib_cancel),
                 style = MaterialTheme.typography.labelLarge,
                 color = c.accent,
-                modifier = Modifier.clip(R8).clickable(role = Role.Button, onClick = onCancel).padding(horizontal = 10.dp, vertical = 12.dp),
+                modifier = Modifier.clip(R8).clickable(role = Role.Button, onClick = onCancel).padding(horizontal = 10.dp, vertical = 13.dp),
             )
         }
         if (progress.total > 0) {

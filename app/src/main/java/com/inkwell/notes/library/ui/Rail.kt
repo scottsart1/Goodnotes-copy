@@ -214,25 +214,30 @@ internal fun CompactRail(
 ) {
     val c = Inkwell.colors
     Column(
-        modifier.fillMaxHeight().width(72.dp).background(c.ground).verticalScroll(rememberScrollState()).padding(vertical = 10.dp),
+        modifier.fillMaxHeight().width(72.dp).background(c.ground).padding(vertical = 10.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         LibIconButton(Icons.Outlined.Menu, stringResource(R.string.lib_open_navigation), onOpenDrawer)
         Spacer(Modifier.height(8.dp))
-        for (d in railDestinations) {
-            val target = d.dropTarget()
-            val hovered = target != null && drag.hovered == target
-            Box(
-                Modifier
-                    .clip(R8)
-                    .then(if (hovered) Modifier.border(1.dp, c.accent, R8) else Modifier)
-                    .dropTarget(drag, target),
-            ) {
-                LibIconButton(d.icon, stringResource(d.label), { controller.goTo(d) }, selected = d.isSelected(state.location) || hovered)
+        Column(
+            Modifier.weight(1f).verticalScroll(rememberScrollState()),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            for (d in railDestinations) {
+                val target = d.dropTarget()
+                val hovered = target != null && drag.hovered == target
+                Box(
+                    Modifier
+                        .clip(R8)
+                        .then(if (hovered) Modifier.border(1.dp, c.accent, R8) else Modifier)
+                        .dropTarget(drag, target),
+                ) {
+                    LibIconButton(d.icon, stringResource(d.label), { controller.goTo(d) }, selected = d.isSelected(state.location) || hovered)
+                }
             }
         }
-        Spacer(Modifier.weight(1f))
+        Spacer(Modifier.height(8.dp))
         LibIconButton(Icons.Outlined.Settings, stringResource(R.string.lib_settings), { controller.nav.openSettings(SettingsSection.GENERAL) })
     }
 }
