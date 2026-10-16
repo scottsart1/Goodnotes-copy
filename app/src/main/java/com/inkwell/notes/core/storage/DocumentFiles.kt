@@ -2,6 +2,8 @@ package com.inkwell.notes.core.storage
 
 import com.inkwell.notes.core.model.ImageItem
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.security.MessageDigest
@@ -180,19 +182,35 @@ internal class DocumentFiles(private val files: FileStore, private val pages: Pa
 
     fun freeBytes(): Long = files.root.usableSpace
 
-    /**
-     * Document folders that no database row refers to and that nothing has written to for
-     * [minAgeMs] (left behind if the process died between deleting rows and files).
-     * Only UUID-named folders are considered, so nothing else under docs/ is ever touched.
-     */
-    suspend fun orphanFolders(knownIds: Set<String>, now: Long, minAgeMs: Long): List<File> = withContext(Dispatchers.IO) {
-        files.root.listFiles().orEmpty().filter { d ->
-            d.isDirectory && UUID_NAME.matches(d.name) && d.name !in knownIds &&
-                d.walkTopDown().all { now - it.lastModified() >= minAgeMs }
+    // ---- Deletion journal: ids whose rows are being deleted, so their folders are removed even
+    // if the process dies between the database commit and the file deletion.
+
+    private val journal = File(files.root.parentFile ?: files.root, "pending-deletes.txt")
+    private val journalLock = Mutex()
+
+    suspend fun markPendingDelete(docId: String) = journalLock.withLock {
+        withContext(Dispatchers.IO) { writeJournal(readJournal() + docId) }
+    }
+
+    suspend fun clearPendingDelete(docId: String) = journalLock.withLock {
+        withContext(Dispatchers.IO) {
+            val ids = readJournal()
+            if (docId in ids) writeJournal(ids - docId)
         }
     }
 
-    private companion object {
-        val UUID_NAME = Regex("[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
+    suspend fun pendingDeletes(): Set<String> = journalLock.withLock { withContext(Dispatchers.IO) { readJournal() } }
+
+    private fun readJournal(): Set<String> =
+        if (!journal.isFile) emptySet() else journal.readLines().map { it.trim() }.filter { it.isNotEmpty() }.toSet()
+
+    private fun writeJournal(ids: Set<String>) {
+        if (ids.isEmpty()) {
+            journal.delete()
+            return
+        }
+        val bytes = ids.joinToString("\n").encodeToByteArray()
+        FileStore.writeAtomically(journal, keepBackup = false) { it.write(bytes) }
     }
+
 }

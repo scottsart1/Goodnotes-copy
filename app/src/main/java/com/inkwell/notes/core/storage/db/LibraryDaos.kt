@@ -77,9 +77,6 @@ interface DocumentDao {
     @Query("SELECT title FROM documents WHERE id != :excludeId")
     suspend fun titlesExcept(excludeId: String): List<String>
 
-    @Query("SELECT id FROM documents")
-    suspend fun allIds(): List<String>
-
     @Query("SELECT * FROM documents WHERE trashedAt IS NOT NULL")
     suspend fun trashed(): List<DocumentEntity>
 

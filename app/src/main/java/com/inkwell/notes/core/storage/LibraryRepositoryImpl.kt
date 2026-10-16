@@ -27,7 +27,6 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.withContext
 import java.util.UUID
 
 /**
@@ -268,16 +267,31 @@ class LibraryRepositoryImpl internal constructor(
         if (renamed) hooks.documentRenamed(id)
     }
 
-    override suspend fun applyAutoName(id: String, topic: String): String {
+    override suspend fun applyAutoName(id: String, topic: String): String =
+        applyTopic(id, topic, onlyWhileWaiting = false) ?: throw IllegalArgumentException("Document not found")
+
+    /**
+     * The background job's variant of [applyAutoName]: applies [topic] only if the document is
+     * still waiting for an automatic name (not renamed by the user, not trashed) at commit time.
+     * Returns the new title, or null when it was left alone.
+     */
+    internal suspend fun applyAutoNameIfWaiting(id: String, topic: String): String? =
+        applyTopic(id, topic, onlyWhileWaiting = true)
+
+    private suspend fun applyTopic(id: String, topic: String, onlyWhileWaiting: Boolean): String? {
         val (title, changed) = db.withTransaction {
-            val cur = db.documents().get(id) ?: throw IllegalArgumentException("Document not found")
+            val cur = db.documents().get(id) ?: return@withTransaction null
+            if (onlyWhileWaiting && (cur.autoNameStatus !in AutoNamingRules.AUTOMATIC || cur.trashedAt != null)) {
+                return@withTransaction null
+            }
             val title = TitleRules.auto(cur.createdAt, topic, db.documents().titlesExcept(id))
                 ?: return@withTransaction cur.title to false // empty or generic topic: keep the current name
             db.documents().update(
                 cur.copy(title = title, topic = DateNaming.cleanTopic(topic), autoNameStatus = AutoNameStatus.DONE),
             )
             title to (title != cur.title)
-        }
+        } ?: return null
+        // Notified after commit, so collaborators read the new title.
         if (changed) hooks.documentRenamed(id)
         return title
     }
@@ -411,6 +425,8 @@ class LibraryRepositoryImpl internal constructor(
     }
 
     override suspend fun deletePermanently(id: String) {
+        // Journaled first: if the process dies after the rows are gone, the folder is still removed later.
+        docFiles.markPendingDelete(id)
         val existed = db.withTransaction {
             if (db.documents().get(id) == null) return@withTransaction false
             db.chat().threadsForDocument(id).forEach { db.chat().deleteThread(it) }
@@ -421,6 +437,7 @@ class LibraryRepositoryImpl internal constructor(
             true
         }
         docFiles.deleteDocument(id)
+        docFiles.clearPendingDelete(id)
         if (existed) hooks.documentDeleted(id)
     }
 
@@ -431,8 +448,9 @@ class LibraryRepositoryImpl internal constructor(
 
     /**
      * Permanently removes documents and folders that have been in the trash for more than
-     * [TRASH_RETENTION_MS], plus document folders left without a database row. Returns the
-     * number of documents removed.
+     * [TRASH_RETENTION_MS], and finishes deletions interrupted by a crash (only folders of
+     * documents whose deletion was journaled and whose row is gone). Returns the number of
+     * documents removed.
      */
     suspend fun purgeExpiredTrash(): Int {
         val now = clock()
@@ -440,9 +458,10 @@ class LibraryRepositoryImpl internal constructor(
         var removed = 0
         for (doc in db.documents().trashedBefore(cutoff)) if (deleteQuietly(doc.id)) removed++
         deleteTrashedFolders(before = cutoff)
-        val known = db.documents().allIds().toHashSet()
-        for (orphan in docFiles.orphanFolders(known, now, ORPHAN_MIN_AGE_MS)) {
-            withContext(Dispatchers.IO) { orphan.deleteRecursively() }
+        for (pending in docFiles.pendingDeletes()) {
+            // A row that still exists means the deletion never committed: the document is alive.
+            if (db.documents().get(pending) == null) docFiles.deleteDocument(pending)
+            docFiles.clearPendingDelete(pending)
         }
         return removed
     }
@@ -572,8 +591,6 @@ class LibraryRepositoryImpl internal constructor(
     companion object {
         private const val TAG = "Library"
         const val TRASH_RETENTION_MS: Long = 30L * 24 * 60 * 60 * 1000
-        /** Unreferenced document folders are only removed once nothing has written to them for a week. */
-        private const val ORPHAN_MIN_AGE_MS: Long = 7L * 24 * 60 * 60 * 1000
         const val DEFAULT_FOLDER_NAME = "New folder"
         private const val DEFAULT_FOLDER_ICON = "folder"
         private const val MAX_TAGS = 32

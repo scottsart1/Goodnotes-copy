@@ -1,7 +1,6 @@
 package com.inkwell.notes.core.naming
 
 import android.util.Log
-import androidx.room.withTransaction
 import com.inkwell.notes.app.AppGraph
 import com.inkwell.notes.core.model.AiMessage
 import com.inkwell.notes.core.model.AiRequest
@@ -9,6 +8,7 @@ import com.inkwell.notes.core.model.AiRole
 import com.inkwell.notes.core.model.AiTask
 import com.inkwell.notes.core.model.DocumentMeta
 import com.inkwell.notes.core.model.NamingPrefs
+import com.inkwell.notes.core.storage.LibraryRepositoryImpl
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -64,13 +64,18 @@ class AutoNamingServiceImpl(private val graph: AppGraph) : AutoNamingService {
             state.retainOnly(candidates.mapTo(HashSet()) { it.id })
             val checks = state.all()
             var renamed = 0
+            var processed = 0
             for (doc in candidates.sortedBy { it.createdAt }) {
+                // Settings may change while a long run is in progress; a bounded batch keeps each run
+                // well inside WorkManager's execution window (the rest follows on the next run).
+                if (!graph.settings.current.naming.autoNameEnabled || processed >= MAX_DOCS_PER_RUN) break
                 val now = System.currentTimeMillis()
                 val lastCheck = checks[doc.id]?.lastCheckAt?.takeIf { it > 0 }
                 if (!AutoNamingRules.isEligible(doc.autoNameStatus, doc.createdAt, doc.autoNameAttempts, lastCheck, now, prefs)) continue
                 if (!inFlight.add(doc.id)) continue
+                processed++
                 try {
-                    if (nameAutomatically(doc, prefs)) renamed++
+                    if (nameAutomatically(doc, checks[doc.id] ?: NamingDocState(), prefs)) renamed++
                 } catch (c: CancellationException) {
                     throw c
                 } catch (e: Exception) {
@@ -85,8 +90,7 @@ class AutoNamingServiceImpl(private val graph: AppGraph) : AutoNamingService {
         }
     }
 
-    private suspend fun nameAutomatically(doc: DocumentMeta, prefs: NamingPrefs): Boolean {
-        val docState = state.get(doc.id)
+    private suspend fun nameAutomatically(doc: DocumentMeta, docState: NamingDocState, prefs: NamingPrefs): Boolean {
         val content = collector.collect(doc)
         val outcome = inference.infer(content, aiNamer(doc.id, prefs), docState.aiFailures, userRequested = false)
         val now = System.currentTimeMillis()
@@ -101,13 +105,15 @@ class AutoNamingServiceImpl(private val graph: AppGraph) : AutoNamingService {
         return false
     }
 
-    /** Applies [topic] unless the user renamed, imported-locked or trashed the document meanwhile. */
-    private suspend fun applyIfStillWaiting(docId: String, topic: String): String? =
-        graph.db.withTransaction {
-            val current = graph.db.documents().get(docId) ?: return@withTransaction null
-            if (current.autoNameStatus !in AutoNamingRules.AUTOMATIC || current.trashedAt != null) return@withTransaction null
-            graph.library.applyAutoName(docId, topic)
-        }
+    /** Applies [topic] unless the user renamed or trashed the document meanwhile. */
+    private suspend fun applyIfStillWaiting(docId: String, topic: String): String? {
+        val library = graph.library
+        if (library is LibraryRepositoryImpl) return library.applyAutoNameIfWaiting(docId, topic)
+        // Any other implementation: check, then apply through the contract.
+        val current = library.getDocument(docId) ?: return null
+        if (current.autoNameStatus !in AutoNamingRules.AUTOMATIC || current.trashedAt != null) return null
+        return library.applyAutoName(docId, topic)
+    }
 
     override suspend fun renameNow(docId: String): String? {
         val doc = graph.library.getDocument(docId) ?: return null
@@ -177,6 +183,7 @@ class AutoNamingServiceImpl(private val graph: AppGraph) : AutoNamingService {
 
     private companion object {
         const val TAG = "AutoNaming"
+        const val MAX_DOCS_PER_RUN = 60
         /** Precise checks are only booked for deadlines before the next periodic run (1 h + flex). */
         const val PRECISE_HORIZON_MS = 75L * 60 * 1000
         /** Small margin so the check runs just after the deadline, not just before it. */
