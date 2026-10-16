@@ -1,5 +1,8 @@
 package com.inkwell.notes.core.storage
 
+import android.util.Log
+import androidx.room.withTransaction
+import com.inkwell.notes.core.model.AutoNameStatus
 import com.inkwell.notes.core.model.DocKind
 import com.inkwell.notes.core.model.DocumentMeta
 import com.inkwell.notes.core.model.Folder
@@ -9,66 +12,571 @@ import com.inkwell.notes.core.model.PageMeta
 import com.inkwell.notes.core.model.PageTemplate
 import com.inkwell.notes.core.model.PaperSpec
 import com.inkwell.notes.core.model.StorageInfo
+import com.inkwell.notes.core.naming.DateNaming
+import com.inkwell.notes.core.naming.TitleRules
 import com.inkwell.notes.core.settings.SettingsRepository
 import com.inkwell.notes.core.storage.db.AppDatabase
+import com.inkwell.notes.core.storage.db.DocumentEntity
+import com.inkwell.notes.core.storage.db.FolderEntity
+import com.inkwell.notes.core.storage.db.OutlineEntity
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.emptyFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.withContext
+import java.util.UUID
 
-/** SCAFFOLD STUB — replaced by the storage implementation. */
-class LibraryRepositoryImpl(
+/**
+ * Room + files implementation of the library.
+ *
+ * - Multi-row changes run in one `withTransaction`; reads used to compute a write happen in the
+ *   same transaction, so concurrent writers (editor autosave, background naming) never lose updates.
+ * - File work runs on [Dispatchers.IO] (see [DocumentFiles]); Room suspend DAOs are main-safe.
+ * - modifiedAt changes when what a document *is* changes (content, pages, title, tags), not when
+ *   it is filed or displayed differently (folder, favourite, pin, archive, trash, thumbnail, view
+ *   state) or renamed automatically, so "Modified" ordering reflects the user's work.
+ * - Deleted documents leave no orphans: rows cascade (pages, outline, recordings, transcripts),
+ *   index rows, embeddings and chat threads are removed, then the document folder.
+ * - Items in the trash for more than [TRASH_RETENTION_MS] are purged by [purgeExpiredTrash],
+ *   which the hourly naming worker calls.
+ *
+ * Automatic naming is not scheduled from here: the repository has no graph or context. The
+ * naming service's hourly worker finds PENDING documents itself and also books a precise
+ * one-off check for the next naming deadline (see `AutoNamingServiceImpl.schedule`).
+ */
+class LibraryRepositoryImpl internal constructor(
     private val db: AppDatabase,
     private val files: FileStore,
     private val pages: PageContentStore,
     private val settings: SettingsRepository,
+    private val hooks: LibraryHooks,
+    private val clock: () -> Long,
 ) : LibraryRepository {
-    private fun stub(): Nothing = throw NotImplementedError("LibraryRepositoryImpl")
 
-    override fun observeFolders(): Flow<List<Folder>> = emptyFlow()
-    override suspend fun getFolder(id: String): Folder? = null
-    override suspend fun createFolder(name: String, parentId: String?, color: Int, icon: String): Folder = stub()
-    override suspend fun updateFolder(folder: Folder) = stub()
-    override suspend fun moveFolder(id: String, newParentId: String?) = stub()
-    override suspend fun trashFolder(id: String) = stub()
-    override suspend fun restoreFolder(id: String) = stub()
-    override suspend fun folderPath(folderId: String?): String = ""
-    override fun observeDocuments(filter: LibraryFilter): Flow<List<DocumentMeta>> = emptyFlow()
-    override fun observeDocument(id: String): Flow<DocumentMeta?> = emptyFlow()
-    override suspend fun getDocument(id: String): DocumentMeta? = null
-    override suspend fun createDocument(kind: DocKind, folderId: String?, template: PageTemplate?, originalName: String?): DocumentMeta = stub()
-    override suspend fun renameDocument(id: String, newTitle: String) = stub()
-    override suspend fun applyAutoName(id: String, topic: String): String = stub()
-    override suspend fun updateDocument(doc: DocumentMeta) = stub()
-    override suspend fun moveDocument(id: String, folderId: String?) = stub()
-    override suspend fun duplicateDocument(id: String): DocumentMeta = stub()
-    override suspend fun setFavorite(id: String, favorite: Boolean) = stub()
-    override suspend fun setPinned(id: String, pinned: Boolean) = stub()
-    override suspend fun setArchived(id: String, archived: Boolean) = stub()
-    override suspend fun setTags(id: String, tags: List<String>) = stub()
-    override suspend fun trashDocument(id: String) = stub()
-    override suspend fun restoreDocument(id: String) = stub()
-    override suspend fun deletePermanently(id: String) = stub()
-    override suspend fun emptyTrash() = stub()
-    override suspend fun updateViewState(id: String, pageIndex: Int, zoom: Float, scrollX: Float, scrollY: Float) = stub()
-    override suspend fun touch(id: String) = stub()
-    override suspend fun setThumbnail(id: String, path: String?) = stub()
-    override fun observePages(docId: String): Flow<List<PageMeta>> = emptyFlow()
-    override suspend fun getPages(docId: String): List<PageMeta> = emptyList()
-    override suspend fun getPage(pageId: String): PageMeta? = null
-    override suspend fun addPage(docId: String, atIndex: Int?, template: PageTemplate?): PageMeta = stub()
-    override suspend fun addPdfPages(docId: String, pdfPageSizesPt: List<Pair<Float, Float>>, firstPdfIndex: Int, atIndex: Int?): List<PageMeta> = stub()
-    override suspend fun deletePage(pageId: String) = stub()
-    override suspend fun duplicatePage(pageId: String): PageMeta = stub()
-    override suspend fun movePage(pageId: String, toIndex: Int) = stub()
-    override suspend fun reorderPages(docId: String, orderedPageIds: List<String>) = stub()
-    override suspend fun copyPageToDocument(pageId: String, targetDocId: String, atIndex: Int?): PageMeta = stub()
-    override suspend fun rotatePage(pageId: String, degreesClockwise: Int) = stub()
-    override suspend fun setPaper(pageId: String, paper: PaperSpec) = stub()
-    override suspend fun setPaperForAll(docId: String, paper: PaperSpec) = stub()
-    override suspend fun setPageSize(pageId: String, widthPt: Float, heightPt: Float) = stub()
-    override suspend fun setBookmark(pageId: String, bookmarked: Boolean, title: String?) = stub()
-    override suspend fun pageContentChanged(docId: String, pageId: String) = stub()
-    override fun observeOutline(docId: String): Flow<List<OutlineEntry>> = emptyFlow()
-    override suspend fun upsertOutlineEntry(entry: OutlineEntry) = stub()
-    override suspend fun deleteOutlineEntry(id: String) = stub()
-    override suspend fun storageInfo(): StorageInfo = StorageInfo(0, 0, 0, 0, 0, files.root.freeSpace)
+    constructor(db: AppDatabase, files: FileStore, pages: PageContentStore, settings: SettingsRepository) :
+        this(db, files, pages, settings, GraphLibraryHooks, System::currentTimeMillis)
+
+    private val docFiles = DocumentFiles(files, pages)
+    private val pageOps = LibraryPages(db, docFiles, settings, hooks, clock)
+
+    // ------------------------------------------------------------------ Folders
+
+    override fun observeFolders(): Flow<List<Folder>> =
+        db.folders().observeAll().map { list -> list.map { it.toModel() } }.distinctUntilChanged()
+
+    override suspend fun getFolder(id: String): Folder? = db.folders().get(id)?.toModel()
+
+    override suspend fun createFolder(name: String, parentId: String?, color: Int, icon: String): Folder {
+        val now = clock()
+        return db.withTransaction {
+            val parent = parentId?.let { db.folders().get(it) }?.takeIf { it.trashedAt == null }
+            val siblings = db.folders().children(parent?.id).map { it.name }
+            val folder = Folder(
+                id = UUID.randomUUID().toString(),
+                name = DateNaming.unique(TitleRules.sanitize(name) ?: DEFAULT_FOLDER_NAME, siblings),
+                parentId = parent?.id,
+                color = color,
+                icon = icon.ifBlank { DEFAULT_FOLDER_ICON },
+                createdAt = now,
+                modifiedAt = now,
+            )
+            db.folders().upsert(FolderEntity.from(folder))
+            folder
+        }
+    }
+
+    override suspend fun updateFolder(folder: Folder) {
+        val now = clock()
+        val affectedDocs = db.withTransaction {
+            val cur = db.folders().get(folder.id) ?: return@withTransaction emptyList()
+            val tree = FolderTree(db.folders().getAllIncludingTrashed().map { it.toModel() })
+            val parentId = validParent(tree, folder.id, folder.parentId, fallback = cur.parentId)
+            val requestedName = TitleRules.sanitize(folder.name) ?: cur.name
+            val name = if (requestedName == cur.name && parentId == cur.parentId) cur.name else uniqueSiblingName(requestedName, parentId, folder.id)
+            val next = cur.copy(
+                name = name, parentId = parentId, color = folder.color,
+                icon = folder.icon.ifBlank { cur.icon }, sortOrder = folder.sortOrder, modifiedAt = now,
+            )
+            if (next == cur.copy(modifiedAt = now)) return@withTransaction emptyList()
+            db.folders().upsert(next)
+            if (name != cur.name || parentId != cur.parentId) docsInSubtree(tree, folder.id) else emptyList()
+        }
+        affectedDocs.forEach { hooks.documentMetaChanged(it) }
+    }
+
+    override suspend fun moveFolder(id: String, newParentId: String?) {
+        val now = clock()
+        val affectedDocs = db.withTransaction {
+            val cur = db.folders().get(id) ?: return@withTransaction emptyList()
+            if (cur.parentId == newParentId) return@withTransaction emptyList()
+            val tree = FolderTree(db.folders().getAllIncludingTrashed().map { it.toModel() })
+            if (tree.wouldCreateCycle(id, newParentId)) {
+                Log.w(TAG, "Refused to move a folder into itself or one of its sub-folders")
+                return@withTransaction emptyList()
+            }
+            if (newParentId != null && tree[newParentId]?.trashedAt != null) return@withTransaction emptyList()
+            if (newParentId != null && tree[newParentId] == null) return@withTransaction emptyList()
+            db.folders().upsert(cur.copy(parentId = newParentId, name = uniqueSiblingName(cur.name, newParentId, id), modifiedAt = now))
+            docsInSubtree(tree, id)
+        }
+        affectedDocs.forEach { hooks.documentMetaChanged(it) }
+    }
+
+    override suspend fun trashFolder(id: String) {
+        val now = clock()
+        db.withTransaction {
+            val tree = FolderTree(db.folders().getAllIncludingTrashed().map { it.toModel() })
+            val root = tree[id] ?: return@withTransaction
+            if (root.trashedAt != null) return@withTransaction
+            val subtree = tree.subtree(id)
+            for (fid in subtree) {
+                val f = tree[fid] ?: continue
+                if (f.trashedAt == null) db.folders().upsert(FolderEntity.from(f.copy(trashedAt = now)))
+            }
+            db.documents().getAll()
+                .filter { it.folderId != null && it.folderId in subtree && it.trashedAt == null }
+                .forEach { db.documents().update(it.copy(trashedAt = now)) }
+        }
+    }
+
+    override suspend fun restoreFolder(id: String) {
+        db.withTransaction {
+            val tree = FolderTree(db.folders().getAllIncludingTrashed().map { it.toModel() })
+            val root = tree[id] ?: return@withTransaction
+            val stamp = root.trashedAt
+            if (stamp != null) {
+                // Restore what was trashed together with this folder; items trashed separately stay in the trash.
+                val subtree = tree.subtree(id)
+                for (fid in subtree) {
+                    val f = tree[fid] ?: continue
+                    if (fid == id || f.trashedAt == stamp) db.folders().upsert(FolderEntity.from(f.copy(trashedAt = null)))
+                }
+                db.documents().getAll()
+                    .filter { it.folderId != null && it.folderId in subtree && it.trashedAt == stamp }
+                    .forEach { db.documents().update(it.copy(trashedAt = null)) }
+            }
+            ensureFolderChainLive(root.parentId, childId = id)
+        }
+    }
+
+    override suspend fun folderPath(folderId: String?): String {
+        if (folderId == null) return ""
+        return FolderTree(db.folders().getAllIncludingTrashed().map { it.toModel() }).path(folderId)
+    }
+
+    /** [requested] if it is a live folder that would not create a cycle, otherwise [fallback]. */
+    private fun validParent(tree: FolderTree, folderId: String, requested: String?, fallback: String?): String? {
+        if (requested == null) return null
+        val parent = tree[requested] ?: return fallback
+        if (parent.trashedAt != null || tree.wouldCreateCycle(folderId, requested)) return fallback
+        return requested
+    }
+
+    private suspend fun uniqueSiblingName(name: String, parentId: String?, selfId: String): String =
+        DateNaming.unique(name, db.folders().children(parentId).filter { it.id != selfId }.map { it.name })
+
+    private suspend fun docsInSubtree(tree: FolderTree, folderId: String): List<String> {
+        val subtree = tree.subtree(folderId)
+        return db.documents().getAll().filter { it.folderId != null && it.folderId in subtree }.map { it.id }
+    }
+
+    /**
+     * Makes [folderId] and its ancestors visible again (restoring trashed ones, re-rooting below a
+     * missing parent). Returns [folderId] if it exists, null otherwise. Runs inside a transaction.
+     */
+    private suspend fun ensureFolderChainLive(folderId: String?, childId: String? = null): String? {
+        val all = db.folders().getAllIncludingTrashed().associateBy { it.id }
+        if (folderId == null) return null
+        if (all[folderId] == null) {
+            // The parent is gone: the child becomes a top-level folder.
+            childId?.let { all[it] }?.let { db.folders().upsert(it.copy(parentId = null)) }
+            return null
+        }
+        var current = all[folderId]
+        val seen = HashSet<String>()
+        while (current != null && seen.add(current.id)) {
+            val parent = current.parentId?.let { all[it] }
+            var next: FolderEntity = current
+            if (current.trashedAt != null) next = next.copy(trashedAt = null)
+            if (current.parentId != null && parent == null) next = next.copy(parentId = null)
+            if (next != current) db.folders().upsert(next)
+            current = parent
+        }
+        return folderId
+    }
+
+    // ------------------------------------------------------------------ Documents
+
+    override fun observeDocuments(filter: LibraryFilter): Flow<List<DocumentMeta>> =
+        combine(db.documents().observeAll(), db.folders().observeAll()) { docs, folders ->
+            LibraryQuery.apply(docs.map { it.toModel() }, filter, folders.map { it.toModel() }, clock())
+        }.flowOn(Dispatchers.Default).distinctUntilChanged()
+
+    override fun observeDocument(id: String): Flow<DocumentMeta?> =
+        db.documents().observe(id).map { it?.toModel() }.distinctUntilChanged()
+
+    override suspend fun getDocument(id: String): DocumentMeta? = db.documents().get(id)?.toModel()
+
+    override suspend fun createDocument(kind: DocKind, folderId: String?, template: PageTemplate?, originalName: String?): DocumentMeta {
+        val prefs = settings.current
+        val now = clock()
+        val id = UUID.randomUUID().toString()
+        val importedTitle = originalName?.let { TitleRules.fromImportedName(it) }
+        val status = when {
+            importedTitle != null && !prefs.naming.renameImported -> AutoNameStatus.IMPORTED
+            !prefs.naming.autoNameEnabled -> AutoNameStatus.DISABLED
+            else -> AutoNameStatus.PENDING
+        }
+        val firstPages = when (kind) {
+            DocKind.NOTEBOOK -> listOf(LibraryPages.notebookPage(template ?: prefs.notebookDefaults.template, id, now))
+            DocKind.WHITEBOARD -> listOf(LibraryPages.whiteboardPage(id, now))
+            DocKind.TYPED, DocKind.PDF -> emptyList()
+        }
+        val doc = db.withTransaction {
+            val folder = folderId?.let { db.folders().get(it) }?.takeIf { it.trashedAt == null }
+            val title = if (importedTitle != null) {
+                DateNaming.unique(importedTitle, db.documents().titlesExcept(id))
+            } else {
+                TitleRules.untitled(now, db.documents().titlesWithPrefix(DateNaming.initialTitle(now)))
+            }
+            val meta = DocumentMeta(
+                id = id, title = title, kind = kind, folderId = folder?.id, createdAt = now, modifiedAt = now,
+                autoNameStatus = status, originalName = originalName, pageCount = firstPages.size,
+            )
+            db.documents().insert(DocumentEntity.from(meta))
+            if (firstPages.isNotEmpty()) db.pages().upsertAll(firstPages)
+            meta
+        }
+        hooks.documentMetaChanged(id)
+        return doc
+    }
+
+    override suspend fun renameDocument(id: String, newTitle: String) {
+        val clean = TitleRules.sanitize(newTitle) ?: return // blank names are rejected
+        val now = clock()
+        val renamed = db.withTransaction {
+            val cur = db.documents().get(id) ?: return@withTransaction false
+            if (clean == cur.title) return@withTransaction false
+            val title = DateNaming.unique(clean, db.documents().titlesExcept(id))
+            db.documents().update(cur.copy(title = title, autoNameStatus = AutoNameStatus.MANUAL, modifiedAt = now))
+            true
+        }
+        if (renamed) hooks.documentRenamed(id)
+    }
+
+    override suspend fun applyAutoName(id: String, topic: String): String {
+        val (title, changed) = db.withTransaction {
+            val cur = db.documents().get(id) ?: throw IllegalArgumentException("Document not found")
+            val title = TitleRules.auto(cur.createdAt, topic, db.documents().titlesExcept(id))
+                ?: return@withTransaction cur.title to false // empty or generic topic: keep the current name
+            db.documents().update(
+                cur.copy(title = title, topic = DateNaming.cleanTopic(topic), autoNameStatus = AutoNameStatus.DONE),
+            )
+            title to (title != cur.title)
+        }
+        if (changed) hooks.documentRenamed(id)
+        return title
+    }
+
+    override suspend fun updateDocument(doc: DocumentMeta) {
+        db.withTransaction {
+            val existing = db.documents().get(doc.id)
+            // pageCount is owned by the page operations; never let a stale copy overwrite it.
+            val pageCount = if (existing != null) db.pages().count(doc.id) else doc.pageCount
+            db.documents().upsert(DocumentEntity.from(doc.copy(pageCount = pageCount)))
+        }
+    }
+
+    override suspend fun moveDocument(id: String, folderId: String?) {
+        val moved = db.withTransaction {
+            val cur = db.documents().get(id) ?: return@withTransaction false
+            val target = folderId?.let { db.folders().get(it) }
+            if (folderId != null && (target == null || target.trashedAt != null)) return@withTransaction false
+            if (cur.folderId == folderId) return@withTransaction false
+            db.documents().update(cur.copy(folderId = folderId))
+            true
+        }
+        if (moved) hooks.documentMetaChanged(id)
+    }
+
+    override suspend fun duplicateDocument(id: String): DocumentMeta {
+        val src = db.documents().get(id) ?: throw IllegalArgumentException("Document not found")
+        val newId = UUID.randomUUID().toString()
+        val now = clock()
+        val srcPages = db.pages().forDocument(id)
+        val pageIds = srcPages.associate { it.id to UUID.randomUUID().toString() }
+        val copied = try {
+            docFiles.copyForDuplicate(id, newId, pageIds)
+        } catch (e: Exception) {
+            docFiles.deleteDocument(newId)
+            throw e
+        }
+        val stalePages = ArrayList<String>()
+        val doc = try {
+            db.withTransaction {
+                val title = TitleRules.copyOf(src.title, db.documents().titlesExcept(newId))
+                val (status, attempts) = when (src.autoNameStatus) {
+                    AutoNameStatus.QUEUED, AutoNameStatus.INSUFFICIENT -> AutoNameStatus.PENDING to 0
+                    else -> src.autoNameStatus to 0
+                }
+                val entity = src.copy(
+                    id = newId, title = title, modifiedAt = now, openedAt = 0, autoNameStatus = status,
+                    autoNameAttempts = attempts, pinned = false, archived = false, trashedAt = null,
+                    pageCount = srcPages.size, lastPageIndex = 0, lastZoom = 1f, lastScrollX = 0f, lastScrollY = 0f,
+                    thumbnailPath = copied.coverPath, lastSyncedAt = 0,
+                )
+                db.documents().insert(entity)
+                val newPages = srcPages.map { p ->
+                    val fresh = p.indexedAt > 0 && p.indexedAt >= p.modifiedAt
+                    val newPageId = pageIds.getValue(p.id)
+                    if (!fresh) stalePages += newPageId
+                    p.copy(
+                        id = newPageId, documentId = newId, modifiedAt = now, indexedAt = if (fresh) now else 0,
+                        thumbnailPath = copied.pageThumbnails[newPageId],
+                    )
+                }
+                if (newPages.isNotEmpty()) db.pages().upsertAll(newPages)
+                val outline = db.outline().forDocument(id).filter { it.pageId in pageIds }
+                val outlineIds = outline.associate { it.id to UUID.randomUUID().toString() }
+                outline.forEach { e ->
+                    db.outline().upsert(
+                        e.copy(
+                            id = outlineIds.getValue(e.id), documentId = newId, pageId = pageIds.getValue(e.pageId),
+                            parentId = e.parentId?.let { outlineIds[it] },
+                        ),
+                    )
+                }
+                val freshMap = pageIds.filterValues { it !in stalePages }
+                if (freshMap.isNotEmpty()) pageOps.copyIndexRows(id, freshMap, newId, now)
+                entity.toModel()
+            }
+        } catch (e: Exception) {
+            docFiles.deleteDocument(newId)
+            throw e
+        }
+        hooks.documentMetaChanged(newId)
+        if (stalePages.isNotEmpty()) hooks.pagesNeedIndexing(newId, stalePages)
+        if (doc.thumbnailPath == null) hooks.coverChanged(newId)
+        return doc
+    }
+
+    override suspend fun setFavorite(id: String, favorite: Boolean) {
+        updateDoc(id) { it.copy(favorite = favorite) }
+    }
+
+    override suspend fun setPinned(id: String, pinned: Boolean) {
+        updateDoc(id) { it.copy(pinned = pinned) }
+    }
+
+    override suspend fun setArchived(id: String, archived: Boolean) {
+        updateDoc(id) { it.copy(archived = archived) }
+    }
+
+    override suspend fun setTags(id: String, tags: List<String>) {
+        val clean = normalizeTags(tags)
+        val now = clock()
+        val changed = updateDoc(id) {
+            if (it.tags == clean.joinToString(DocumentEntity.TAG_SEP)) it
+            else it.copy(tags = clean.joinToString(DocumentEntity.TAG_SEP), modifiedAt = now)
+        }
+        if (changed) hooks.documentMetaChanged(id)
+    }
+
+    override suspend fun trashDocument(id: String) {
+        val now = clock()
+        updateDoc(id) { if (it.trashedAt != null) it else it.copy(trashedAt = now) }
+    }
+
+    override suspend fun restoreDocument(id: String) {
+        db.withTransaction {
+            val cur = db.documents().get(id) ?: return@withTransaction
+            if (cur.trashedAt == null) return@withTransaction
+            // Return it to its folder (bringing the folder back if needed), or to the root if the folder is gone.
+            val folderId = ensureFolderChainLive(cur.folderId)
+            db.documents().update(cur.copy(trashedAt = null, folderId = folderId))
+        }
+    }
+
+    override suspend fun deletePermanently(id: String) {
+        val existed = db.withTransaction {
+            if (db.documents().get(id) == null) return@withTransaction false
+            db.chat().threadsForDocument(id).forEach { db.chat().deleteThread(it) }
+            db.textIndex().deleteDocument(id)
+            db.embeddings().deleteDocument(id)
+            // Cascades to pages, outline, recordings and their transcript segments.
+            db.documents().delete(id)
+            true
+        }
+        docFiles.deleteDocument(id)
+        if (existed) hooks.documentDeleted(id)
+    }
+
+    override suspend fun emptyTrash() {
+        for (doc in db.documents().trashed()) deleteQuietly(doc.id)
+        deleteTrashedFolders(before = null)
+    }
+
+    /**
+     * Permanently removes documents and folders that have been in the trash for more than
+     * [TRASH_RETENTION_MS], plus document folders left without a database row. Returns the
+     * number of documents removed.
+     */
+    suspend fun purgeExpiredTrash(): Int {
+        val now = clock()
+        val cutoff = now - TRASH_RETENTION_MS
+        var removed = 0
+        for (doc in db.documents().trashedBefore(cutoff)) if (deleteQuietly(doc.id)) removed++
+        deleteTrashedFolders(before = cutoff)
+        val known = db.documents().allIds().toHashSet()
+        for (orphan in docFiles.orphanFolders(known, now, ORPHAN_MIN_AGE_MS)) {
+            withContext(Dispatchers.IO) { orphan.deleteRecursively() }
+        }
+        return removed
+    }
+
+    private suspend fun deleteQuietly(id: String): Boolean = try {
+        deletePermanently(id)
+        true
+    } catch (c: CancellationException) {
+        throw c
+    } catch (e: Exception) {
+        Log.e(TAG, "Could not delete document $id: ${e.javaClass.simpleName}")
+        false
+    }
+
+    /** Deletes trashed folder rows (all, or those trashed before [before]); live content inside moves to the root. */
+    private suspend fun deleteTrashedFolders(before: Long?) {
+        db.withTransaction {
+            val all = db.folders().getAllIncludingTrashed()
+            val doomed = all.filter { f -> f.trashedAt != null && (before == null || f.trashedAt < before) }.mapTo(HashSet()) { it.id }
+            if (doomed.isEmpty()) return@withTransaction
+            all.filter { it.id !in doomed && it.parentId != null && it.parentId in doomed }
+                .forEach { db.folders().upsert(it.copy(parentId = null)) }
+            db.documents().getAll()
+                .filter { it.trashedAt == null && it.folderId != null && it.folderId in doomed }
+                .forEach { db.documents().update(it.copy(folderId = null)) }
+            doomed.forEach { db.folders().delete(it) }
+        }
+    }
+
+    override suspend fun updateViewState(id: String, pageIndex: Int, zoom: Float, scrollX: Float, scrollY: Float) {
+        db.documents().updateViewState(
+            id, pageIndex.coerceAtLeast(0),
+            if (zoom.isFinite() && zoom > 0f) zoom else 1f,
+            if (scrollX.isFinite()) scrollX else 0f,
+            if (scrollY.isFinite()) scrollY else 0f,
+            clock(),
+        )
+    }
+
+    override suspend fun touch(id: String) {
+        db.documents().touch(id, clock())
+    }
+
+    override suspend fun setThumbnail(id: String, path: String?) {
+        db.documents().setThumbnail(id, path)
+    }
+
+    /** Read-modify-write of one document in a transaction; returns true when something changed. */
+    private suspend fun updateDoc(id: String, transform: (DocumentEntity) -> DocumentEntity): Boolean =
+        db.withTransaction {
+            val cur = db.documents().get(id) ?: return@withTransaction false
+            val next = transform(cur)
+            if (next == cur) return@withTransaction false
+            db.documents().update(next)
+            true
+        }
+
+    // ------------------------------------------------------------------ Pages
+
+    override fun observePages(docId: String): Flow<List<PageMeta>> = pageOps.observePages(docId)
+    override suspend fun getPages(docId: String): List<PageMeta> = pageOps.getPages(docId)
+    override suspend fun getPage(pageId: String): PageMeta? = pageOps.getPage(pageId)
+    override suspend fun addPage(docId: String, atIndex: Int?, template: PageTemplate?): PageMeta = pageOps.addPage(docId, atIndex, template)
+    override suspend fun addPdfPages(docId: String, pdfPageSizesPt: List<Pair<Float, Float>>, firstPdfIndex: Int, atIndex: Int?): List<PageMeta> =
+        pageOps.addPdfPages(docId, pdfPageSizesPt, firstPdfIndex, atIndex)
+    override suspend fun deletePage(pageId: String) = pageOps.deletePage(pageId)
+    override suspend fun duplicatePage(pageId: String): PageMeta = pageOps.duplicatePage(pageId)
+    override suspend fun movePage(pageId: String, toIndex: Int) = pageOps.movePage(pageId, toIndex)
+    override suspend fun reorderPages(docId: String, orderedPageIds: List<String>) = pageOps.reorderPages(docId, orderedPageIds)
+    override suspend fun copyPageToDocument(pageId: String, targetDocId: String, atIndex: Int?): PageMeta =
+        pageOps.copyPageToDocument(pageId, targetDocId, atIndex)
+    override suspend fun rotatePage(pageId: String, degreesClockwise: Int) = pageOps.rotatePage(pageId, degreesClockwise)
+    override suspend fun setPaper(pageId: String, paper: PaperSpec) = pageOps.setPaper(pageId, paper)
+    override suspend fun setPaperForAll(docId: String, paper: PaperSpec) = pageOps.setPaperForAll(docId, paper)
+    override suspend fun setPageSize(pageId: String, widthPt: Float, heightPt: Float) = pageOps.setPageSize(pageId, widthPt, heightPt)
+    override suspend fun setBookmark(pageId: String, bookmarked: Boolean, title: String?) = pageOps.setBookmark(pageId, bookmarked, title)
+    override suspend fun pageContentChanged(docId: String, pageId: String) = pageOps.pageContentChanged(docId, pageId)
+
+    // ------------------------------------------------------------------ Outline
+
+    override fun observeOutline(docId: String): Flow<List<OutlineEntry>> =
+        db.outline().observe(docId).map { list -> list.map { it.toModel() } }.distinctUntilChanged()
+
+    override suspend fun upsertOutlineEntry(entry: OutlineEntry) {
+        val title = TitleRules.sanitize(entry.title) ?: return
+        db.withTransaction {
+            if (db.documents().get(entry.documentId) == null) return@withTransaction
+            val page = db.pages().get(entry.pageId)
+            if (page == null || page.documentId != entry.documentId) return@withTransaction
+            val parentId = entry.parentId?.takeIf { it != entry.id && db.outline().get(it)?.documentId == entry.documentId }
+            db.outline().upsert(
+                OutlineEntity.from(entry.copy(id = entry.id.ifBlank { UUID.randomUUID().toString() }, title = title, parentId = parentId)),
+            )
+        }
+    }
+
+    override suspend fun deleteOutlineEntry(id: String) {
+        db.withTransaction {
+            val entry = db.outline().get(id) ?: return@withTransaction
+            db.outline().forDocument(entry.documentId)
+                .filter { it.parentId == id }
+                .forEach { db.outline().upsert(it.copy(parentId = entry.parentId)) }
+            db.outline().delete(id)
+        }
+    }
+
+    // ------------------------------------------------------------------ Storage
+
+    override suspend fun storageInfo(): StorageInfo {
+        val scan = docFiles.scan()
+        db.withTransaction {
+            for (doc in db.documents().getAll()) {
+                val size = scan.perDocument[FileStore.safe(doc.id)] ?: 0L
+                if (size != doc.sizeBytes) db.documents().setSize(doc.id, size)
+            }
+        }
+        return StorageInfo(
+            documentCount = db.documents().countLive(),
+            totalBytes = scan.totalBytes,
+            audioBytes = scan.audioBytes,
+            pdfBytes = scan.pdfBytes,
+            inkBytes = scan.inkBytes,
+            freeBytes = docFiles.freeBytes(),
+        )
+    }
+
+    companion object {
+        private const val TAG = "Library"
+        const val TRASH_RETENTION_MS: Long = 30L * 24 * 60 * 60 * 1000
+        /** Unreferenced document folders are only removed once nothing has written to them for a week. */
+        private const val ORPHAN_MIN_AGE_MS: Long = 7L * 24 * 60 * 60 * 1000
+        const val DEFAULT_FOLDER_NAME = "New folder"
+        private const val DEFAULT_FOLDER_ICON = "folder"
+        private const val MAX_TAGS = 32
+        private const val MAX_TAG_CHARS = 48
+
+        /** Trimmed, de-duplicated (case-insensitive) tags without separator characters. */
+        internal fun normalizeTags(tags: List<String>): List<String> {
+            val seen = HashSet<String>()
+            return tags.asSequence()
+                .mapNotNull { TitleRules.sanitize(it.replace(DocumentEntity.TAG_SEP, " "))?.take(MAX_TAG_CHARS)?.trim() }
+                .filter { it.isNotEmpty() && seen.add(it.lowercase()) }
+                .take(MAX_TAGS)
+                .toList()
+        }
+    }
 }

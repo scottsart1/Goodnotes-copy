@@ -48,7 +48,14 @@ object DateNaming {
         t = t.replace(ILLEGAL, " ").replace('_', ' ').replace(Regex("\\s+"), " ").trim()
         if (t.isEmpty()) return null
         val words = t.split(' ').filter { it.isNotBlank() }.take(MAX_TOPIC_WORDS)
-        t = words.joinToString(" ") { w -> if (w.any { it.isUpperCase() }) w else w.replaceFirstChar { it.titlecase() } }
+        t = words.mapIndexed { i, w ->
+            when {
+                w.any { it.isUpperCase() } -> w
+                // Title Case keeps short connectives lowercase inside a topic ("Bank of England").
+                i > 0 && i < words.lastIndex && w in MINOR_WORDS -> w
+                else -> w.replaceFirstChar { it.titlecase() }
+            }
+        }.joinToString(" ")
         if (t.length > MAX_TOPIC_CHARS) t = t.take(MAX_TOPIC_CHARS).substringBeforeLast(' ').ifEmpty { t.take(MAX_TOPIC_CHARS) }
         if (t.lowercase() in GENERIC) return null
         return t
@@ -65,6 +72,8 @@ object DateNaming {
         while ("$desired ($n)".lowercase() in taken) n++
         return "$desired ($n)"
     }
+
+    private val MINOR_WORDS = setOf("a", "an", "and", "as", "at", "by", "for", "in", "of", "on", "or", "the", "to", "vs", "with")
 
     private val GENERIC = setOf(
         "untitled", "notes", "note", "my notes", "general", "misc", "miscellaneous", "document", "notebook",
