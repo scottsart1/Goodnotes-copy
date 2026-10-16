@@ -24,7 +24,7 @@ import androidx.compose.material.icons.outlined.FlipToBack
 import androidx.compose.material.icons.outlined.FlipToFront
 import androidx.compose.material.icons.outlined.GroupWork
 import androidx.compose.material.icons.outlined.LayersClear
-import androidx.compose.material.icons.outlined.NoteAdd
+import androidx.compose.material.icons.automirrored.outlined.NoteAdd
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
@@ -121,7 +121,7 @@ fun SelectionBar(selection: InkSelection, actions: SelectionActions, modifier: M
                         MenuRow(Icons.Outlined.FlipToBack, R.string.wb_sel_back) { moreOpen = false; actions.onBack() }
                         MenuRow(Icons.Outlined.GroupWork, R.string.wb_sel_group) { moreOpen = false; actions.onGroup() }
                         MenuRow(Icons.Outlined.LayersClear, R.string.wb_sel_ungroup) { moreOpen = false; actions.onUngroup() }
-                        MenuRow(Icons.Outlined.NoteAdd, R.string.wb_send_to_notebook) { moreOpen = false; actions.onSendToNotebook() }
+                        MenuRow(Icons.AutoMirrored.Outlined.NoteAdd, R.string.wb_send_to_notebook) { moreOpen = false; actions.onSendToNotebook() }
                     }
                 }
             }

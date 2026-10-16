@@ -30,7 +30,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.FileDownload
 import androidx.compose.material.icons.outlined.MoreVert
-import androidx.compose.material.icons.outlined.NoteAdd
+import androidx.compose.material.icons.automirrored.outlined.NoteAdd
 import androidx.compose.material.icons.outlined.PostAdd
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
@@ -176,8 +176,8 @@ private fun WhiteboardContent(controller: WhiteboardController, nav: AppNavigato
         controller.imageTarget = null
         if (uri != null) scope.launch { controller.ops.insertPickedImage(context, uri, at) }
     }
-    LaunchedEffect(controller.imagePickRequest) {
-        if (controller.imagePickRequest > 0) {
+    LaunchedEffect(controller) {
+        controller.imageRequests.collect {
             try {
                 pickImage.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
             } catch (e: ActivityNotFoundException) {
@@ -446,7 +446,7 @@ private fun BoardMenu(
     val c = Inkwell.colors
     DropdownMenu(expanded = expanded, onDismissRequest = onDismiss, containerColor = c.surface) {
         MenuRow(Icons.Outlined.PostAdd, R.string.wb_add_page_objects) { onDismiss(); onAddPage() }
-        MenuRow(Icons.Outlined.NoteAdd, R.string.wb_send_to_notebook, enabled = hasSelection) { onDismiss(); onSend() }
+        MenuRow(Icons.AutoMirrored.Outlined.NoteAdd, R.string.wb_send_to_notebook, enabled = hasSelection) { onDismiss(); onSend() }
         HorizontalDivider(color = c.outline, thickness = 1.dp)
         Text(
             stringResource(R.string.wb_background),

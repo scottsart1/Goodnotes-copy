@@ -8,7 +8,7 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.NoteAdd
+import androidx.compose.material.icons.automirrored.outlined.NoteAdd
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -60,7 +60,7 @@ fun SendToNotebookDialog(ops: BoardOperations, onDismiss: () -> Unit, onSent: (D
                 onPick = { send(it) },
                 header = {
                     PickerRow(
-                        icon = { Icon(Icons.Outlined.NoteAdd, null, tint = Inkwell.colors.accent, modifier = Modifier.size(Dimens.icon)) },
+                        icon = { Icon(Icons.AutoMirrored.Outlined.NoteAdd, null, tint = Inkwell.colors.accent, modifier = Modifier.size(Dimens.icon)) },
                         title = stringResource(R.string.wb_new_notebook),
                         subtitle = null,
                         onClick = { send(null) },

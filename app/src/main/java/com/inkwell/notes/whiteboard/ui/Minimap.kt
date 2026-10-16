@@ -93,9 +93,9 @@ fun Minimap(
                             // Freeze the mapping for the whole gesture: the world grows with the viewport.
                             val t = MinimapMath.transform(MinimapMath.world(content, vis), size.width.toFloat(), size.height.toFloat(), INSET_PX)
                             val v = vis?.let { MinimapMath.viewportOnMap(t, it) }
-                            var startX: Float
-                            var startY: Float
-                            if (v != null && v.contains(down.position.x, down.position.y) && vis != null) {
+                            val startX: Float
+                            val startY: Float
+                            if (vis != null && v != null && v.contains(down.position.x, down.position.y)) {
                                 startX = vis.centerX; startY = vis.centerY
                             } else {
                                 val (x, y) = MinimapMath.panTarget(t, down.position.x, down.position.y)

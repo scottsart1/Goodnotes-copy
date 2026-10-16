@@ -96,9 +96,10 @@ class WhiteboardController(val graph: AppGraph, val docId: String) : InkCanvasLi
     var textEdit by mutableStateOf<TextEditRequest?>(null)
     var stickyEdit by mutableStateOf<StickyEditRequest?>(null)
     var longPress by mutableStateOf<LongPressRequest?>(null)
-    /** Board point where a picked image should go; non-null while the picker is wanted. */
-    var imageTarget by mutableStateOf<PointF?>(null)
-    var imagePickRequest by mutableStateOf(0); private set
+    /** Board point where the next picked image should go (null = centre of the view). */
+    var imageTarget: PointF? = null
+    /** One event per "pick an image" request; the screen launches the photo picker. */
+    val imageRequests = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
     var minimap by mutableStateOf<MinimapImage?>(null); private set
     /** Bounds of all content (board points), refreshed with the minimap. */
     var contentBox by mutableStateOf<Box?>(null); private set
@@ -113,7 +114,7 @@ class WhiteboardController(val graph: AppGraph, val docId: String) : InkCanvasLi
     /** Minimap bitmap size in pixels (set by the minimap from its layout). */
     var minimapPx: Pair<Int, Int> = 400 to 280
 
-    private var bound = false
+    private var boundCanvas: InkCanvasView? = null
     private var released = false
     private var minimapJob: Job? = null
     private var viewSaveJob: Job? = null
@@ -184,8 +185,8 @@ class WhiteboardController(val graph: AppGraph, val docId: String) : InkCanvasLi
     private fun maybeBind() {
         val c = canvas ?: return
         val p = page ?: return
-        if (bound) return
-        bound = true
+        if (boundCanvas === c) return
+        boundCanvas = c
         val restore = lastSavedView?.takeIf {
             graph.settings.current.view.reopenAtLastPosition && (it.zoom != 1f || it.scrollX != 0f || it.scrollY != 0f)
         }
@@ -222,6 +223,7 @@ class WhiteboardController(val graph: AppGraph, val docId: String) : InkCanvasLi
             runCatching { c.release() }
         }
         canvas = null
+        boundCanvas = null
     }
 
     // ------------------------------------------------------------------ Content tracking
@@ -355,7 +357,7 @@ class WhiteboardController(val graph: AppGraph, val docId: String) : InkCanvasLi
 
     fun requestImage(at: PointF?) {
         imageTarget = at
-        imagePickRequest++
+        imageRequests.tryEmit(Unit)
     }
 
     // ------------------------------------------------------------------ InkCanvasListener
