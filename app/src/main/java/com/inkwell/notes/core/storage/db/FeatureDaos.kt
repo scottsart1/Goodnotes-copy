@@ -319,6 +319,49 @@ interface SyncQueueDao {
 
     @Query("DELETE FROM sync_queue WHERE documentId = :docId AND kind = :kind AND target = :target AND status = 'PENDING'")
     suspend fun dropPendingDuplicates(docId: String, kind: String, target: String)
+
+    // ---- Added by sync (export/sync)
+
+    /** Like [dropPendingDuplicates] but per recording ([refId]) and also clears failed rows it supersedes. */
+    @Query(
+        """DELETE FROM sync_queue WHERE documentId = :docId AND kind = :kind AND target = :target
+           AND refId IS :refId AND status IN ('PENDING', 'FAILED')"""
+    )
+    suspend fun dropOpenDuplicates(docId: String, kind: String, target: String, refId: String?)
+
+    /** Enqueues [item], replacing any open item for the same document, kind, target and recording. */
+    @Transaction
+    suspend fun enqueueUnique(item: SyncQueueEntity): Long {
+        if (item.refId == null) dropPendingDuplicates(item.documentId, item.kind, item.target)
+        dropOpenDuplicates(item.documentId, item.kind, item.target, item.refId)
+        return enqueue(item)
+    }
+
+    @Query("SELECT COUNT(*) FROM sync_queue WHERE status = 'PENDING'")
+    suspend fun pendingCount(): Int
+
+    @Query("SELECT COUNT(*) FROM sync_queue WHERE status = 'FAILED'")
+    fun observeFailedCount(): Flow<Int>
+
+    /** Records the outcome of one attempt without resurrecting a row that was superseded meanwhile. */
+    @Query("UPDATE sync_queue SET status = :status, attempts = :attempts, lastError = :lastError WHERE rowId = :rowId")
+    suspend fun setOutcome(rowId: Long, status: String, attempts: Int, lastError: String?)
+
+    @Query("DELETE FROM sync_queue WHERE documentId = :docId AND status IN ('PENDING', 'FAILED')")
+    suspend fun dropOpenForDocument(docId: String)
+
+    @Query("DELETE FROM sync_queue WHERE kind = :kind AND target = :target AND status IN ('PENDING', 'FAILED')")
+    suspend fun dropOpenFor(kind: String, target: String)
+
+    @Query("UPDATE sync_queue SET status = 'FAILED', lastError = :error WHERE target = :target AND status = 'PENDING'")
+    suspend fun failPendingForTarget(target: String, error: String): Int
+
+    /** "Sync now" gives failed items another chance. */
+    @Query("UPDATE sync_queue SET status = 'PENDING', attempts = 0, lastError = NULL WHERE status = 'FAILED'")
+    suspend fun retryFailed(): Int
+
+    @Query("DELETE FROM sync_queue WHERE status = 'FAILED' AND enqueuedAt < :before")
+    suspend fun pruneFailed(before: Long)
 }
 
 @Dao
