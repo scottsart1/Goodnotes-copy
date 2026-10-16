@@ -36,7 +36,7 @@ import java.io.File
  */
 internal class PageIndexer(private val graph: AppGraph) {
     private val writer: IndexWriter by lazy { (graph.search as? SearchIndexImpl)?.writer ?: IndexWriter(graph.db) }
-    private val imageCache by lazy { ImageOcrCache(File(graph.context.cacheDir, "ocr-images")) }
+    internal val imageCache by lazy { ImageOcrCache(File(graph.context.noBackupFilesDir, "ocr-cache")) }
     private val json = Json { ignoreUnknownKeys = true; coerceInputValues = true }
 
     /** What happened to a page. */
@@ -184,7 +184,7 @@ internal class PageIndexer(private val graph: AppGraph) {
         val file = graph.files.assetFile(docId, img.assetId)
         val size = withContext(Dispatchers.IO) { if (file.exists()) file.length() else -1L }
         if (size <= 0) return emptyList()
-        val cached = imageCache.get(docId, img.assetId, size) ?: run {
+        val cached = imageCache.get(docId, "$IMAGE_KEY${img.assetId}", size) ?: run {
             val bitmap = withContext(Dispatchers.IO) { ImageOcrCache.decodeForOcr(file) } ?: return emptyList()
             val w = bitmap.width.toFloat().coerceAtLeast(1f)
             val h = bitmap.height.toFloat().coerceAtLeast(1f)
@@ -193,12 +193,8 @@ internal class PageIndexer(private val graph: AppGraph) {
             } finally {
                 bitmap.recycle()
             }
-            CachedImageOcr(
-                result.engine,
-                result.blocks.map { b ->
-                    CachedImageOcr.CachedBlock(b.text, listOf(b.bounds[0] / w, b.bounds[1] / h, b.bounds[2] / w, b.bounds[3] / h), b.confidence)
-                },
-            ).also { imageCache.put(docId, img.assetId, size, it) }
+            CachedImageOcr(result.engine, result.blocks.map { normalised(it.text, it.bounds, w, h, it.confidence) }, result.confidence)
+                .also { imageCache.put(docId, "$IMAGE_KEY${img.assetId}", size, it) }
         }
         val item = floatArrayOf(img.x, img.y, img.width, img.height)
         val crop = floatArrayOf(img.cropLeft, img.cropTop, img.cropRight, img.cropBottom)
@@ -209,10 +205,24 @@ internal class PageIndexer(private val graph: AppGraph) {
         }
     }
 
-    /** OCR of a source-PDF page without a text layer, with optional AI assistance. */
+    /**
+     * OCR of a source-PDF page without a text layer, with optional AI assistance for pages the
+     * local recogniser reads with low confidence. Results are cached per page of the source
+     * PDF, so annotating a scanned page does not OCR (or pay for an AI transcription) again.
+     */
     private suspend fun scannedPageEntries(docId: String, page: PageMeta, pdfIndex: Int): List<IndexEntry> {
         val impl = recognition() ?: return emptyList()
         if (page.isInfinite) return emptyList()
+        val prefs = graph.settings.current.ocr
+        val sourceSize = withContext(Dispatchers.IO) { graph.files.sourcePdf(docId).let { if (it.exists()) it.length() else 0L } }
+        val key = "$PDF_PAGE_KEY$pdfIndex"
+        fun wantsAi(c: CachedImageOcr): Boolean {
+            val mean = c.confidence ?: return false
+            return !c.isAi && prefs.aiAssistLowConfidence && mean < prefs.lowConfidenceThreshold && aiAvailable()
+        }
+        val cached = if (sourceSize > 0) imageCache.get(docId, key, sourceSize) else null
+        if (cached != null && !wantsAi(cached)) return pageEntries(cached, page)
+
         val (w, h) = OcrScaling.renderSize(page.widthPt, page.heightPt)
         // The PDF service caches its renders: the bitmap is not ours to recycle.
         val bitmap = try {
@@ -222,12 +232,16 @@ internal class PageIndexer(private val graph: AppGraph) {
         } catch (e: Exception) {
             Log.w(TAG, "PDF page render failed: ${e.javaClass.simpleName}")
             null
-        } ?: return emptyList()
-        if (bitmap.isRecycled) return emptyList()
-        val local = impl.recognizeBitmapOrThrow(bitmap, page.widthPt, page.heightPt)
-        val prefs = graph.settings.current.ocr
-        val mean = local.confidence
-        if (prefs.aiAssistLowConfidence && mean != null && mean < prefs.lowConfidenceThreshold && aiAvailable()) {
+        }
+        if (bitmap == null || bitmap.isRecycled) return cached?.let { pageEntries(it, page) } ?: emptyList()
+
+        val local = cached?.takeIf { !it.isAi } ?: run {
+            // Recognised in page points, stored normalised to the page.
+            val r = impl.recognizeBitmapOrThrow(bitmap, page.widthPt, page.heightPt)
+            CachedImageOcr(r.engine, r.blocks.map { normalised(it.text, it.bounds, page.widthPt, page.heightPt, it.confidence) }, r.confidence)
+        }
+        var result = local
+        if (wantsAi(local)) {
             val ai = try {
                 if (bitmap.isRecycled) null else impl.recognizeWithAi(bitmap, null)
             } catch (c: CancellationException) {
@@ -236,11 +250,20 @@ internal class PageIndexer(private val graph: AppGraph) {
                 null
             }
             if (ai != null && ai.text.isNotBlank()) {
-                val whole = floatArrayOf(0f, 0f, page.widthPt, page.heightPt)
-                return ai.blocks.map { IndexEntry(it.text, whole, null, ai.engine) }
+                result = CachedImageOcr(ai.engine, ai.blocks.map { CachedImageOcr.CachedBlock(it.text, WHOLE, null) }, null)
             }
         }
-        return entries(local)
+        if (sourceSize > 0) imageCache.put(docId, key, sourceSize, result)
+        return pageEntries(result, page)
+    }
+
+    private fun normalised(text: String, b: FloatArray, w: Float, h: Float, confidence: Float?) =
+        CachedImageOcr.CachedBlock(text, listOf(b[0] / w, b[1] / h, b[2] / w, b[3] / h), confidence)
+
+    private fun pageEntries(c: CachedImageOcr, page: PageMeta): List<IndexEntry> = c.blocks.mapNotNull { b ->
+        if (b.box.size != 4) return@mapNotNull null
+        val bounds = floatArrayOf(b.box[0] * page.widthPt, b.box[1] * page.heightPt, b.box[2] * page.widthPt, b.box[3] * page.heightPt)
+        IndexEntry(b.text, bounds, b.confidence, c.engine)
     }
 
     private fun aiAvailable(): Boolean = try {
@@ -251,11 +274,15 @@ internal class PageIndexer(private val graph: AppGraph) {
 
     private fun entries(r: RecognitionResult): List<IndexEntry> = r.blocks.map { IndexEntry(it.text, it.bounds, it.confidence, r.engine) }
 
+
     companion object {
         private const val TAG = "PageIndexer"
         /** A PDF page with less embedded text than this is treated as scanned. */
         const val MIN_PDF_TEXT_CHARS = 20
         const val ENGINE_PDF_TEXT = "pdf-text"
         const val ENGINE_TYPED = "typed"
+        private const val PDF_PAGE_KEY = "pdfpage-"
+        private const val IMAGE_KEY = "asset-"
+        private val WHOLE = listOf(0f, 0f, 1f, 1f)
     }
 }

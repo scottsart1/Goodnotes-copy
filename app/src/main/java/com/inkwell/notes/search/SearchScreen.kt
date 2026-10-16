@@ -149,7 +149,7 @@ fun SearchScreen(initialQuery: String, nav: AppNavigator) {
                         expanded = expanded,
                         vm = vm,
                         onRecent = { q ->
-                            setQuery(q)
+                            text = q
                             vm.useRecent(q)
                             keyboard?.hide()
                         },

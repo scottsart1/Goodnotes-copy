@@ -90,7 +90,11 @@ class SearchViewModel(private val graph: AppGraph, initialQuery: String) : ViewM
     fun onQueryChange(q: String) {
         _state.update { it.copy(query = q) }
         queries.value = q
-        if (q.isBlank()) _state.update { it.copy(hits = emptyList(), searchedQuery = "", loading = false, failed = false, semanticFailed = false) }
+        if (q.isBlank()) {
+            // Drop any search still running for the previous text.
+            searchRun++
+            _state.update { it.copy(hits = emptyList(), searchedQuery = "", loading = false, failed = false, semanticFailed = false) }
+        }
     }
 
     fun setFilter(f: SearchFilter) = _state.update { it.copy(filter = f) }

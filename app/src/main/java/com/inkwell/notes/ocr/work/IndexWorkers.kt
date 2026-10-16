@@ -131,7 +131,10 @@ internal class CatchUpWorker(context: Context, params: WorkerParameters) : Index
             if (isStopped) return
             indexer.indexMeta(docId)
         }
-        val docs = withContext(Dispatchers.IO) { db.documents().getAll() }.filter { it.trashedAt == null }.associateBy { it.id }
+        val all = withContext(Dispatchers.IO) { db.documents().getAll() }
+        // Cached OCR of deleted documents (documents in the trash keep theirs until emptied).
+        indexer.imageCache.prune(all.mapTo(HashSet()) { it.id })
+        val docs = all.filter { it.trashedAt == null }.associateBy { it.id }
         val stale = withContext(Dispatchers.IO) { db.pages().needingIndex() + db.textIndex().pagesNeverIndexed(NEVER_INDEXED_BATCH) }
             .filter { it.documentId in docs }
             .distinctBy { it.id }
