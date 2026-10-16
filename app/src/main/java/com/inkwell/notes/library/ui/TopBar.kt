@@ -153,7 +153,17 @@ internal fun LibraryTopBar(
                 } else {
                     ViewToggleCompact(state.view, controller)
                 }
-                if (LibraryFilters.allowsSort(state.location)) SortMenu(state.sort, compact = !singleRow, onSort = controller.vm::setSort)
+                if (LibraryFilters.allowsSort(state.location)) {
+                    SortMenu(state.sort, compact = !singleRow, onSort = controller.vm::setSort)
+                } else if (singleRow) {
+                    Text(
+                        stringResource(R.string.lib_sort_recent),
+                        style = MaterialTheme.typography.labelLarge,
+                        color = Inkwell.colors.inkMuted,
+                        maxLines = 1,
+                        modifier = Modifier.padding(horizontal = 10.dp),
+                    )
+                }
                 Spacer(Modifier.width(8.dp))
                 NewButton(compact = !singleRow, onNew = onNew)
             }

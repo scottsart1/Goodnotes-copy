@@ -25,6 +25,8 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.painter.Painter
+import androidx.compose.ui.geometry.isSpecified
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.Dp
@@ -72,12 +74,16 @@ internal fun DocThumbnail(
     Box(modifier.aspectRatio(frameAspect), contentAlignment = Alignment.BottomCenter) {
         val widthPx = decodeWidthPx.coerceIn(48, 1600)
         val path = decor?.thumbnailPath
+        val key = decor?.thumbnailKey ?: path
         val context = LocalContext.current
-        val painter = if (path != null) {
-            val request = remember(decor.thumbnailKey, widthPx) {
+        // The last cover shown for this document stays up while a rewritten one loads.
+        val lastShown = remember(doc.id) { arrayOfNulls<String>(1) }
+        val painter = if (path != null && key != null) {
+            val request = remember(key, widthPx) {
                 ImageRequest.Builder(context)
                     .data(File(path))
-                    .memoryCacheKey(decor.thumbnailKey ?: path)
+                    .memoryCacheKey(key)
+                    .apply { lastShown[0]?.takeIf { it != key }?.let { placeholderMemoryCacheKey(it) } }
                     .size(Dimension.Pixels(widthPx), Dimension.Undefined)
                     .precision(Precision.INEXACT)
                     .crossfade(120)
@@ -87,9 +93,15 @@ internal fun DocThumbnail(
         } else {
             null
         }
-        val success = painter?.state as? AsyncImagePainter.State.Success
-        val intrinsic = success?.painter?.intrinsicSize
-        val aspect = if (intrinsic != null && intrinsic.width > 0f && intrinsic.height > 0f && intrinsic.width.isFinite()) {
+        val st = painter?.state
+        if (st is AsyncImagePainter.State.Success) lastShown[0] = key
+        val visible: Painter? = when (st) {
+            is AsyncImagePainter.State.Success -> st.painter
+            is AsyncImagePainter.State.Loading -> st.painter
+            else -> null
+        }
+        val intrinsic = visible?.intrinsicSize
+        val aspect = if (intrinsic != null && intrinsic.isSpecified && intrinsic.width > 0f && intrinsic.height > 0f) {
             intrinsic.width / intrinsic.height
         } else {
             placeholderAspect(doc.kind)
@@ -101,13 +113,10 @@ internal fun DocThumbnail(
                 .clip(shape)
                 .border(if (selected) 2.dp else 1.dp, borderColor, shape),
         ) {
-            if (painter != null && success != null) {
-                Image(painter, contentDescription = null, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.FillBounds)
-            } else {
-                Placeholder(doc.kind, defaultPaper)
-                // Keep the painter drawn so a pending load completes and replaces the placeholder.
-                if (painter != null) Image(painter, contentDescription = null, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.FillBounds)
-            }
+            if (visible == null) Placeholder(doc.kind, defaultPaper)
+            // Always drawn: it shows the cover (or the previous one while loading) and lets a
+            // pending load finish; while it has nothing yet it draws nothing over the placeholder.
+            if (painter != null) Image(painter, contentDescription = null, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.FillBounds)
             overlay()
         }
     }

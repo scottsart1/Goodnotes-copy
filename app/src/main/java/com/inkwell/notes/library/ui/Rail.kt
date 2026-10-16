@@ -41,6 +41,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.ripple
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -75,6 +76,7 @@ import com.inkwell.notes.library.LibraryText
 import com.inkwell.notes.library.LibraryUiState
 import com.inkwell.notes.ui.theme.Dimens
 import com.inkwell.notes.ui.theme.Inkwell
+import kotlinx.coroutines.delay
 
 /** A rail destination. */
 internal data class RailDestination(
@@ -159,7 +161,7 @@ internal fun LibraryRail(
                 })
             }
             val currentId = state.currentFolder?.id
-            val rows = state.index.visibleRows(expanded + state.index.ancestorsOf(currentId))
+            val rows = state.index.visibleRows(expanded)
             for (row in rows) {
                 RailFolderRow(
                     row = row,
@@ -305,6 +307,13 @@ private fun RailFolderRow(
     val interaction = remember { MutableInteractionSource() }
     val openLabel = stringResource(R.string.lib_folder_open)
     val menuLabel = stringResource(R.string.lib_action_more_for, folder.name)
+    // Hovering a collapsed folder while dragging opens it, so items can be dropped into sub-folders.
+    LaunchedEffect(hovered, row.expanded) {
+        if (hovered && row.hasChildren && !row.expanded) {
+            delay(700)
+            onToggle()
+        }
+    }
     Box {
         Row(
             Modifier

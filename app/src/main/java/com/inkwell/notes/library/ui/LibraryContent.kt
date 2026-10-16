@@ -204,7 +204,7 @@ private fun DocumentItem(
     val interaction = remember { MutableInteractionSource() }
     val density = LocalDensity.current
     val openLabel = stringResource(R.string.lib_action_open)
-    val selectLabel = stringResource(R.string.lib_selected)
+    val selectLabel = stringResource(R.string.lib_select)
     val moreLabel = stringResource(R.string.lib_action_more_for, doc.title)
     val onAction: (DocAction) -> Unit = { a ->
         buttonMenu = false
@@ -267,7 +267,7 @@ private fun FolderItem(folder: Folder, count: Int, controller: LibraryController
     val interaction = remember { MutableInteractionSource() }
     val density = LocalDensity.current
     val openLabel = stringResource(R.string.lib_folder_open)
-    val selectLabel = stringResource(R.string.lib_selected)
+    val selectLabel = stringResource(R.string.lib_select)
     val moreLabel = stringResource(R.string.lib_action_more_for, folder.name)
     val onAction: (FolderAction) -> Unit = { a ->
         buttonMenu = false

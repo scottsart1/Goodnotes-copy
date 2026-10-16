@@ -130,6 +130,12 @@ internal fun LibraryHome(vm: LibraryViewModel, nav: AppNavigator) {
             runCatching { rootFocus.requestFocus() }
         }
     }
+    // Reveal the open folder in the rail tree; the user can still collapse its ancestors.
+    val openPath = state.breadcrumb.map { it.id }
+    LaunchedEffect(openPath) {
+        val ancestors = openPath.dropLast(1)
+        if (!expanded.containsAll(ancestors)) expanded = expanded + ancestors
+    }
     LaunchedEffect(state.location) {
         val key = state.location.key()
         if (key != shownLocation) {

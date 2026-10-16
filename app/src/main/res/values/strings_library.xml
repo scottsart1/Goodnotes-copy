@@ -51,7 +51,6 @@
     <string name="lib_select_all">Select all</string>
     <string name="lib_clear_selection">Clear selection</string>
     <string name="lib_more">More</string>
-    <string name="lib_results_count">%1$s in this view</string>
 
     <!-- Document actions -->
     <string name="lib_action_open">Open</string>
@@ -91,6 +90,7 @@
     <string name="lib_badge_recordings">Has recordings</string>
     <string name="lib_badge_favorite">Favorite</string>
     <string name="lib_badge_pinned">Pinned</string>
+    <string name="lib_select">Select</string>
     <string name="lib_selected">Selected</string>
     <string name="lib_not_selected">Not selected</string>
     <string name="lib_drop_here">Drop to move here</string>
@@ -127,13 +127,11 @@
 
     <!-- Messages -->
     <string name="lib_undo">Undo</string>
-    <string name="lib_open">Open</string>
     <string name="lib_msg_renamed">Renamed to %1$s</string>
     <string name="lib_msg_not_enough_content">Not enough content yet</string>
     <string name="lib_msg_suggesting">Suggesting a name…</string>
     <string name="lib_msg_into_itself">A folder can’t be moved into itself</string>
     <string name="lib_msg_moved_to">Moved to %1$s</string>
-    <string name="lib_msg_folder_created">Created %1$s</string>
     <string name="lib_err_generic">Something went wrong. Please try again.</string>
     <string name="lib_err_create">Couldn’t create the document</string>
     <string name="lib_err_create_folder">Couldn’t create the folder</string>
@@ -170,7 +168,6 @@
     <string name="lib_name">Name</string>
     <string name="lib_save">Save</string>
     <string name="lib_create">Create</string>
-    <string name="lib_done">Done</string>
     <string name="lib_dialog_new_folder">New folder</string>
     <string name="lib_dialog_new_folder_in">New folder in %1$s</string>
     <string name="lib_dialog_folder_appearance">Colour and icon</string>
@@ -208,7 +205,6 @@
     <string name="lib_storage_free">Free on this tablet</string>
     <string name="lib_storage_used">Used by Inkwell</string>
     <string name="lib_storage_manage">Storage settings</string>
-    <string name="lib_storage_unavailable">Storage details aren’t available right now.</string>
     <string name="lib_close">Close</string>
 
     <!-- Notebook template -->
@@ -258,10 +254,6 @@
     <plurals name="lib_msg_moved_trash">
         <item quantity="one">Moved %d item to the Trash</item>
         <item quantity="other">Moved %d items to the Trash</item>
-    </plurals>
-    <plurals name="lib_msg_moved">
-        <item quantity="one">Moved %d item</item>
-        <item quantity="other">Moved %d items</item>
     </plurals>
     <plurals name="lib_msg_duplicated">
         <item quantity="one">Duplicated %d document</item>
