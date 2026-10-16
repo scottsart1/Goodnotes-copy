@@ -141,6 +141,17 @@ internal class PageIndexer(private val graph: AppGraph) {
         writer.replacePage(docId, ReadingOrder.TYPED_PAGE, TextSource.TYPED, entries)
     }
 
+    /** Rebuilds the transcript rows of a document's recordings from the stored transcripts. */
+    suspend fun indexTranscripts(docId: String) {
+        val db = graph.db
+        val recordings = withContext(Dispatchers.IO) { db.recordings().forDocument(docId) }
+        for (r in recordings) {
+            val segments = withContext(Dispatchers.IO) { db.transcripts().forRecording(r.id) }
+            if (segments.isEmpty()) continue
+            writer.replaceTranscript(docId, r.id, segments.map { it.toModel() }, segments.first().source)
+        }
+    }
+
     /** True when typed.json changed after its text was last indexed. */
     suspend fun typedNeedsIndex(docId: String): Boolean = withContext(Dispatchers.IO) {
         val f = graph.files.typedFile(docId)

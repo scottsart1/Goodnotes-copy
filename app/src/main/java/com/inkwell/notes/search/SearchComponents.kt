@@ -297,7 +297,9 @@ private fun PagePreview(vm: SearchViewModel, docId: String, pageId: String, page
     }
     ThumbFrame {
         val b = bitmap
-        if (b != null) {
+        if (b == null) {
+            Text((pageIndex + 1).toString(), style = MaterialTheme.typography.labelSmall, color = Inkwell.colors.inkMuted)
+        } else {
             Image(
                 b,
                 stringResource(R.string.search_page_preview, pageIndex + 1),

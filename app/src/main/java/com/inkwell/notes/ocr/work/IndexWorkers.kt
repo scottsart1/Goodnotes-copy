@@ -112,6 +112,7 @@ internal class ReindexAllWorker(context: Context, params: WorkerParameters) : In
         for (d in docs) {
             if (isStopped) return
             document(d.id, force = true, since = since)
+            indexer.indexTranscripts(d.id)
         }
         embeddings(maxBatches = 16)
     }
