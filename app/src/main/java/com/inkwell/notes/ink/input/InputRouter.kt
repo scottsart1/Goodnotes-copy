@@ -643,13 +643,21 @@ internal class InputRouter(private val e: InkEngine) {
 
     private fun fingerMove(event: MotionEvent) {
         // Track positions and late palm detection (contact growing into a palm).
+        var newPalm = false
         for (i in 0 until event.pointerCount) {
             val f = fingers[event.getPointerId(i)] ?: continue
             f.x = event.getX(i); f.y = event.getY(i)
             if (!f.palm && kindOf(event, i) == PointerKind.FINGER && policy.isPalm(event.getTouchMajor(i))) {
                 f.palm = true
+                newPalm = true
                 if (mode == Mode.PENDING || mode == Mode.TOOL) abandonFingers()
             }
+        }
+        if (newPalm && mode == Mode.MULTI) {
+            // The focal point and span now exclude the palm: re-baseline so the canvas does not jump.
+            taps.invalidate()
+            baselineMulti()
+            return
         }
         velocity?.addMovement(event)
         when (mode) {
