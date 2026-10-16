@@ -83,9 +83,10 @@ object PageRenderer {
     // ---------------------------------------------------------------- Whole pages
 
     /**
-     * Renders a full page into a new bitmap of [widthPx] width (displayed orientation, so
-     * rotated pages come out rotated). Very tall results are scaled down to stay within memory
-     * limits; unbounded pages render their content bounds.
+     * Renders a full page into a new bitmap of [widthPx] width, in page orientation (apply
+     * PageMeta.rotation when displaying it) unless [honorRotation], which renders it as shown on
+     * the canvas. Very tall results are scaled down to stay within memory limits; unbounded
+     * pages render their content bounds.
      */
     fun renderToBitmap(
         page: PageMeta,
@@ -94,9 +95,10 @@ object PageRenderer {
         background: Bitmap? = null,
         images: (String) -> Bitmap? = { null },
         drawPaper: Boolean = true,
+        honorRotation: Boolean = false,
     ): Bitmap {
         val region: Bounds? = if (page.isInfinite) (contentBoundsOf(content)?.outset(24f) ?: Bounds(0f, 0f, 1000f, 1000f)) else null
-        val rotation = if (page.isInfinite) 0 else PageRotation.normalize(page.rotation)
+        val rotation = if (page.isInfinite || !honorRotation) 0 else PageRotation.normalize(page.rotation)
         val dw = region?.width ?: PageRotation.displayWidth(page.widthPt, page.heightPt, rotation)
         val dh = region?.height ?: PageRotation.displayHeight(page.widthPt, page.heightPt, rotation)
         var scale = widthPx.coerceAtLeast(1) / dw.coerceAtLeast(1f)

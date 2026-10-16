@@ -405,6 +405,16 @@ internal class ViewportController(private val e: InkEngine) {
     fun restore(state: CanvasViewState, notifyNow: Boolean = true) {
         if (!vp.hasSize) { pendingInitial = state; needsInitial = true; return }
         stop()
+        if (state == CanvasViewState()) {
+            // A never-moved document: open at the default position (page margin / centred board).
+            defaultPosition()
+            autoCenter = true
+            if (notifyNow) {
+                e.render.updateLevel(force = true)
+                changed(userMove = false)
+            }
+            return
+        }
         val z = if (state.zoom.isFinite() && state.zoom > 0f) state.zoom else 1f
         vp.setZoomUnanchored(z)
         vp.scrollX = if (state.scrollX.isFinite()) state.scrollX else 0f

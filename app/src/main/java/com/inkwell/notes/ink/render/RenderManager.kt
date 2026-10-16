@@ -353,8 +353,8 @@ internal class RenderManager(private val host: RenderHost, scope: CoroutineScope
 
     private fun needsSnapshot(holder: PageHolder, pt: PageTiles, now: Long): Boolean {
         if (pt.snapshotInFlight) return false
-        if (pt.snapshot == null) return true
         if (pt.snapshotVersion >= holder.visualVersion) return false
+        if (pt.snapshot == null) return true
         return now - pt.lastEditAt > SNAPSHOT_IDLE_MS
     }
 
@@ -400,9 +400,11 @@ internal class RenderManager(private val host: RenderHost, scope: CoroutineScope
 
     // ---------------------------------------------------------------- Geometry helpers
 
+    private val visibleCheck = IntArray(64)
+
     private fun isPageVisible(i: Int): Boolean {
-        val n = host.visiblePages(visible)
-        for (k in 0 until n) if (visible[k] == i) return true
+        val n = host.visiblePages(visibleCheck)
+        for (k in 0 until n) if (visibleCheck[k] == i) return true
         return false
     }
 
