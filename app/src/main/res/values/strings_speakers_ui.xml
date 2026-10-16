@@ -206,7 +206,7 @@
     <string name="spk_enroll_saved">Voice sample saved. %1$s will be recognised in new recordings.</string>
     <string name="spk_enroll_too_little">There wasn\'t enough speech in that sample. Find a quiet spot and try again.</string>
     <string name="spk_enroll_mic_busy">The microphone is in use by another app.</string>
-    <string name="spk_enroll_doc_recording">Stop the recording in your notebook first.</string>
+    <string name="spk_enroll_doc_recording">A recording is running. Stop it first, then record the voice sample.</string>
     <string name="spk_enroll_permission">Inkwell needs microphone access to record a voice sample.</string>
     <string name="spk_enroll_failed">Couldn\'t save the voice sample. Please try again.</string>
     <string name="spk_enroll_privacy">The sample is turned into an encrypted voiceprint on this tablet and then deleted.</string>

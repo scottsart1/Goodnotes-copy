@@ -15,7 +15,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -153,171 +152,169 @@ internal fun SpeakersContent(s: AppSettings, actions: SettingsActions, openSecti
     val failed = stringResource(R.string.spk_set_failed)
     fun set(transform: (SpeakerPrefs) -> SpeakerPrefs) = actions.update { it.copy(speakers = transform(it.speakers)) }
 
-    run {
-        if (title != null) {
-            Text(
-                title,
-                style = MaterialTheme.typography.headlineSmall,
-                color = Inkwell.colors.ink,
-                modifier = Modifier.padding(top = 8.dp).semantics { heading() },
-            )
-        }
-        SettingsGroup(stringResource(R.string.spk_set_engine), description = stringResource(R.string.spk_set_engine_desc)) {
-            RadioRow(
-                title = stringResource(R.string.spk_set_engine_device),
-                selected = prefs.engine == SpeakerEngine.DEVICE,
-                onClick = { set { it.copy(engine = SpeakerEngine.DEVICE) } },
-                subtitle = stringResource(R.string.spk_set_engine_device_sub, SpeakerStatusLogic.MODEL_DOWNLOAD_MB),
-            )
-            RowDivider()
-            val cost = cloud?.usdPerMinute?.let { AudioText.usd(it) }
-            RadioRow(
-                title = stringResource(R.string.spk_set_engine_openai),
-                selected = prefs.engine == SpeakerEngine.OPENAI,
-                onClick = { set { it.copy(engine = SpeakerEngine.OPENAI) } },
-                subtitle = stringResource(R.string.spk_set_engine_openai_sub) +
-                    (cost?.let { " " + stringResource(R.string.spk_set_engine_openai_cost, it) } ?: ""),
-            )
-            if (prefs.engine == SpeakerEngine.OPENAI && cloud?.available == false) {
-                Note(
-                    stringResource(R.string.spk_set_engine_openai_missing),
-                    tone = NoteTone.WARNING,
-                    icon = Icons.Outlined.WarningAmber,
-                    modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 8.dp),
-                ) {
-                    QuietButton(stringResource(R.string.spk_set_open_ai), onClick = { openSection(SettingsSection.AI) })
-                }
-            }
-            RowDivider()
-            RadioRow(
-                title = stringResource(R.string.spk_set_engine_off),
-                selected = prefs.engine == SpeakerEngine.OFF,
-                onClick = { set { it.copy(engine = SpeakerEngine.OFF) } },
-                subtitle = stringResource(R.string.spk_set_engine_off_sub),
-            )
-        }
-
-        if (prefs.engine == SpeakerEngine.DEVICE) {
-            SettingsGroup(stringResource(R.string.spk_set_models)) {
-                ModelsRow(models, actions, onDelete = { dialog = VoicesDialog.DeleteModels })
-                RowDivider()
-                SwitchRow(
-                    stringResource(R.string.spk_set_wifi_only),
-                    prefs.downloadOnUnmeteredOnly,
-                    { v -> set { it.copy(downloadOnUnmeteredOnly = v) } },
-                    subtitle = stringResource(R.string.spk_set_wifi_only_sub),
-                )
-            }
-        }
-
-        if (prefs.engine != SpeakerEngine.OFF) {
-            SettingsGroup(stringResource(R.string.spk_set_naming)) {
-                SwitchRow(
-                    stringResource(R.string.spk_set_ask),
-                    prefs.askToName,
-                    { v -> set { it.copy(askToName = v) } },
-                    subtitle = stringResource(R.string.spk_set_ask_sub),
-                )
-                RowDivider()
-                SwitchRow(
-                    stringResource(R.string.spk_set_remember),
-                    prefs.rememberVoices,
-                    { v ->
-                        set { it.copy(rememberVoices = v) }
-                        // Turning it off offers to delete what is already stored.
-                        if (!v && people.orEmpty().any { it.voiceSamples > 0 }) dialog = VoicesDialog.ForgetAfterOff
-                    },
-                    subtitle = stringResource(R.string.spk_set_remember_sub),
-                )
-                RowDivider()
-                val auto = stringResource(R.string.spk_set_expected_auto)
-                ChipsRow(
-                    title = stringResource(R.string.spk_set_expected),
-                    subtitle = stringResource(R.string.spk_set_expected_sub),
-                    choices = SpeakerPrefsLogic.expectedSpeakerChoices.map { Choice(it, if (it == 0) auto else it.toString()) },
-                    selected = SpeakerPrefsLogic.expected(prefs),
-                    onSelect = { n -> set { it.copy(expectedSpeakers = n) } },
-                )
-                if (prefs.engine == SpeakerEngine.DEVICE && prefs.rememberVoices) {
-                    RowDivider()
-                    val sensitivity = MatchSensitivity.of(prefs.matchThreshold)
-                    SegmentedRow(
-                        title = stringResource(R.string.spk_set_sensitivity),
-                        subtitle = stringResource(R.string.spk_set_sensitivity_sub),
-                        choices = listOf(
-                            Choice(MatchSensitivity.STRICT, stringResource(R.string.spk_set_strict)),
-                            Choice(MatchSensitivity.BALANCED, stringResource(R.string.spk_set_balanced)),
-                            Choice(MatchSensitivity.LOOSE, stringResource(R.string.spk_set_loose)),
-                        ),
-                        selected = sensitivity,
-                        onSelect = { m -> set { it.copy(matchThreshold = m.threshold) } },
-                        footer = {
-                            Note(
-                                stringResource(
-                                    when (sensitivity) {
-                                        MatchSensitivity.STRICT -> R.string.spk_set_sensitivity_strict_note
-                                        MatchSensitivity.BALANCED -> R.string.spk_set_sensitivity_balanced_note
-                                        MatchSensitivity.LOOSE -> R.string.spk_set_sensitivity_loose_note
-                                    },
-                                ),
-                            )
-                        },
-                    )
-                }
-            }
-        }
-
-        SettingsGroup(stringResource(R.string.spk_set_people), description = stringResource(R.string.spk_set_people_desc)) {
-            val list = people
-            val hasMe = list.orEmpty().any { it.isMe }
-            if (!hasMe && prefs.rememberVoices && prefs.engine != SpeakerEngine.OFF) {
-                ActionRow(
-                    title = stringResource(R.string.spk_set_record_me),
-                    subtitle = stringResource(R.string.spk_set_record_me_sub),
-                    actionLabel = stringResource(R.string.spk_set_record),
-                    onAction = { dialog = VoicesDialog.NameMe },
-                )
-                RowDivider()
-            }
-            when {
-                list == null -> Spacer(Modifier.heightIn(min = 56.dp))
-                list.isEmpty() -> Text(
-                    stringResource(R.string.spk_set_people_empty),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = Inkwell.colors.inkMuted,
-                    modifier = Modifier.padding(16.dp),
-                )
-                else -> list.forEachIndexed { i, p ->
-                    if (i > 0) RowDivider()
-                    PersonRow(
-                        p = p,
-                        canMerge = list.size > 1,
-                        canRecord = prefs.rememberVoices,
-                        onRename = { dialog = VoicesDialog.Rename(p) },
-                        onToggleMe = { actions.background(failed) { graph.speakers.setMe(if (p.isMe) null else p.id) } },
-                        onMerge = { dialog = VoicesDialog.Merge(p) },
-                        onRecord = { dialog = VoicesDialog.Enroll(p) },
-                        onDelete = { dialog = VoicesDialog.Delete(p) },
-                    )
-                }
-            }
-            if (!prefs.rememberVoices && !list.isNullOrEmpty()) {
-                Note(stringResource(R.string.spk_set_voice_off_note), modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 12.dp))
-            }
-        }
-
-        SettingsGroup(null) {
-            ActionRow(
-                title = stringResource(R.string.spk_set_forget_all),
-                subtitle = stringResource(R.string.spk_set_forget_all_sub),
-                actionLabel = stringResource(R.string.spk_set_forget),
-                onAction = { dialog = VoicesDialog.ForgetAll },
-                destructive = true,
-            )
-        }
-
-        Note(stringResource(R.string.spk_explainer), icon = Icons.Outlined.Lock)
+    if (title != null) {
+        Text(
+            title,
+            style = MaterialTheme.typography.headlineSmall,
+            color = Inkwell.colors.ink,
+            modifier = Modifier.padding(top = 8.dp).semantics { heading() },
+        )
     }
+    SettingsGroup(stringResource(R.string.spk_set_engine), description = stringResource(R.string.spk_set_engine_desc)) {
+        RadioRow(
+            title = stringResource(R.string.spk_set_engine_device),
+            selected = prefs.engine == SpeakerEngine.DEVICE,
+            onClick = { set { it.copy(engine = SpeakerEngine.DEVICE) } },
+            subtitle = stringResource(R.string.spk_set_engine_device_sub, SpeakerStatusLogic.MODEL_DOWNLOAD_MB),
+        )
+        RowDivider()
+        val cost = cloud?.usdPerMinute?.let { AudioText.usd(it) }
+        RadioRow(
+            title = stringResource(R.string.spk_set_engine_openai),
+            selected = prefs.engine == SpeakerEngine.OPENAI,
+            onClick = { set { it.copy(engine = SpeakerEngine.OPENAI) } },
+            subtitle = stringResource(R.string.spk_set_engine_openai_sub) +
+                (cost?.let { " " + stringResource(R.string.spk_set_engine_openai_cost, it) } ?: ""),
+        )
+        if (prefs.engine == SpeakerEngine.OPENAI && cloud?.available == false) {
+            Note(
+                stringResource(R.string.spk_set_engine_openai_missing),
+                tone = NoteTone.WARNING,
+                icon = Icons.Outlined.WarningAmber,
+                modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 8.dp),
+            ) {
+                QuietButton(stringResource(R.string.spk_set_open_ai), onClick = { openSection(SettingsSection.AI) })
+            }
+        }
+        RowDivider()
+        RadioRow(
+            title = stringResource(R.string.spk_set_engine_off),
+            selected = prefs.engine == SpeakerEngine.OFF,
+            onClick = { set { it.copy(engine = SpeakerEngine.OFF) } },
+            subtitle = stringResource(R.string.spk_set_engine_off_sub),
+        )
+    }
+
+    if (prefs.engine == SpeakerEngine.DEVICE) {
+        SettingsGroup(stringResource(R.string.spk_set_models)) {
+            ModelsRow(models, actions, onDelete = { dialog = VoicesDialog.DeleteModels })
+            RowDivider()
+            SwitchRow(
+                stringResource(R.string.spk_set_wifi_only),
+                prefs.downloadOnUnmeteredOnly,
+                { v -> set { it.copy(downloadOnUnmeteredOnly = v) } },
+                subtitle = stringResource(R.string.spk_set_wifi_only_sub),
+            )
+        }
+    }
+
+    if (prefs.engine != SpeakerEngine.OFF) {
+        SettingsGroup(stringResource(R.string.spk_set_naming)) {
+            SwitchRow(
+                stringResource(R.string.spk_set_ask),
+                prefs.askToName,
+                { v -> set { it.copy(askToName = v) } },
+                subtitle = stringResource(R.string.spk_set_ask_sub),
+            )
+            RowDivider()
+            SwitchRow(
+                stringResource(R.string.spk_set_remember),
+                prefs.rememberVoices,
+                { v ->
+                    set { it.copy(rememberVoices = v) }
+                    // Turning it off offers to delete what is already stored.
+                    if (!v && people.orEmpty().any { it.voiceSamples > 0 }) dialog = VoicesDialog.ForgetAfterOff
+                },
+                subtitle = stringResource(R.string.spk_set_remember_sub),
+            )
+            RowDivider()
+            val auto = stringResource(R.string.spk_set_expected_auto)
+            ChipsRow(
+                title = stringResource(R.string.spk_set_expected),
+                subtitle = stringResource(R.string.spk_set_expected_sub),
+                choices = SpeakerPrefsLogic.expectedSpeakerChoices.map { Choice(it, if (it == 0) auto else it.toString()) },
+                selected = SpeakerPrefsLogic.expected(prefs),
+                onSelect = { n -> set { it.copy(expectedSpeakers = n) } },
+            )
+            if (prefs.engine == SpeakerEngine.DEVICE && prefs.rememberVoices) {
+                RowDivider()
+                val sensitivity = MatchSensitivity.of(prefs.matchThreshold)
+                SegmentedRow(
+                    title = stringResource(R.string.spk_set_sensitivity),
+                    subtitle = stringResource(R.string.spk_set_sensitivity_sub),
+                    choices = listOf(
+                        Choice(MatchSensitivity.STRICT, stringResource(R.string.spk_set_strict)),
+                        Choice(MatchSensitivity.BALANCED, stringResource(R.string.spk_set_balanced)),
+                        Choice(MatchSensitivity.LOOSE, stringResource(R.string.spk_set_loose)),
+                    ),
+                    selected = sensitivity,
+                    onSelect = { m -> set { it.copy(matchThreshold = m.threshold) } },
+                    footer = {
+                        Note(
+                            stringResource(
+                                when (sensitivity) {
+                                    MatchSensitivity.STRICT -> R.string.spk_set_sensitivity_strict_note
+                                    MatchSensitivity.BALANCED -> R.string.spk_set_sensitivity_balanced_note
+                                    MatchSensitivity.LOOSE -> R.string.spk_set_sensitivity_loose_note
+                                },
+                            ),
+                        )
+                    },
+                )
+            }
+        }
+    }
+
+    SettingsGroup(stringResource(R.string.spk_set_people), description = stringResource(R.string.spk_set_people_desc)) {
+        val list = people
+        val hasMe = list.orEmpty().any { it.isMe }
+        if (!hasMe && prefs.rememberVoices && prefs.engine != SpeakerEngine.OFF) {
+            ActionRow(
+                title = stringResource(R.string.spk_set_record_me),
+                subtitle = stringResource(R.string.spk_set_record_me_sub),
+                actionLabel = stringResource(R.string.spk_set_record),
+                onAction = { dialog = VoicesDialog.NameMe },
+            )
+            RowDivider()
+        }
+        when {
+            list == null -> Spacer(Modifier.heightIn(min = 56.dp))
+            list.isEmpty() -> Text(
+                stringResource(R.string.spk_set_people_empty),
+                style = MaterialTheme.typography.bodyMedium,
+                color = Inkwell.colors.inkMuted,
+                modifier = Modifier.padding(16.dp),
+            )
+            else -> list.forEachIndexed { i, p ->
+                if (i > 0) RowDivider()
+                PersonRow(
+                    p = p,
+                    canMerge = list.size > 1,
+                    canRecord = prefs.rememberVoices,
+                    onRename = { dialog = VoicesDialog.Rename(p) },
+                    onToggleMe = { actions.background(failed) { graph.speakers.setMe(if (p.isMe) null else p.id) } },
+                    onMerge = { dialog = VoicesDialog.Merge(p) },
+                    onRecord = { dialog = VoicesDialog.Enroll(p) },
+                    onDelete = { dialog = VoicesDialog.Delete(p) },
+                )
+            }
+        }
+        if (!prefs.rememberVoices && !list.isNullOrEmpty()) {
+            Note(stringResource(R.string.spk_set_voice_off_note), modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 12.dp))
+        }
+    }
+
+    SettingsGroup(null) {
+        ActionRow(
+            title = stringResource(R.string.spk_set_forget_all),
+            subtitle = stringResource(R.string.spk_set_forget_all_sub),
+            actionLabel = stringResource(R.string.spk_set_forget),
+            onAction = { dialog = VoicesDialog.ForgetAll },
+            destructive = true,
+        )
+    }
+
+    Note(stringResource(R.string.spk_explainer), icon = Icons.Outlined.Lock)
 
     VoicesDialogs(dialog, people.orEmpty(), actions, onDismiss = { dialog = null }, onEnroll = { dialog = VoicesDialog.Enroll(it) })
 }

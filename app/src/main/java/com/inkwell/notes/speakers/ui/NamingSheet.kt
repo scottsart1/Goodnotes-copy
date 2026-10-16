@@ -267,7 +267,11 @@ private fun NamingContent(vm: NamingViewModel, close: () -> Unit) {
     val unnamed = list.orEmpty().any { it.personId == null }
 
     fun finish() {
-        if (explain) SpeakerUiMemory.markExplained(context)
+        // The explainer counts as seen only if it was shown (it is replaced while voices aren't remembered).
+        if (explain && prefs.rememberVoices) {
+            SpeakerUiMemory.markExplained(context)
+            explain = false
+        }
         close()
     }
 

@@ -60,8 +60,10 @@ import com.inkwell.notes.speakers.ui.logic.NamingPromptLogic
 import com.inkwell.notes.speakers.ui.logic.SpeakerTranscript
 import com.inkwell.notes.ui.theme.Dimens
 import com.inkwell.notes.ui.theme.Inkwell
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flowOn
 
 private val R12 = RoundedCornerShape(12.dp)
 
@@ -90,8 +92,10 @@ internal fun BoxWithConstraintsScope.DockNamingPrompt(graph: AppGraph, docId: St
     val id = candidate
     if (id != null) {
         val settings by graph.settings.settings.collectAsStateWithLifecycle()
-        val needs by remember(id) { graph.speakers.needsNaming(id).catch { emit(false) } }.collectAsStateWithLifecycle(false)
-        val speakers by remember(id) { graph.speakers.speakers(id).catch { emit(emptyList()) } }.collectAsStateWithLifecycle(emptyList())
+        val needs by remember(id) { graph.speakers.needsNaming(id).catch { emit(false) }.flowOn(Dispatchers.IO) }.collectAsStateWithLifecycle(false)
+        val speakers by remember(id) {
+            graph.speakers.speakers(id).catch { emit(emptyList()) }.flowOn(Dispatchers.IO)
+        }.collectAsStateWithLifecycle(emptyList())
         val recordingActive by remember { derivedStateOf { recording.value is RecordingState.Active } }
         val unnamed = SpeakerTranscript.unnamedCount(speakers)
         val visible = NamingPromptLogic.visible(

@@ -72,9 +72,15 @@ internal class VoiceSampleRecorder(private val context: Context) {
 
         private fun dir(context: Context) = File(context.cacheDir, "voice-sample")
 
-        /** Deletes samples left over from an earlier run. */
-        fun sweep(context: Context) {
-            runCatching { dir(context).listFiles()?.forEach { it.delete() } }
+        /**
+         * Deletes samples left over from an earlier run (a crash before the voiceprint was made).
+         * Recent files are kept: one may still be on its way into a voiceprint.
+         */
+        fun sweep(context: Context, olderThanMs: Long = STALE_MS) {
+            val cutoff = System.currentTimeMillis() - olderThanMs
+            runCatching { dir(context).listFiles()?.filter { it.lastModified() < cutoff }?.forEach { it.delete() } }
         }
+
+        private const val STALE_MS = 10 * 60_000L
     }
 }

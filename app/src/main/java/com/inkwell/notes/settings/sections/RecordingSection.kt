@@ -16,6 +16,7 @@ import com.inkwell.notes.core.model.AiTask
 import com.inkwell.notes.core.model.AppSettings
 import com.inkwell.notes.core.model.DockSide
 import com.inkwell.notes.core.model.RecordingPrefs
+import com.inkwell.notes.core.model.SpeakerEngine
 import com.inkwell.notes.settings.logic.SettingsFormat
 import com.inkwell.notes.settings.ui.Choice
 import com.inkwell.notes.settings.ui.Note
@@ -84,6 +85,9 @@ internal fun RecordingSection(s: AppSettings, actions: SettingsActions, openSect
                     "Transcribing with ${status.modelName ?: "your transcription model"}.",
                     modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 12.dp),
                 )
+            }
+            if (rec.autoTranscribe && s.speakers.engine == SpeakerEngine.OPENAI) {
+                Note(stringResource(R.string.spk_consent_clips), modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 12.dp))
             }
         }
 

@@ -207,11 +207,14 @@ internal class RecordingsViewModel(private val graph: AppGraph, val docId: Strin
         .map { info -> info?.takeIf { it.state.isFinished }?.outputData?.getString(KEY_SPEAKER_NOTE)?.trim()?.takeIf { it.isNotEmpty() } }
         .stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
-    /** Speakers the transcript shows: none while the engine is off (stored names still show). */
-    private val shownSpeakers: Flow<List<RecordingSpeaker>> =
-        combine(speakers, speakerPrefs) { s, p -> if (p.engine == SpeakerEngine.OFF) emptyList() else s }
+    /**
+     * Speakers and voice filter the transcript uses: none while the engine is off (stored names
+     * still show, and a filter set earlier can't hide blocks without a way to clear it).
+     */
+    private val shownSpeakers: Flow<Pair<List<RecordingSpeaker>, String?>> =
+        combine(speakers, speakerFilter, speakerPrefs) { s, f, p -> if (p.engine == SpeakerEngine.OFF) emptyList<RecordingSpeaker>() to null else s to f }
 
-    val rows: StateFlow<List<SpeakerTranscript.Row>> = combine(transcript, query, shownSpeakers, speakerFilter) { segs, q, spk, only ->
+    val rows: StateFlow<List<SpeakerTranscript.Row>> = combine(transcript, query, shownSpeakers) { segs, q, (spk, only) ->
         SpeakerTranscript.rows(segs, q, spk.associateBy { it.label }, only)
     }
         .flowOn(Dispatchers.Default)

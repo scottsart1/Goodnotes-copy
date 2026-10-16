@@ -202,9 +202,11 @@ private fun SpeakerStatusCard(vm: RecordingsViewModel, rec: Recording, status: S
                         color = c.inkMuted,
                     )
                 }
-                AudioPrimaryButton(
+                // Secondary: transcription stays the recording's main action.
+                AudioSecondaryButton(
                     stringResource(if (status.needsDownload) R.string.spk_identify_download_action else R.string.spk_identify_action),
                     onClick = { vm.identifySpeakers(rec, replace = false) },
+                    color = c.accent,
                 )
             }
             SpeakerStatus.Hidden -> Unit

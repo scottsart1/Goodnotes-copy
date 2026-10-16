@@ -295,7 +295,7 @@ private fun DetailContent(
                     onShowNotes = { onShowNotesAt(rec.id, vm.positionFor(rec)) },
                     lanes = lanes,
                     lanesDescription = lanesDescription,
-                    focusLabel = speakerFilter,
+                    focusLabel = speakerFilter.takeIf { speakerState.enabled },
                 )
             }
             Column(Modifier.fillMaxSize()) {
@@ -336,7 +336,7 @@ private fun DetailContent(
                                 else transcript.getOrNull(index)?.let { vm.seek(rec, it.startMs, play = true) }
                             },
                             speakersEnabled = speakerState.enabled,
-                            filtered = speakerFilter != null,
+                            filtered = speakerState.enabled && speakerFilter != null,
                             hasSpeakerNames = hasSpeakerNames,
                             onChangeSpeaker = { vm.changeSpeaker(rec, it) },
                         )
