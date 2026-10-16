@@ -259,7 +259,7 @@ class AiEngine(
         val adapter = providers.find(ref.provider) ?: fail("${ref.provider.displayName} is not supported in this version.")
         if (!p.providerSettings(ref.provider).enabled) fail("${ref.provider.displayName} is turned off in AI settings.")
         val key = keys.get(ref.provider)?.takeIf { it.isNotBlank() }
-            ?: fail("Add a ${ref.provider.displayName} API key in Settings > AI providers to use ${ref.modelId}.")
+            ?: fail("Add your ${ref.provider.displayName} API key in Settings > AI providers to use ${ref.modelId}.")
         val spec = models.spec(ref)
         if (!spec.has(AiCapability.TEXT)) fail("${spec.displayName} is not a chat model. Choose a text model.")
         val (base, official) = try { endpoint(ref.provider) } catch (e: AiException) { fail(e.message ?: "Invalid custom endpoint.") }
