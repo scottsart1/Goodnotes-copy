@@ -153,12 +153,23 @@ object MarkdownWriter {
     }
 
     private val BLOCK_START = Regex("""(?m)^(\s{0,3})([#+\-=]|\d{1,9}[.)])(?=\s|$)""")
+    private val LEADING_WHITESPACE = Regex("""(?m)^[ \t]+""")
 
-    /** Escapes text that would otherwise start a heading, list or rule at a line start. */
-    private fun escapeLineStarts(s: String): String =
-        BLOCK_START.replace(s) { m ->
+    /**
+     * Escapes text that would otherwise start a heading, list or rule at a line start, and keeps
+     * indentation of four or more columns (a tab counts as four) from starting an indented code
+     * block by writing it as non-breaking spaces.
+     */
+    private fun escapeLineStarts(s: String): String {
+        val indented = LEADING_WHITESPACE.replace(s) { m ->
+            val ws = m.value
+            val columns = ws.sumOf { if (it == '\t') 4 else 1 }
+            if (columns < 4) ws else ws.replace("\t", "&nbsp;&nbsp;&nbsp;&nbsp;").replace(" ", "&nbsp;")
+        }
+        return BLOCK_START.replace(indented) { m ->
             val lead = m.groupValues[1]
             val token = m.groupValues[2]
             if (token.first().isDigit()) lead + token.dropLast(1) + "\\" + token.last() else "$lead\\$token"
         }
+    }
 }
