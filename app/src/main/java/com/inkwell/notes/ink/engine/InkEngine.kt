@@ -153,6 +153,13 @@ internal class InkEngine(val view: InkCanvasView) : ToolHost, CommandTarget, Ren
     }
 
     fun updatePages(metas: List<PageMeta>) {
+        if (PageChanges.isBookkeepingOnly(pages.map { it.meta }, metas)) {
+            // Autosave bumps modifiedAt (and thumbnails arrive) a few hundred milliseconds after
+            // every stroke, i.e. usually while the next one is being written. Nothing to lay out
+            // again, and committing and ending the gesture in progress would truncate that stroke.
+            for ((i, m) in metas.withIndex()) pages[i].meta = m
+            return
+        }
         flushTools()
         val anchor = viewportCtl.captureAnchor()
         val old = HashMap(byId)
@@ -160,8 +167,7 @@ internal class InkEngine(val view: InkCanvasView) : ToolHost, CommandTarget, Ren
         for (m in metas) {
             val h = old.remove(m.id)
             if (h == null) { addHolder(PageHolder(m)); continue }
-            val renderChanged = h.meta.widthPt != m.widthPt || h.meta.heightPt != m.heightPt || h.meta.paper != m.paper ||
-                h.meta.rotation != m.rotation || h.meta.pdfPageIndex != m.pdfPageIndex
+            val renderChanged = PageChanges.affectsRendering(h.meta, m)
             h.meta = m
             addHolder(h)
             if (renderChanged) {

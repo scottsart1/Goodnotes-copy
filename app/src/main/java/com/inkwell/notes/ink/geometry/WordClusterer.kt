@@ -26,6 +26,8 @@ object WordClusterer {
     const val QUICK_GAP_FACTOR = 0.6f
     const val QUICK_MS = 1500L
     const val MIN_LINE_HEIGHT = 6f
+    /** Share of the shorter stroke's height two strokes must overlap vertically to be on one line. */
+    const val BAND_OVERLAP = 0.45f
 
     /** Ids of the word containing [seedId] (always includes the seed when present). */
     fun wordOf(seedId: String, strokes: List<StrokeBox>): Set<String> {
@@ -94,14 +96,20 @@ object WordClusterer {
         val minH = max(1f, min(ab.height, bb.height))
         val quick = abs(b.startMs - a.endMs) <= QUICK_MS || abs(a.startMs - b.endMs) <= QUICK_MS
         val gapLimit = h * if (quick) QUICK_GAP_FACTOR else GAP_FACTOR
-        if (overlapY >= 0.25f * minH || overlapY >= 0.25f * h) {
+        // Letters of one line share its x-height band, so the shorter stroke overlaps the other by
+        // at least half its height (a descender "p" next to an ascender "t" shares exactly the
+        // band). A descender reaching into the ascenders of the line below overlaps far less; a
+        // looser threshold used to merge stacked lines into one "word".
+        if (overlapY >= BAND_OVERLAP * minH) {
             return gapX <= gapLimit
         }
-        // Accent above/below: small stroke horizontally over the other, vertically close.
+        // Accent above: a small stroke (i-dot, t-bar, umlaut) sitting over the letter, vertically
+        // close. Nothing below a letter is part of it except its own descender.
         val small = if (ab.height < bb.height) ab else bb
         val big = if (small === ab) bb else ab
         val horizontallyOver = small.right >= big.left - h * 0.15f && small.left <= big.right + h * 0.15f
+        val above = small.bottom <= big.top + h * 0.25f
         val gapY = max(0f, max(ab.top, bb.top) - min(ab.bottom, bb.bottom))
-        return small.height <= h * 0.6f && horizontallyOver && gapY <= h * 0.6f
+        return above && small.height <= h * 0.6f && horizontallyOver && gapY <= h * 0.6f
     }
 }

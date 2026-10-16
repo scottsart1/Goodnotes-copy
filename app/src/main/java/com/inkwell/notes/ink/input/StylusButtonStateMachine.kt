@@ -62,6 +62,12 @@ class StylusButtonStateMachine {
 
     private var hoverExitDeadline = -1L
     private var pendingModeChange = false
+    /**
+     * The button was still down when the pen left hover range. Seeing it down again on re-entry
+     * is then a continuation, not a new press (only an explicit BUTTON_PRESS is), so toggle mode
+     * does not flip back.
+     */
+    private var heldThroughLostHover = false
     private val result = Result()
 
     val effectiveTool: ToolType get() = temporaryTool ?: baseTool
@@ -89,9 +95,11 @@ class StylusButtonStateMachine {
         hoverExitDeadline = -1L
         val held = (buttonState and BUTTON_MASK) != 0
         val wasHeld = buttonHeld
+        val resumed = held && !wasHeld && heldThroughLostHover && phase != StylusPhase.BUTTON_PRESS
+        heldThroughLostHover = false
         buttonHeld = held
         eraserTip = kind == PointerKind.ERASER_TIP
-        if (mode == SideButtonMode.TOGGLE_ERASER && held && !wasHeld) {
+        if (mode == SideButtonMode.TOGGLE_ERASER && held && !wasHeld && !resumed) {
             val target = if (baseTool == ToolType.ERASER) lastNonEraserTool else ToolType.ERASER
             result.requestTool = target
             // Optimistic: the host applies the request asynchronously.
@@ -107,6 +115,7 @@ class StylusButtonStateMachine {
         result.reset(effectiveTool)
         if (hoverExitDeadline < 0 || nowMs < hoverExitDeadline) return result
         hoverExitDeadline = -1L
+        heldThroughLostHover = buttonHeld
         buttonHeld = false
         eraserTip = false
         updateTemporary()
@@ -124,7 +133,7 @@ class StylusButtonStateMachine {
 
     /** Forgets everything (e.g. when the view is rebound). */
     fun reset() {
-        buttonHeld = false; eraserTip = false; temporaryTool = null; hoverExitDeadline = -1L
+        buttonHeld = false; eraserTip = false; temporaryTool = null; hoverExitDeadline = -1L; heldThroughLostHover = false
     }
 
     private fun updateTemporary() {

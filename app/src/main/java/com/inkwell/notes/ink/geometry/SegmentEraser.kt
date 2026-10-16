@@ -4,8 +4,8 @@ import kotlin.math.PI
 
 /**
  * Segment eraser geometry: removes the part of a polyline between its crossings with other
- * polylines (or itself). When it crosses nothing, sharp corners act as the cut points, so a
- * hand-drawn box loses one side. Pure Kotlin.
+ * polylines (or itself) and its sharp corners, so a hand-drawn box loses one side whether or not
+ * another stroke crosses it. Pure Kotlin.
  */
 object SegmentEraser {
     /** Turning angle (radians) above which a vertex counts as a corner. */
@@ -63,6 +63,17 @@ object SegmentEraser {
         val arr = out.toArray()
         arr.sort()
         return dedupe(arr, 1e-3f)
+    }
+
+    /** Union of two sorted cut lists (crossings and corners), sorted and deduplicated. */
+    fun merge(a: FloatArray, b: FloatArray): FloatArray {
+        if (a.isEmpty()) return b
+        if (b.isEmpty()) return a
+        val all = FloatArray(a.size + b.size)
+        System.arraycopy(a, 0, all, 0, a.size)
+        System.arraycopy(b, 0, all, a.size, b.size)
+        all.sort()
+        return dedupe(all, 1e-3f)
     }
 
     /** Collapses sorted values closer than [eps] (crossings found twice at shared sample points). */

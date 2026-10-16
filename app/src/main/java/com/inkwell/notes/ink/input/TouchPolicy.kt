@@ -84,6 +84,11 @@ class MultiFingerTapTracker(var tapTimeoutMs: Long = 320L, var slopPx: Float = 2
 
     fun invalidate() { valid = false }
 
+    /** Forgets the gesture in progress (single-finger gestures never reach [end]). */
+    fun cancel() {
+        startMs = -1; maxPointers = 0; valid = false
+    }
+
     /** Call when the last finger lifts; returns 2 or 3 for a tap, otherwise 0. */
     fun end(timeMs: Long): Int {
         val ok = valid && startMs >= 0 && timeMs - startMs <= tapTimeoutMs && maxPointers in 2..3
