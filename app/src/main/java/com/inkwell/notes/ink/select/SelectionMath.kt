@@ -68,11 +68,16 @@ object SelectionMath {
             val s = (((vx - ax) * dx + (vy - ay) * dy) / len2).coerceAtLeast(max(minSx, minSy))
             return Affine.scale(s, s, ax, ay)
         }
+        // A box without extent along the dragged axis has nothing to scale (and would divide by zero).
         return if (h.fx != 0) {
-            val s = ((vx - ax) / (hp[0] - ax)).coerceAtLeast(minSx)
+            val span = hp[0] - ax
+            if (abs(span) < 1e-6f) return Affine.IDENTITY
+            val s = ((vx - ax) / span).coerceAtLeast(minSx)
             Affine.scale(s, 1f, ax, ay)
         } else {
-            val s = ((vy - ay) / (hp[1] - ay)).coerceAtLeast(minSy)
+            val span = hp[1] - ay
+            if (abs(span) < 1e-6f) return Affine.IDENTITY
+            val s = ((vy - ay) / span).coerceAtLeast(minSy)
             Affine.scale(1f, s, ax, ay)
         }
     }
