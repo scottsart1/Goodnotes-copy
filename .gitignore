@@ -1,0 +1,14 @@
+*.iml
+.gradle/
+/local.properties
+.idea/
+.DS_Store
+build/
+/captures
+.externalNativeBuild
+.cxx
+.kotlin/
+node_modules/
+web/notes-vault/.wrangler/
+web/notes-vault/.dev.vars
+*.log

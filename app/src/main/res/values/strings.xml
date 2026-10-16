@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Inkwell</string>
+    <string name="recording_channel_name">Recording</string>
+    <string name="recording_channel_description">Shows while Inkwell is recording audio for a notebook.</string>
+    <string name="sync_channel_name">Sync and background work</string>
+</resources>
