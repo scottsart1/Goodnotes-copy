@@ -48,9 +48,12 @@ object LassoSelector {
      */
     fun select(content: PageContent, index: ItemIndex, poly: FloatArray, filter: LassoFilter): Set<String> {
         val n = poly.size / 2
-        if (n < 3 || Geo.polygonArea(poly, n) == 0f) return emptySet()
+        if (n < 3) return emptySet()
         val pb = Bounds()
         for (i in 0 until n) pb.union(poly[i * 2], poly[i * 2 + 1])
+        // A loop without extent encloses nothing. (The signed area is not a usable test here: the
+        // lobes of a self-intersecting loop cancel out even though each of them encloses items.)
+        if (pb.isEmpty || pb.width <= 0f || pb.height <= 0f) return emptySet()
         val out = LinkedHashSet<String>()
         index.query(pb) { e ->
             val item = e.item
