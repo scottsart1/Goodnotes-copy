@@ -79,7 +79,7 @@ object BackupNaming {
 
     /** Package entry name for a document: readable title plus id so names never collide. */
     fun entryName(title: String, documentId: String): String {
-        val base = com.inkwell.notes.export.format.ExportNaming.sanitize(title).take(80)
+        val base = com.inkwell.notes.export.format.ExportNaming.truncate(com.inkwell.notes.export.format.ExportNaming.sanitize(title), 80)
         return LibraryManifest.DOCS_DIR + base + "__" + PackageManifest.safe(documentId).take(40) + ".inkwell"
     }
 

@@ -25,11 +25,25 @@ class IdRemap(
         return old.copy(id = id, documentId = documentId, index = index, thumbnailPath = null)
     }
 
-    /** Outline entries re-pointed at the new pages; entries whose page is gone are dropped. */
-    fun outlineEntries(old: List<OutlineEntry>): List<OutlineEntry> = old.mapNotNull { e ->
-        val id = outline[e.id] ?: return@mapNotNull null
-        val page = pages[e.pageId] ?: return@mapNotNull null
-        e.copy(id = id, documentId = documentId, pageId = page, parentId = e.parentId?.let { outline[it] })
+    /**
+     * Outline entries re-pointed at the new pages; entries whose page is gone are dropped and
+     * their children move up to the nearest kept ancestor (or the root).
+     */
+    fun outlineEntries(old: List<OutlineEntry>): List<OutlineEntry> {
+        val byId = old.associateBy { it.id }
+        val kept = old.filter { outline[it.id] != null && pages[it.pageId] != null }.associateBy { it.id }
+        fun newParent(e: OutlineEntry): String? {
+            var p = e.parentId
+            val seen = HashSet<String>()
+            while (p != null && p != e.id && seen.add(p)) {
+                if (p in kept) return outline[p]
+                p = byId[p]?.parentId
+            }
+            return null
+        }
+        return kept.values.map { e ->
+            e.copy(id = outline[e.id]!!, documentId = documentId, pageId = pages[e.pageId]!!, parentId = newParent(e))
+        }
     }
 
     /** Re-points audio anchors at the new recordings; anchors to recordings not imported are cleared. */

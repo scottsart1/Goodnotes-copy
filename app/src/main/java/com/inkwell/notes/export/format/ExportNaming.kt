@@ -31,12 +31,16 @@ object ExportNaming {
         var s = normalized.replace(FORBIDDEN, " ").replace(SPACES, " ").trim().trim('.', ' ')
         if (s.isEmpty()) s = fallback
         if (s.substringBefore('.').uppercase() in RESERVED_WINDOWS) s = "${s}_"
-        if (s.length > MAX_BASE_LENGTH) {
-            var end = MAX_BASE_LENGTH
-            if (Character.isHighSurrogate(s[end - 1])) end--
-            s = s.substring(0, end).trimEnd('.', ' ')
-        }
+        if (s.length > MAX_BASE_LENGTH) s = truncate(s, MAX_BASE_LENGTH)
         return s.ifEmpty { fallback }
+    }
+
+    /** [s] cut to at most [maxLength] UTF-16 units without splitting a surrogate pair or ending in a dot or space. */
+    fun truncate(s: String, maxLength: Int): String {
+        if (s.length <= maxLength) return s
+        var end = maxLength.coerceAtLeast(1)
+        if (Character.isHighSurrogate(s[end - 1])) end--
+        return s.substring(0, end).trimEnd('.', ' ')
     }
 
     /** True when an image export of [pageCount] pages is delivered as a zip of images. */
