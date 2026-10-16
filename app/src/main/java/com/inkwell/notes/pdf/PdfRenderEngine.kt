@@ -85,18 +85,21 @@ internal class PdfRenderEngine(
             val pdf = openPdf(docId) ?: return@withContext null
             if (pdfPageIndex >= pdf.pageCount) return@withContext null
             val bitmap = draw(docId, pdf, pdfPageIndex, target) ?: return@withContext null
-            cache.put(key, bitmap)
+            // A valid entry of another shape (a caller asking for a different aspect ratio) is
+            // kept, so two such callers never evict each other in a loop.
+            val existing = cache.get(key)
+            if (existing == null || existing.isRecycled) cache.put(key, bitmap)
             bitmap
         }
     }
 
     private fun cached(key: RenderKey, target: PixelSize): Bitmap? {
         val hit = cache.get(key) ?: return null
-        if (hit.isRecycled || !RenderSizing.matches(hit.width, hit.height, target)) {
+        if (hit.isRecycled) {
             cache.remove(key)
             return null
         }
-        return hit
+        return hit.takeIf { RenderSizing.matches(it.width, it.height, target) }
     }
 
     /** Page sizes in points, read once per open document. */

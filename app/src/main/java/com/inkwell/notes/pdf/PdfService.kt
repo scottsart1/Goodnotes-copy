@@ -102,7 +102,16 @@ class PdfServiceImpl(private val graph: AppGraph) : PdfService {
         if (uris.isEmpty()) throw PdfErrors.create(context, PdfError.NO_IMAGES)
         val out = importer.tempFile("images-")
         try {
-            images.write(uris, out)
+            try {
+                images.write(uris, out)
+            } catch (e: PdfException) {
+                throw e
+            } catch (c: CancellationException) {
+                throw c
+            } catch (e: Exception) {
+                Log.w(TAG, "Writing images to PDF failed (${e.javaClass.simpleName})")
+                throw PdfErrors.forWrite(context, e)
+            }
             return importPreparedFile(out, folderId, title?.let(PdfNames::clean))
         } finally {
             out.delete()

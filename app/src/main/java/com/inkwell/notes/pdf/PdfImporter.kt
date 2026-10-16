@@ -51,8 +51,12 @@ internal class PdfImporter(
         }
     }
 
-    /** A fresh temp file in the PDF work directory. */
-    fun tempFile(prefix: String, suffix: String = ".pdf"): File = File.createTempFile(prefix, suffix, workDir())
+    /** A fresh temp file in the PDF work directory; failures surface as a [PdfException]. */
+    fun tempFile(prefix: String, suffix: String = ".pdf"): File = try {
+        File.createTempFile(prefix, suffix, workDir())
+    } catch (e: IOException) {
+        throw PdfErrors.forWrite(context, e)
+    }
 
     /**
      * Streams [uri] into a temp file and checks the PDF header. The caller deletes the file.
