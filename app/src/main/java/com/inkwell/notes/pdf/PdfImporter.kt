@@ -121,8 +121,12 @@ internal class PdfImporter(
             is PdfRenderEngine.Probe.Ok -> first.sizes
             PdfRenderEngine.Probe.Locked -> {
                 rewriteInPlace(file, locked = true)
-                (engine.probe(file) as? PdfRenderEngine.Probe.Ok)?.sizes
-                    ?: throw PdfErrors.create(context, PdfError.PASSWORD_REQUIRED)
+                when (val second = engine.probe(file)) {
+                    is PdfRenderEngine.Probe.Ok -> second.sizes
+                    PdfRenderEngine.Probe.Locked -> throw PdfErrors.create(context, PdfError.PASSWORD_REQUIRED)
+                    // Security is gone but the renderer still refuses it: the file itself is broken.
+                    PdfRenderEngine.Probe.Damaged -> throw PdfErrors.create(context, PdfError.DAMAGED)
+                }
             }
             PdfRenderEngine.Probe.Damaged -> {
                 rewriteInPlace(file, locked = false)
