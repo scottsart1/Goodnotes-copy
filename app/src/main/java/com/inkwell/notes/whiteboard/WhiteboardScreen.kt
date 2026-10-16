@@ -162,7 +162,7 @@ private fun WhiteboardContent(controller: WhiteboardController, nav: AppNavigato
     val snackbar = remember { SnackbarHostState() }
     CollectMessages(controller.messages, snackbar)
 
-    var aiOpen by rememberSaveable { mutableStateOf(false) }
+    var aiOpen by remember { mutableStateOf(false) }
     var aiContext by remember { mutableStateOf<AiPanelContext?>(null) }
     var exportMode by remember { mutableStateOf(false) }
     var dialog by remember { mutableStateOf<BoardDialog?>(null) }
@@ -315,6 +315,7 @@ private fun WhiteboardContent(controller: WhiteboardController, nav: AppNavigato
                                     controller.refreshMinimap()
                                 }
                             },
+                            paperColor = controller.page?.paper?.color ?: WhiteboardController.DEFAULT_PAPER.color,
                             modifier = Modifier.align(Alignment.BottomEnd).navigationBarsPadding().padding(12.dp),
                         )
                     }

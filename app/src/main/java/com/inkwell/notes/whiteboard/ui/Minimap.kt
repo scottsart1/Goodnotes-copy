@@ -42,7 +42,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.widthIn
 import com.inkwell.notes.R
+import androidx.compose.ui.graphics.luminance
+import com.inkwell.notes.ui.theme.DarkInkwell
 import com.inkwell.notes.ui.theme.Dimens
+import com.inkwell.notes.ui.theme.LightInkwell
 import com.inkwell.notes.ui.theme.Inkwell
 import com.inkwell.notes.whiteboard.MinimapImage
 import com.inkwell.notes.whiteboard.kit.KitIconButton
@@ -65,6 +68,7 @@ fun Minimap(
     onCollapsedChange: (Boolean) -> Unit,
     onCenterOn: (Float, Float) -> Unit,
     onSizePx: (IntSize) -> Unit,
+    paperColor: Int,
     modifier: Modifier = Modifier,
 ) {
     if (collapsed) {
@@ -83,7 +87,7 @@ fun Minimap(
                 Modifier
                     .fillMaxSize()
                     .clip(RoundedCornerShape(12.dp))
-                    .background(c.surfaceAlt)
+                    .background(androidx.compose.ui.graphics.Color(paperColor))
                     .onSizeChanged(onSizePx)
                     .semantics { contentDescription = description }
                     .pointerInput(Unit) {
@@ -143,7 +147,8 @@ fun Minimap(
                 { onCollapsedChange(true) },
                 modifier = Modifier.align(Alignment.TopEnd),
                 size = 36.dp,
-                tint = c.inkMuted,
+                // The map shows the board's paper, so pick the muted ink that reads on it.
+                tint = if (androidx.compose.ui.graphics.Color(paperColor).luminance() > 0.5f) LightInkwell.inkMuted else DarkInkwell.inkMuted,
             )
         }
     }

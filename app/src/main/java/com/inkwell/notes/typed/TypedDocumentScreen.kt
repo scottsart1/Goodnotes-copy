@@ -177,7 +177,7 @@ private fun TypedEditor(controller: TypedDocController, nav: AppNavigator) {
     CollectMessages(controller.messages, snackbar)
 
     var outlineOpen by rememberSaveable { mutableStateOf<Boolean?>(null) }
-    var aiOpen by rememberSaveable { mutableStateOf(false) }
+    var aiOpen by remember { mutableStateOf(false) }
     var aiContext by remember { mutableStateOf<AiPanelContext?>(null) }
     var dialog by remember { mutableStateOf<TypedDialog?>(null) }
     var linkTarget by remember { mutableStateOf<Triple<String, IntRange, String?>?>(null) }
