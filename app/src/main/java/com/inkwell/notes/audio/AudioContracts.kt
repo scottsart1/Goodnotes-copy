@@ -1,9 +1,7 @@
 package com.inkwell.notes.audio
 
-import com.inkwell.notes.app.AppGraph
 import com.inkwell.notes.core.model.AudioAnchor
 import com.inkwell.notes.core.model.Recording
-import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 
 /** Supplies the recording timeline position for items created while recording. */
@@ -52,6 +50,8 @@ data class PlaybackState(
     val durationMs: Long = 0,
     val playing: Boolean = false,
     val speed: Float = 1f,
+    /** User-visible reason the last playback attempt failed, or null. */
+    val error: String? = null,
 )
 
 /** Plays a recording's segments as one seamless timeline. */
@@ -65,24 +65,4 @@ interface PlaybackController {
     fun release()
 }
 
-/** SCAFFOLD STUB — replaced by the audio implementation. */
-class RecordingControllerImpl(private val graph: AppGraph) : RecordingController {
-    override val state: StateFlow<RecordingState> = MutableStateFlow(RecordingState.Idle)
-    override val clock: AudioClock = AudioClock { null }
-    override fun start(docId: String, title: String?) {}
-    override fun pause() {}
-    override fun resume() {}
-    override fun stop() {}
-    override suspend fun recoverInterrupted() {}
-}
-
-/** SCAFFOLD STUB — replaced by the audio implementation. */
-class PlaybackControllerImpl(private val graph: AppGraph) : PlaybackController {
-    override val state: StateFlow<PlaybackState> = MutableStateFlow(PlaybackState())
-    override fun load(recording: Recording) {}
-    override fun play() {}
-    override fun pause() {}
-    override fun seekTo(positionMs: Long) {}
-    override fun setSpeed(speed: Float) {}
-    override fun release() {}
-}
+// Implementations: RecordingControllerImpl.kt, PlaybackControllerImpl.kt, RecordingService.kt.

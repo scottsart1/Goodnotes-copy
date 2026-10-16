@@ -1,0 +1,135 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Notification -->
+    <string name="audio_notif_recording">Recording · %1$s · %2$s</string>
+    <string name="audio_notif_paused">Paused · %1$s · %2$s</string>
+    <string name="audio_notif_text">Tap to return to your notes</string>
+    <string name="audio_notif_pause">Pause</string>
+    <string name="audio_notif_resume">Resume</string>
+    <string name="audio_notif_stop">Stop</string>
+    <string name="audio_untitled_doc">Notebook</string>
+
+    <!-- Recorder errors -->
+    <string name="audio_error_permission">Inkwell needs microphone access to record. Allow it when asked, or in the app\'s permissions.</string>
+    <string name="audio_error_start">Couldn\'t start recording. The microphone may be in use by another app.</string>
+    <string name="audio_error_background">Recording can only start while Inkwell is open.</string>
+    <string name="audio_error_mic_lost">Recording stopped because the microphone became unavailable. Everything up to that point was saved.</string>
+    <string name="audio_error_server_died">Recording stopped because the system audio service restarted. Everything up to that point was saved.</string>
+    <string name="audio_error_doc_missing">This notebook no longer exists, so recording stopped.</string>
+    <string name="audio_error_save">Recording stopped, but it couldn\'t be saved completely.</string>
+
+    <!-- Dock -->
+    <string name="audio_dock_pause">Pause recording</string>
+    <string name="audio_dock_resume">Resume recording</string>
+    <string name="audio_dock_stop">Stop recording</string>
+    <string name="audio_dock_stop_confirm">Tap again to stop recording</string>
+    <string name="audio_dock_stop_short">Stop?</string>
+    <string name="audio_dock_collapse">Tuck recording controls into the edge</string>
+    <string name="audio_dock_expand">Show recording controls</string>
+    <string name="audio_dock_recording_cd">Recording, %1$s</string>
+    <string name="audio_dock_paused_cd">Recording paused, %1$s</string>
+    <string name="audio_dock_level_cd">Input level</string>
+    <string name="audio_dismiss">Dismiss</string>
+
+    <!-- Panel -->
+    <string name="audio_panel_title">Recordings</string>
+    <string name="audio_close">Close</string>
+    <string name="audio_back_to_list">All recordings</string>
+    <string name="audio_empty_title">No recordings yet</string>
+    <string name="audio_empty_body">Tap Record in the toolbar to capture a lecture or meeting. Notes you write while recording remember the moment they were written.</string>
+    <string name="audio_badge_recovered">Recovered</string>
+    <string name="audio_badge_recording">Recording</string>
+    <string name="audio_status_transcribed">Transcript</string>
+    <string name="audio_status_transcribing">Transcribing</string>
+    <string name="audio_status_queued">Waiting to transcribe</string>
+    <string name="audio_status_failed">Transcription failed</string>
+    <string name="audio_more">More options</string>
+    <string name="audio_rename">Rename</string>
+    <string name="audio_rename_hint">Recording name</string>
+    <string name="audio_rename_save">Save name</string>
+    <string name="audio_export">Export audio</string>
+    <string name="audio_delete">Delete</string>
+    <string name="audio_cancel">Cancel</string>
+    <string name="audio_live_title">Recording in progress · %1$s</string>
+    <string name="audio_live_body">Playback and transcription become available when you stop recording.</string>
+    <string name="audio_recovered_hint">Recovered after Inkwell closed unexpectedly. Audio up to the last saved moment was kept.</string>
+    <string name="audio_no_audio">The audio files for this recording are missing.</string>
+
+    <!-- Player -->
+    <string name="audio_play">Play</string>
+    <string name="audio_pause">Pause</string>
+    <string name="audio_back_10">Back 10 seconds</string>
+    <string name="audio_forward_10">Forward 10 seconds</string>
+    <string name="audio_speed_cd">Playback speed %1$s</string>
+    <string name="audio_show_notes">Show notes written here</string>
+    <string name="audio_waveform_cd">Playback position %1$s of %2$s</string>
+    <string name="audio_playback_error">Couldn\'t play this recording.</string>
+
+    <!-- Transcript -->
+    <string name="audio_transcript">Transcript</string>
+    <string name="audio_transcribe">Transcribe</string>
+    <string name="audio_transcribe_title">Transcribe this recording</string>
+    <string name="audio_transcribe_estimate">%1$d min of audio · est. %2$s with %3$s (estimate, not a bill)</string>
+    <string name="audio_transcribe_estimate_unknown">%1$d min of audio · %2$s</string>
+    <string name="audio_transcribe_needs_key">Transcripts use OpenAI speech-to-text with your own API key. Add an OpenAI key in Settings, AI providers, to transcribe recordings. Everything else works without it.</string>
+    <string name="audio_transcribing_progress">Transcribing part %1$d of %2$d</string>
+    <string name="audio_transcribing_start">Starting transcription</string>
+    <string name="audio_transcribing_waiting">Waiting for a network connection</string>
+    <string name="audio_transcribe_retry">Try again</string>
+    <string name="audio_transcribe_again">Transcribe again</string>
+    <string name="audio_transcribe_interrupted">Transcription was interrupted.</string>
+    <string name="audio_transcribe_failed">Transcription failed. Check your connection and API key, then try again.</string>
+    <string name="audio_transcribe_unavailable">Transcription isn\'t available. Add an OpenAI key in Settings, AI providers.</string>
+    <string name="audio_transcribe_no_audio">This recording has no audio to transcribe.</string>
+    <string name="audio_transcript_empty">No speech was detected in this recording.</string>
+    <string name="audio_transcript_search">Search transcript</string>
+    <string name="audio_transcript_clear">Clear search</string>
+    <string name="audio_transcript_no_matches">No matches</string>
+    <plurals name="audio_transcript_matches">
+        <item quantity="one">%d match</item>
+        <item quantity="other">%d matches</item>
+    </plurals>
+    <string name="audio_segment_cd">Play from %1$s</string>
+    <string name="audio_send_audio_title">Send audio to %1$s?</string>
+    <string name="audio_send_audio_body">%1$d min of audio will be uploaded to %2$s with your API key to create a transcript. %3$s</string>
+    <string name="audio_estimate_sentence">Est. %1$s (estimate, not a bill).</string>
+    <string name="audio_dont_ask_again">Don\'t ask again</string>
+    <string name="audio_send">Send</string>
+    <string name="audio_price_unknown">price unknown</string>
+
+    <!-- AI quick actions -->
+    <string name="audio_ai_title">Ask about this recording</string>
+    <string name="audio_ai_summarize">Summarize</string>
+    <string name="audio_ai_decisions">Decisions</string>
+    <string name="audio_ai_key_topics">Key topics</string>
+    <string name="audio_ai_action_items">Action items</string>
+    <string name="audio_ai_revision_notes">Revision notes</string>
+    <string name="audio_ai_explain">Explain a passage</string>
+    <string name="audio_ai_compare">Compare with my notes</string>
+    <string name="audio_ai_pick_passage">Tap a passage in the transcript to explain it.</string>
+    <string name="audio_ai_no_notes">There\'s no recognised handwriting or typed text in this notebook yet, so there\'s nothing to compare with.</string>
+    <string name="audio_ai_send_title">Send to %1$s?</string>
+    <string name="audio_ai_send_body">This recording\'s transcript will be sent to %1$s with your API key.</string>
+    <string name="audio_ai_send_body_notes">This recording\'s transcript and the text of this notebook will be sent to %1$s with your API key.</string>
+    <string name="audio_ai_large_title">Large request</string>
+    <string name="audio_ai_large_body">This request is %1$s (est. %2$s, an estimate, not a bill). Send it?</string>
+    <string name="audio_ai_working">Working</string>
+    <string name="audio_ai_copy">Copy</string>
+    <string name="audio_ai_copied">Copied to clipboard</string>
+    <string name="audio_ai_save_typed">Save as typed document</string>
+    <string name="audio_ai_saved">Saved as %1$s</string>
+    <string name="audio_ai_save_failed">Couldn\'t save the document.</string>
+    <string name="audio_ai_stop">Stop</string>
+    <string name="audio_ai_footer">%1$s · est. %2$s (estimate, not a bill)</string>
+    <string name="audio_ai_typed_source">From the recording \"%1$s\" in %2$s.</string>
+    <string name="audio_ai_failed">The request didn\'t complete.</string>
+
+    <!-- Delete / export -->
+    <string name="audio_delete_title">Delete recording?</string>
+    <string name="audio_delete_body">\"%1$s\" and its transcript will be deleted. Notes you wrote during it stay, but will no longer play back audio.</string>
+    <string name="audio_delete_failed">Couldn\'t delete the recording.</string>
+    <string name="audio_delete_while_recording">Stop recording before deleting it.</string>
+    <string name="audio_export_preparing">Preparing audio</string>
+    <string name="audio_export_failed">Couldn\'t export the recording.</string>
+    <string name="audio_share_title">Share recording</string>
+</resources>

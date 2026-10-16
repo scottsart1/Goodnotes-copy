@@ -1,0 +1,50 @@
+package com.inkwell.notes.audio.logic
+
+import com.inkwell.notes.core.model.TranscriptSegment
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
+
+/**
+ * Progress of a transcription that runs segment by segment, saved after each one so a
+ * stopped or retried job continues where it left off instead of paying for audio twice.
+ */
+@Serializable
+data class TranscriptCheckpoint(
+    /** The segment files this checkpoint belongs to; a different list invalidates it. */
+    val files: List<String>,
+    /** Number of leading segments already transcribed. */
+    val done: Int = 0,
+    val segments: List<TranscriptSegment> = emptyList(),
+    val language: String? = null,
+    val source: String? = null,
+) {
+    fun matches(currentFiles: List<String>): Boolean = files == currentFiles && done in 0..files.size
+
+    companion object {
+        private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
+
+        fun encode(c: TranscriptCheckpoint): String = json.encodeToString(serializer(), c)
+
+        fun decode(text: String): TranscriptCheckpoint? = runCatching { json.decodeFromString(serializer(), text) }.getOrNull()
+    }
+}
+
+object TranscriptAssembly {
+    /** Start of segment [index] on the recording's timeline. */
+    fun offsetOf(durations: List<Long>, index: Int): Long = durations.take(index.coerceAtLeast(0)).sumOf { it.coerceAtLeast(0) }
+
+    /**
+     * Moves segment-relative transcript pieces onto the recording timeline and keeps them
+     * inside the segment ([durationMs] <= 0 means unknown, no upper clamp). Blank pieces are dropped.
+     */
+    fun shift(pieces: List<TranscriptSegment>, offsetMs: Long, durationMs: Long): List<TranscriptSegment> =
+        pieces.filter { it.text.isNotBlank() }.map { p ->
+            val start = p.startMs.coerceAtLeast(0)
+            val end = p.endMs.coerceAtLeast(start)
+            val (s, e) = if (durationMs > 0) start.coerceAtMost(durationMs) to end.coerceAtMost(durationMs) else start to end
+            p.copy(startMs = offsetMs + s, endMs = offsetMs + e, text = p.text.trim())
+        }
+
+    /** Fraction done for progress display. */
+    fun progress(done: Int, total: Int): Float = if (total <= 0) 0f else (done.toFloat() / total).coerceIn(0f, 1f)
+}
