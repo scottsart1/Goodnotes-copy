@@ -245,6 +245,22 @@ private fun TypedEditor(controller: TypedDocController, nav: AppNavigator) {
     }
     BackHandler(enabled = aiOpen) { aiOpen = false }
 
+    // Reopen where the reader left off, and remember the position when leaving.
+    LaunchedEffect(controller) {
+        controller.initialScroll?.let { (index, offset) -> runCatching { listState.scrollToItem(index, offset) } }
+    }
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner, listState) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_PAUSE) controller.saveScroll(listState.firstVisibleItemIndex, listState.firstVisibleItemScrollOffset)
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+            controller.saveScroll(listState.firstVisibleItemIndex, listState.firstVisibleItemScrollOffset)
+        }
+    }
+
     val blocks = controller.blocks
     val numbers = remember(blocks) { BlockOps.numbering(blocks) }
     val outline = remember(blocks) { BlockOps.outline(blocks) }

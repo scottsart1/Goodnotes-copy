@@ -84,6 +84,10 @@ class TypedDocController(val graph: AppGraph, val docId: String) {
 
     val messages = MutableSharedFlow<UiMessage>(extraBufferCapacity = 8)
 
+    /** Block index and pixel offset to reopen at (null = top). */
+    var initialScroll: Pair<Int, Int>? = null; private set
+    private var lastSavedScroll: Pair<Int, Int>? = null
+
     private val saveListener: (Throwable?, Boolean) -> Unit = { error, retry ->
         scope.launch {
             if (error == null) {
@@ -112,7 +116,11 @@ class TypedDocController(val graph: AppGraph, val docId: String) {
                 is TypedLoad.Loaded -> setDocument(r.document)
             }
             loadState = LoadState.Ready
-            scope.launch { runCatching { graph.library.touch(docId) } }
+            // Stamps "opened" (for Recent) without marking the document modified.
+            graph.appScope.launch { runCatching { graph.library.updateViewState(docId, d.lastPageIndex, 1f, 0f, d.lastScrollY) } }
+            initialScroll = if (graph.settings.current.view.reopenAtLastPosition) {
+                d.lastPageIndex.coerceIn(0, (blocks.size - 1).coerceAtLeast(0)) to d.lastScrollY.toInt().coerceAtLeast(0)
+            } else null
             scope.launch { graph.library.observeDocument(docId).collect { if (it != null) doc = it } }
             blocks.firstOrNull()?.takeIf { blocks.size == 1 && it.text.isEmpty() && BlockOps.isTextual(it.type) }?.let {
                 requestFocus(it.id, TextRange(0))
@@ -139,6 +147,17 @@ class TypedDocController(val graph: AppGraph, val docId: String) {
     }
 
     suspend fun flushAndWait() = store.flush()
+
+    /** Remembers the reading position (first visible block and its offset). */
+    fun saveScroll(index: Int, offset: Int) {
+        val pos = index to offset
+        if (pos == lastSavedScroll || loadState != LoadState.Ready) return
+        lastSavedScroll = pos
+        graph.appScope.launch {
+            runCatching { graph.library.updateViewState(docId, index, 1f, 0f, offset.toFloat()) }
+                .onFailure { Log.w(TAG, "Saving the reading position failed", it) }
+        }
+    }
 
     fun dispose() {
         store.saver.flushAsync()

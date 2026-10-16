@@ -141,7 +141,8 @@ class WhiteboardController(val graph: AppGraph, val docId: String) : InkCanvasLi
             lastSavedView = CanvasViewState(0, d.lastZoom, d.lastScrollX, d.lastScrollY)
             loadState = LoadState.Ready
             maybeBind()
-            scope.launch { runCatching { graph.library.touch(docId) } }
+            // Stamps "opened" (for Recent) without marking the board modified.
+            graph.appScope.launch { runCatching { graph.library.updateViewState(docId, 0, d.lastZoom, d.lastScrollX, d.lastScrollY) } }
             scope.launch {
                 graph.library.observeDocument(docId).collect { if (it != null) doc = it }
             }
