@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Handwriting canvas (ink engine) -->
+    <string name="ink_canvas_description">Handwriting canvas</string>
+    <string name="ink_page_load_failed">This page couldn\'t be loaded</string>
+    <string name="ink_page_load_retry">Inkwell will try again shortly</string>
+    <string name="ink_page_not_editable">This page couldn\'t be loaded, so changes here can\'t be saved.</string>
+    <string name="ink_save_failed">Couldn\'t save the latest change. It stays on screen; Inkwell will save it with your next edit.</string>
+</resources>
