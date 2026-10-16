@@ -71,6 +71,27 @@ interface DocumentDao {
 
     @Query("DELETE FROM documents WHERE id = :id")
     suspend fun delete(id: String)
+
+    // ---- Added by core/storage
+
+    @Query("SELECT title FROM documents WHERE id != :excludeId")
+    suspend fun titlesExcept(excludeId: String): List<String>
+
+    @Query("SELECT * FROM documents WHERE trashedAt IS NOT NULL")
+    suspend fun trashed(): List<DocumentEntity>
+
+    @Query("SELECT COUNT(*) FROM documents WHERE trashedAt IS NULL")
+    suspend fun countLive(): Int
+
+    /** Changes the naming state only while it still is one of [expected] (never overrides a user rename). */
+    @Query("UPDATE documents SET autoNameStatus = :status, autoNameAttempts = :attempts WHERE id = :id AND autoNameStatus IN (:expected)")
+    suspend fun updateAutoNameState(id: String, status: AutoNameStatus, attempts: Int, expected: List<AutoNameStatus>): Int
+
+    @Query("UPDATE documents SET sizeBytes = :sizeBytes WHERE id = :id")
+    suspend fun setSize(id: String, sizeBytes: Long)
+
+    @Query("UPDATE documents SET thumbnailPath = :path WHERE id = :id")
+    suspend fun setThumbnail(id: String, path: String?)
 }
 
 @Dao
@@ -124,4 +145,9 @@ interface OutlineDao {
 
     @Query("DELETE FROM outline WHERE id = :id")
     suspend fun delete(id: String)
+
+    // ---- Added by core/storage
+
+    @Query("SELECT * FROM outline WHERE id = :id")
+    suspend fun get(id: String): OutlineEntity?
 }
