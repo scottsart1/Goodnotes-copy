@@ -97,7 +97,7 @@ internal class EnginePainter(private val e: InkEngine) {
             // Visible part of the page in page points, for the paper placeholder.
             clip.set(max(rect.left, 0f), max(rect.top, 0f), min(rect.right, vp.viewWidth), min(rect.bottom, vp.viewHeight))
             viewRectToPage(i, clip, region)
-            e.render.backgrounds.ensure(meta, s, primary = i == current)
+            e.render.backgrounds.ensure(meta, s, primary = i == current, viewportMoving = e.isViewportMoving)
             canvas.save()
             e.pageMatrix(i, matrix)
             canvas.concat(matrix)

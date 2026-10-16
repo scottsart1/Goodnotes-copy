@@ -107,13 +107,17 @@ internal class FrontBufferLayer(context: Context, private val onFailure: () -> U
         }
     }
 
-    fun detach(parent: ViewGroup) {
+    /**
+     * Releases the renderer. The SurfaceView is only removed when [removeView] (never during the
+     * parent's own detach pass).
+     */
+    fun detach(parent: ViewGroup, removeView: Boolean) {
         val r = renderer
         renderer = null
         attached = false
         showing = false
         try { r?.release(true) } catch (t: Throwable) { Log.w(TAG, "Front buffer release failed", t) }
-        if (surfaceView.parent === parent) parent.removeView(surfaceView)
+        if (removeView && surfaceView.parent === parent) parent.removeView(surfaceView)
     }
 
     fun obtain(): FrontParam = pool.poll() ?: FrontParam()

@@ -89,7 +89,8 @@ internal class InputRouter(private val e: InkEngine) {
     private var fingerTool: InkTool? = null
     private var fingerToolStarted = false
     private var fingerToolPage = -1
-    private val pendingSamples = ArrayList<FloatArray>()
+    private class Sample(val x: Float, val y: Float, val t: Long)
+    private val pendingSamples = ArrayList<Sample>()
     private var lastFocusX = 0f
     private var lastFocusY = 0f
     private var lastSpan = 0f
@@ -337,6 +338,9 @@ internal class InputRouter(private val e: InkEngine) {
         }
         try { predictor?.record(event) } catch (t: Throwable) { predictor = null }
         clearStylusGesture()
+        // Devices without hover events never send HOVER_EXIT; release the edge exclusion anyway.
+        handler.removeCallbacks(clearExclusion)
+        handler.postDelayed(clearExclusion, TouchPolicy.STYLUS_LINGER_MS + 50)
         e.invalidateOverlay()
     }
 
@@ -545,7 +549,7 @@ internal class InputRouter(private val e: InkEngine) {
             val role = if (mouse) FingerRole.NAVIGATE else policy.fingerRole()
             if (role != FingerRole.NAVIGATE) {
                 pendingSamples.clear()
-                pendingSamples += floatArrayOf(f.x, f.y, event.eventTime.toFloat())
+                pendingSamples += Sample(f.x, f.y, event.eventTime)
                 fingerTool = e.tool(if (role == FingerRole.SELECT) ToolType.LASSO else e.toolState.tool)
                 fingerToolStarted = false
                 fingerToolPage = e.pageIndexAt(f.x, f.y)
@@ -554,10 +558,19 @@ internal class InputRouter(private val e: InkEngine) {
             return
         }
         if (active >= 2) {
-            val delay = event.eventTime - firstFingerTime
-            if (mode == Mode.IGNORED && !(permission == FingerPermission.MULTI_ONLY || permission == FingerPermission.ALL)) return
-            if (!policy.deliberateMultiTouch(delay, near)) { abandonFingers(); return }
             if (mode == Mode.CONSUMED) return
+            if (near && mode != Mode.MULTI) {
+                // While writing, only fingers landing together form a gesture; older contacts are a
+                // resting hand and stay ignored.
+                val recent = fingers.values.filter { !it.palm && policy.deliberateMultiTouch(event.eventTime - it.downTime, true) }
+                if (recent.size < 2) {
+                    if (mode == Mode.PENDING || mode == Mode.TOOL || mode == Mode.SCROLL) abandonFingers()
+                    mode = Mode.IGNORED
+                    return
+                }
+                for (other in fingers.values) if (!other.palm && other !in recent) other.palm = true
+                firstFingerTime = recent.minOf { it.downTime }
+            }
             // A second finger turns any tentative single-finger action into navigation.
             handler.removeCallbacks(startFingerTool)
             handler.removeCallbacks(longPress)
@@ -604,13 +617,13 @@ internal class InputRouter(private val e: InkEngine) {
         fingerToolStarted = true
         mode = Mode.TOOL
         val first = pendingSamples[0]
-        fillSingle(ev, fingerToolPage, first[0], first[1], 0.6f, 0f, first[2].toLong(), stylus = false)
+        fillSingle(ev, fingerToolPage, first.x, first.y, 0.6f, 0f, first.t, stylus = false)
         ev.isFinger = true
         tool.onDown(e, ev)
         if (pendingSamples.size > 1) {
             ev.reset(fingerToolPage)
             ev.isStylus = false; ev.isFinger = true; ev.willPredict = false
-            for (k in 1 until pendingSamples.size) { val s = pendingSamples[k]; addSample(ev, s[0], s[1], 0.6f, 0f, s[2].toLong()) }
+            for (k in 1 until pendingSamples.size) { val s = pendingSamples[k]; addSample(ev, s.x, s.y, 0.6f, 0f, s.t) }
             tool.onMove(e, ev)
         }
         pendingSamples.clear()
@@ -623,10 +636,7 @@ internal class InputRouter(private val e: InkEngine) {
             f.x = event.getX(i); f.y = event.getY(i)
             if (!f.palm && kindOf(event, i) == PointerKind.FINGER && policy.isPalm(event.getTouchMajor(i))) {
                 f.palm = true
-                if (mode == Mode.PENDING || mode == Mode.TOOL) {
-                    if (fingerToolStarted) fingerTool?.onCancel(e)
-                    abandonFingers()
-                }
+                if (mode == Mode.PENDING || mode == Mode.TOOL) abandonFingers()
             }
         }
         velocity?.addMovement(event)
@@ -635,8 +645,8 @@ internal class InputRouter(private val e: InkEngine) {
                 val f = fingers.values.firstOrNull { !it.palm } ?: return
                 val idx = event.findPointerIndex(f.id)
                 if (fingerTool != null && idx >= 0) {
-                    for (h in 0 until event.historySize) pendingSamples += floatArrayOf(event.getHistoricalX(idx, h), event.getHistoricalY(idx, h), event.getHistoricalEventTime(h).toFloat())
-                    pendingSamples += floatArrayOf(f.x, f.y, event.eventTime.toFloat())
+                    for (h in 0 until event.historySize) pendingSamples += Sample(event.getHistoricalX(idx, h), event.getHistoricalY(idx, h), event.getHistoricalEventTime(h))
+                    pendingSamples += Sample(f.x, f.y, event.eventTime)
                 }
                 if (Geo.dist(f.downX, f.downY, f.x, f.y) > touchSlop) {
                     handler.removeCallbacks(longPress)

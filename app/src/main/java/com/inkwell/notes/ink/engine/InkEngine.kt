@@ -213,20 +213,19 @@ internal class InkEngine(val view: InkCanvasView) : ToolHost, CommandTarget, Ren
 
     fun onDetached() {
         flushTools()
-        front?.let { it.detach(view) }
-        front = null
+        // Keep the SurfaceView child; only its renderer goes (re-created on the next attach).
+        front?.detach(view, removeView = false)
     }
 
     /** Creates or removes the low-latency layer to match the preference. */
     fun updateFrontBuffer() {
         val want = inputPrefs.lowLatencyInk && view.isAttachedToWindow && !frontFailed
         val f = front
-        if (want && f == null) {
-            val layer = FrontBufferLayer(context) { onFrontBufferFailed() }
-            front = layer
+        if (want) {
+            val layer = f ?: FrontBufferLayer(context) { onFrontBufferFailed() }.also { front = it }
             layer.attach(view)
-        } else if (!want && f != null) {
-            f.detach(view)
+        } else if (f != null) {
+            f.detach(view, removeView = true)
             front = null
         }
     }
@@ -236,7 +235,7 @@ internal class InkEngine(val view: InkCanvasView) : ToolHost, CommandTarget, Ren
     private fun onFrontBufferFailed() {
         frontFailed = true
         view.post {
-            front?.detach(view)
+            front?.detach(view, removeView = true)
             front = null
             invalidateOverlay()
         }
@@ -249,7 +248,7 @@ internal class InkEngine(val view: InkCanvasView) : ToolHost, CommandTarget, Ren
         cancelActiveTools()
         viewportCtl.stop()
         for (h in pages) h.loadJob?.cancel()
-        front?.detach(view)
+        front?.detach(view, removeView = false)
         front = null
         render.release()
         scope.cancel()
@@ -533,7 +532,9 @@ internal class InkEngine(val view: InkCanvasView) : ToolHost, CommandTarget, Ren
         val changed = Bounds()
         val tmp = Bounds()
         for (it in items) changed.union(ItemGeometry.bounds(it, tmp, after))
-        val onTop = if (items.any { it is Stroke && it.pen == PenType.HIGHLIGHTER }) null else items
+        // New items sit above everything, so tiles can draw them incrementally (in paint order).
+        val onTop = if (items.any { it is Stroke && it.pen == PenType.HIGHLIGHTER }) null
+        else com.inkwell.notes.ink.render.RenderOrder.order(ContentOps.add(PageContent.EMPTY, items))
         render.onPageEdited(h, prevVisual, changed, onTop)
         history.push(ContentDiffCommand(label, listOf(appendDiff(h.id, before, items))))
         notifyContentChanged(h)

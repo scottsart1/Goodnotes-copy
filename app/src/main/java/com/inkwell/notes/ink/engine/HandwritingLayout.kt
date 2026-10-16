@@ -92,7 +92,7 @@ object HandwritingLayout {
         val gaps = ArrayList<Float>()
         for (l in ls) for (k in 1 until l.size) gaps += l[k].bounds.left - l[k - 1].bounds.right
         gaps.sort()
-        val gap = (if (gaps.isEmpty()) h * 0.5f else gaps[gaps.size / 2]).coerceIn(h * 0.25f, h * 1.2f)
+        val gap = (if (gaps.isEmpty()) h * 0.5f else gaps[gaps.size / 2]).coerceIn(h * 0.25f, h * 2.5f)
         val centers = ls.map { l -> l.map { it.bounds.centerY }.average().toFloat() }
         val spacings = (1 until centers.size).map { centers[it] - centers[it - 1] }.filter { it > h * 0.8f }.sorted()
         val lineHeight = if (spacings.isEmpty()) h * 1.6f else spacings[spacings.size / 2]

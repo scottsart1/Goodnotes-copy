@@ -54,7 +54,7 @@ internal class BackgroundCache(private val scope: CoroutineScope) {
      * Makes sure a background of about [pxPerPt] resolution exists for [page]. [primary] pages
      * (the one the user is looking at) get a larger pixel budget.
      */
-    fun ensure(page: PageMeta, pxPerPt: Float, primary: Boolean) {
+    fun ensure(page: PageMeta, pxPerPt: Float, primary: Boolean, viewportMoving: Boolean = false) {
         val src = source ?: return
         val e = entries.getOrPut(page.id) { Entry() }
         e.lastUsed = SystemClock.uptimeMillis()
@@ -64,6 +64,8 @@ internal class BackgroundCache(private val scope: CoroutineScope) {
         val desired = if (probe) PROBE_WIDTH else desiredWidth(page, pxPerPt, primary)
         val current = e.bitmap?.width ?: 0
         if (current >= desired * 0.85f) return
+        // While zooming or flinging keep the current (blurry) bitmap; upgrade once settled.
+        if (viewportMoving && e.bitmap != null) return
         if (e.job?.isActive == true && e.requestedWidth >= desired * 0.85f) return
         if (e.failures > 0 && SystemClock.uptimeMillis() - e.lastFailureAt < RETRY_MS * e.failures) return
         e.job?.cancel()
