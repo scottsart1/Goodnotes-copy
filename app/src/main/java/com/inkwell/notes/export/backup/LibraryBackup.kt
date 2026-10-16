@@ -76,18 +76,25 @@ internal class LibraryBackup(private val graph: AppGraph) {
                     coroutineContext.ensureActive()
                     val tmp = File(tmpDir, UUID.randomUUID().toString() + ".inkwell")
                     try {
-                        tmp.outputStream().buffered().use { writer.write(entry.documentId, it, includeAudio) }
-                        // Packages are zips already: copy them in without recompressing.
-                        zip.setLevel(Deflater.NO_COMPRESSION)
-                        zip.putNextEntry(ZipEntry(entry.entry))
-                        tmp.inputStream().use { it.copyTo(zip, 256 * 1024) }
-                        zip.closeEntry()
-                        count++
-                    } catch (c: CancellationException) {
-                        throw c
-                    } catch (e: Exception) {
-                        if (ExportErrors.isNoSpace(e)) throw e
-                        Log.w(TAG, "Skipped a document in the backup (${e.javaClass.simpleName})")
+                        // A document that cannot be packaged is skipped; failing to write the backup itself is fatal.
+                        val packaged = try {
+                            tmp.outputStream().buffered().use { writer.write(entry.documentId, it, includeAudio) }
+                            true
+                        } catch (c: CancellationException) {
+                            throw c
+                        } catch (e: Exception) {
+                            if (ExportErrors.isNoSpace(e)) throw e
+                            Log.w(TAG, "Skipped a document in the backup (${e.javaClass.simpleName})")
+                            false
+                        }
+                        if (packaged) {
+                            // Packages are zips already: copy them in without recompressing.
+                            zip.setLevel(Deflater.NO_COMPRESSION)
+                            zip.putNextEntry(ZipEntry(entry.entry))
+                            tmp.inputStream().use { it.copyTo(zip, 256 * 1024) }
+                            zip.closeEntry()
+                            count++
+                        }
                     } finally {
                         tmp.delete()
                     }
@@ -136,7 +143,12 @@ internal class LibraryBackup(private val graph: AppGraph) {
             }
             open(uri).use { restore(it) }
         } catch (t: Throwable) {
-            throw if (t is CancellationException) t else ExportErrors.wrap(context, t)
+            throw when {
+                t is CancellationException -> t
+                t is PackageException && t.reason == PackageException.Reason.NOT_A_PACKAGE ->
+                    ExportErrors.of(context, R.string.export_err_backup_invalid)
+                else -> ExportErrors.wrap(context, t)
+            }
         }
     }
 

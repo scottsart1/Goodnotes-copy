@@ -3,6 +3,7 @@ package com.inkwell.notes.export.ui
 import android.app.Activity
 import android.content.ActivityNotFoundException
 import android.content.Context
+import android.content.ContextWrapper
 import android.content.Intent
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -184,9 +185,10 @@ fun ExportDialog(docId: String, initialPageIndices: List<Int>? = null, onDismiss
                 val mime = if (file.extension.equals("zip", true)) "application/zip" else options.format.mime
                 val send = service.shareIntent(file, mime)
                 val chooser = Intent.createChooser(send, context.getString(R.string.export_share_chooser, file.name))
-                if (context !is Activity) chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                val activity = context.findActivity()
+                if (activity == null) chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 try {
-                    context.startActivity(chooser)
+                    (activity ?: context).startActivity(chooser)
                     onDismiss()
                 } catch (e: ActivityNotFoundException) {
                     error = context.getString(R.string.export_err_no_share)
@@ -255,7 +257,7 @@ fun ExportDialog(docId: String, initialPageIndices: List<Int>? = null, onDismiss
                                 Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()).padding(horizontal = 24.dp, vertical = 16.dp),
                                 verticalArrangement = Arrangement.spacedBy(20.dp),
                             ) {
-                                FormatSection(choices.format) { update(choices.copy(format = it)) }
+                                FormatSection(choices.format, enabled = running == null) { update(choices.copy(format = it)) }
                                 PagesSection(i, choices, initialPageIndices, enabled = running == null) { update(it) }
                                 OptionsSection(i, choices, enabled = running == null) { update(it) }
                             }
@@ -287,6 +289,16 @@ private const val KEY_CHOICES = "choices"
 
 private fun prefs(context: Context) = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
+/** The activity behind a (possibly wrapped) context, so the share sheet opens in this task. */
+private fun Context.findActivity(): Activity? {
+    var c: Context? = this
+    while (c is ContextWrapper) {
+        if (c is Activity) return c
+        c = c.baseContext
+    }
+    return null
+}
+
 /** ACTION_CREATE_DOCUMENT with the file name and MIME type chosen at launch time. */
 private class CreateDocumentOfType : ActivityResultContract<Pair<String, String>, Uri?>() {
     override fun createIntent(context: Context, input: Pair<String, String>): Intent =
@@ -317,7 +329,7 @@ private fun Header(title: String?, onClose: () -> Unit) {
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun FormatSection(selected: ExportFormat, onSelect: (ExportFormat) -> Unit) {
+private fun FormatSection(selected: ExportFormat, enabled: Boolean, onSelect: (ExportFormat) -> Unit) {
     Section(stringResource(R.string.export_format_label)) {
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             for (f in ExportFormat.entries) {
@@ -325,6 +337,7 @@ private fun FormatSection(selected: ExportFormat, onSelect: (ExportFormat) -> Un
                 FilterChip(
                     selected = isSelected,
                     onClick = { onSelect(f) },
+                    enabled = enabled,
                     label = { Text(stringResource(formatLabel(f)), style = MaterialTheme.typography.labelLarge) },
                     modifier = Modifier.heightIn(min = Dimens.minTouch),
                     shape = RoundedCornerShape(8.dp),
@@ -335,7 +348,7 @@ private fun FormatSection(selected: ExportFormat, onSelect: (ExportFormat) -> Un
                         selectedLabelColor = Inkwell.colors.ink,
                     ),
                     border = FilterChipDefaults.filterChipBorder(
-                        enabled = true,
+                        enabled = enabled,
                         selected = isSelected,
                         borderColor = Inkwell.colors.outline,
                         selectedBorderColor = Inkwell.colors.accent,
