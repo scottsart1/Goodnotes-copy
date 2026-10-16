@@ -60,7 +60,8 @@ class StrokeGeometry {
         flatCaps = pen == PenType.HIGHLIGHTER
         isDot = false
         runCount = 0
-        // 1. Gather samples, dropping near-duplicates.
+        // 1. Gather samples, dropping near-duplicates and anything non-finite (a NaN sample would
+        //    otherwise poison every offset of the outline and the whole stroke would vanish).
         val minDist = max(0.01f, width * 0.02f)
         val minDist2 = minDist * minDist
         var n = 0
@@ -68,15 +69,17 @@ class StrokeGeometry {
             val src = if (k < count) points else extra!!
             val o = (if (k < count) k else k - count) * st
             val x = src[o]; val y = src[o + 1]
+            if (!x.isFinite() || !y.isFinite()) continue
+            val pressure = src[o + InkPoints.PRESSURE].let { if (it.isFinite()) it else 0.5f }
             if (n > 0 && Geo.distSq(xs[n - 1], ys[n - 1], x, y) < minDist2) {
                 // Keep the newest pressure so the tip follows a lifting pen.
-                if (k == total - 1) { ps[n - 1] = src[o + InkPoints.PRESSURE] }
+                if (k == total - 1) { ps[n - 1] = pressure }
                 continue
             }
             xs[n] = x; ys[n] = y
-            ps[n] = src[o + InkPoints.PRESSURE]
-            tilts[n] = src[o + InkPoints.TILT]
-            ts[n] = src[o + InkPoints.TIME]
+            ps[n] = pressure
+            tilts[n] = src[o + InkPoints.TILT].let { if (it.isFinite()) it else 0f }
+            ts[n] = src[o + InkPoints.TIME].let { if (it.isFinite()) it else if (n > 0) ts[n - 1] else 0f }
             n++
         }
         this.count = n
