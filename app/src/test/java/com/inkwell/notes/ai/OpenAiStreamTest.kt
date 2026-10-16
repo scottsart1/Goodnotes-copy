@@ -197,6 +197,13 @@ class OpenAiStreamTest {
         assertEquals("gpt-4o", row.model)
     }
 
+    @Test fun nonStreamedCompletionIsDecoded() {
+        h.enqueueJson("""{"id":"c1","object":"chat.completion","choices":[{"index":0,"message":{"role":"assistant","content":"Plain answer."},"finish_reason":"stop"}],"usage":{"prompt_tokens":5,"completion_tokens":2}}""")
+        val done = h.events(request()).last() as EngineEvent.Completed
+        assertEquals("Plain answer.", done.text)
+        assertEquals(5, done.usage.inputTokens)
+    }
+
     @Test fun refusalDeltaIsReportedAsRefusal() = runBlocking {
         h.enqueueSse(openAiSse("""{"choices":[{"delta":{"refusal":"I can't help with that."},"finish_reason":"stop"}]}"""))
         val events = h.engine.toAiEvents(h.engine.streamDetailed(request())).toList()

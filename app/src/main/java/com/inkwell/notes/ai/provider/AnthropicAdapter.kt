@@ -227,6 +227,15 @@ class AnthropicStreamDecoder : StreamDecoder {
                 }
             }
             "message_stop" -> listOf(StreamPart.End)
+            // Non-streamed response (a gateway that ignored `stream: true`).
+            "message" -> buildList {
+                json["usage"].obj()?.let { u -> add(StreamPart.Usage(sumInput(u), u["output_tokens"].int())) }
+                json["content"].arr()?.mapNotNull { it.obj() }?.filter { it["type"].str() == "text" }?.forEach { b ->
+                    b["text"].str()?.takeIf { it.isNotEmpty() }?.let { add(StreamPart.Text(it)) }
+                }
+                add(StreamPart.Stop(json["stop_reason"].str()?.let(::mapStop) ?: StopReason.END, json["stop_reason"].str()))
+                add(StreamPart.End)
+            }
             "error" -> {
                 val err = json["error"].obj()
                 listOf(StreamPart.Failure(ErrorMapper.streamError(AiProviderId.ANTHROPIC, err?.get("type").str(), err?.get("message").str())))

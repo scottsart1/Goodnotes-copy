@@ -164,6 +164,14 @@ class AnthropicStreamTest {
         assertFalse(body.containsKey("fallbacks"))
     }
 
+    @Test fun nonStreamedResponseIsDecoded() {
+        h.enqueueJson("""{"id":"msg_1","type":"message","role":"assistant","model":"claude-opus-5-5","content":[{"type":"thinking","thinking":"x"},{"type":"text","text":"Whole answer."}],"stop_reason":"end_turn","usage":{"input_tokens":11,"output_tokens":3}}""")
+        val done = h.events(request()).last() as EngineEvent.Completed
+        assertEquals("Whole answer.", done.text)
+        assertEquals(11, done.usage.inputTokens)
+        assertEquals(3, done.usage.outputTokens)
+    }
+
     @Test fun overloaded529IsRetryable() {
         h.enqueueJson("""{"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}""", code = 529)
         h.enqueueSse(stream(start, delta(0, "Back"), messageDelta("end_turn", 1), stop))

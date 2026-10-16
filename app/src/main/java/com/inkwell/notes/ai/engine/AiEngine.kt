@@ -418,10 +418,16 @@ class AiEngine(
             val body = response.body ?: return@withCancellableCall Outcome.Io(IOException("empty response"))
             val contentType = body.contentType()?.toString().orEmpty()
             if (contentType.startsWith("application/json")) {
-                // A gateway answered without streaming; surface its error (or treat as an error).
+                // A gateway ignored `stream: true`: decode the complete response the same way.
                 val raw = body.string()
-                val msg = ErrorMapper.providerMessage(raw)
-                return@withCancellableCall Outcome.Stream(ErrorMapper.streamError(adapter.id, null, msg ?: "Unexpected non-streaming response."))
+                val parts = adapter.newDecoder().decode(SseEvent(null, raw))
+                parts.firstOrNull { it is StreamPart.Failure }?.let { return@withCancellableCall Outcome.Stream((it as StreamPart.Failure).failure) }
+                if (parts.none { it is StreamPart.Text || it is StreamPart.Stop }) {
+                    val msg = ErrorMapper.providerMessage(raw)
+                    return@withCancellableCall Outcome.Stream(ErrorMapper.streamError(adapter.id, null, msg ?: "Unexpected response format."))
+                }
+                for (part in parts) onPart(part)
+                return@withCancellableCall Outcome.Success
             }
             val source = body.source()
             val parser = SseParser()
