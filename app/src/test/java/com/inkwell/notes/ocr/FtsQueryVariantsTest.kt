@@ -49,11 +49,14 @@ class FtsQueryVariantsTest {
     }
 
     @Test
-    fun formatCharactersInsideWordsStayInTheTerm() {
-        // Zero-width non-joiner inside a Persian word is part of the indexed token, so the
-        // query keeps it too (one prefix term instead of two that could never both match).
-        assertEquals(1, FtsQuery.tokens("می‌خواهم").size)
-        // A soft hyphen is invisible: dropped from the index, and dropped from the query.
+    fun invisibleFormatCharactersAreNeitherTermsNorSeparators() {
+        // A zero-width non-joiner inside a Persian word, a soft hyphen, a byte order mark: the
+        // index drops them (see IndexText), so the query drops them too and the word matches
+        // whether or not it was typed with them.
+        assertEquals(listOf("میخواهم"), FtsQuery.tokens("می‌خواهم"))
+        assertEquals(listOf("میخواهم"), FtsQuery.tokens("میخواهم"))
         assertEquals(listOf("information"), FtsQuery.tokens("in­formation"))
+        assertEquals(listOf("hello"), FtsQuery.tokens("﻿Hello"))
+        assertEquals(listOf("miخواهم"), FtsQuery.tokens("mi‌خواهم"))
     }
 }

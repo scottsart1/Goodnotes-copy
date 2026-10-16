@@ -25,8 +25,7 @@ object FtsQuery {
             }
         }
         for (ch in query) {
-            // Soft hyphens are invisible and never stored (see IndexText): neither term nor separator.
-            if (ch == '­') continue
+            if (isTransparent(ch)) continue
             if (isTermChar(ch)) sb.append(asciiLower(ch)) else flush()
             if (out.size >= MAX_TOKENS) break
         }
@@ -91,20 +90,23 @@ object FtsQuery {
 
     /**
      * A character that belongs to a search term. Mirrors the simple tokenizer for ASCII; for
-     * other characters only letters, digits, combining marks and in-word format characters
-     * (zero-width joiners of Persian and Indic scripts) count, so typographic quotes, dashes or
-     * ellipses typed in a query never become part of a term. Indexed text is normalised the
-     * same way by [IndexText], so index and query split words at the same places.
+     * other characters only letters, digits and combining marks count, so typographic quotes,
+     * dashes or ellipses typed in a query never become part of a term. Indexed text is
+     * normalised the same way by [IndexText], so index and query split words at the same places.
      */
     fun isTermChar(c: Char): Boolean = when {
         c in 'a'..'z' || c in 'A'..'Z' || c in '0'..'9' -> true
         c.code < 128 -> false
-        c == '­' -> false
-        else -> Character.isLetterOrDigit(c) || when (Character.getType(c)) {
-            Character.NON_SPACING_MARK.toInt(), Character.COMBINING_SPACING_MARK.toInt(), Character.FORMAT.toInt() -> true
-            else -> false
-        }
+        else -> Character.isLetterOrDigit(c) || Character.getType(c) == Character.NON_SPACING_MARK.toInt() ||
+            Character.getType(c) == Character.COMBINING_SPACING_MARK.toInt()
     }
+
+    /**
+     * Invisible format characters (soft hyphens, zero-width joiners, byte order marks): neither
+     * part of a term nor a separator. They are dropped from indexed text and from queries, so
+     * "in­formation" and "می‌خواهم" are found whether or not they are typed with them.
+     */
+    fun isTransparent(c: Char): Boolean = c.code >= 128 && Character.getType(c) == Character.FORMAT.toInt()
 
     private fun asciiLower(c: Char): Char = if (c in 'A'..'Z') (c + 32) else c
 }

@@ -61,7 +61,7 @@ object TextSplitter {
                 }
             }
             // No boundary at all (a long URL, an emoji run): cut hard, but never through a surrogate pair.
-            if (cut < 0) cut = IndexText.safeCut(t, hardEnd)
+            if (cut < 0) cut = IndexText.safeCut(t, hardEnd).takeIf { it > start } ?: hardEnd
             val piece = t.substring(start, cut).trim()
             if (piece.isNotEmpty()) out += piece
             start = cut

@@ -77,6 +77,16 @@ class IndexTextCleaningTest {
     }
 
     @Test
+    fun invisibleFormatCharactersAreRemoved() {
+        assertEquals("information", IndexWriter.clean("in­formation"))
+        assertEquals("Hello", IndexWriter.clean("﻿Hello"))
+        assertEquals("میخواهم", IndexWriter.clean("می‌خواهم"))
+        // Words the ranker sees match the index and the query.
+        assertEquals(listOf("میخواهم"), TextMatch.words("می‌خواهم").map { it.lower })
+        assertEquals(listOf("information"), TextMatch.words("in­formation").map { it.lower })
+    }
+
+    @Test
     fun blankAndNulOnlyTextIsDropped() {
         assertNull(IndexWriter.clean(""))
         assertNull(IndexWriter.clean("   \u0000  "))

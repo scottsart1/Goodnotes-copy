@@ -9,7 +9,6 @@ package com.inkwell.notes.ocr.text
  * query. Letters, digits and combining marks of every script are left untouched.
  */
 object IndexText {
-    private const val SOFT_HYPHEN = '­'
     private const val ELLIPSIS = '…'
     private const val SINGLE_QUOTES = "‘’‚‛‹›´′"
 
@@ -21,7 +20,7 @@ object IndexText {
             when {
                 c == '\u0000' -> sb.append(' ')
                 c.code < 128 -> sb.append(c)
-                c == SOFT_HYPHEN -> Unit
+                FtsQuery.isTransparent(c) -> Unit
                 FtsQuery.isTermChar(c) -> sb.append(c)
                 c.isWhitespace() -> sb.append(' ')
                 else -> {

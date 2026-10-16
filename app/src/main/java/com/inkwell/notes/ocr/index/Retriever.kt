@@ -2,6 +2,7 @@ package com.inkwell.notes.ocr.index
 
 import android.util.Log
 import com.inkwell.notes.app.AppGraph
+import com.inkwell.notes.core.storage.db.TextSearchRow
 import com.inkwell.notes.ocr.IndexedPassage
 import com.inkwell.notes.ocr.text.Chunk
 import com.inkwell.notes.ocr.text.Chunker
@@ -43,7 +44,7 @@ internal class Retriever(
         for (t in terms.take(MAX_TERMS)) {
             // The terms are fully lower-cased for in-memory matching; the index folds ASCII
             // only, so every case variant of a non-ASCII term is queried.
-            val rows = ArrayList<com.inkwell.notes.core.storage.db.TextSearchRow>()
+            val rows = ArrayList<TextSearchRow>()
             for (match in FtsQuery.variants(listOf(t))) {
                 try {
                     rows += graph.db.textIndex().searchLive(match, PER_TERM_ROWS)
