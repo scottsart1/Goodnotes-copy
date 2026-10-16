@@ -145,10 +145,13 @@ class AiEngine(
 
     // ------------------------------------------------------------------ models & keys
 
-    suspend fun models(p: AiProviderId, refresh: Boolean): List<AiModelInfo> {
+    suspend fun models(p: AiProviderId, refresh: Boolean): List<AiModelInfo> = withContext(io) {
         val fetchedAt = models.liveFetchedAt(p)
         val stale = fetchedAt == null || clock() - fetchedAt > ModelRegistry.STALE_MS
-        if ((refresh || stale) && keys.has(p)) {
+        // Offline or failing: do not retry the list on every call.
+        val recentlyTried = (lastFetchAttempt[p] ?: 0L).let { clock() - it < FETCH_RETRY_MS && it > 0L }
+        if ((refresh || (stale && !recentlyTried)) && keys.has(p)) {
+            lastFetchAttempt[p] = clock()
             val key = keys.get(p)
             if (key != null) {
                 runCatching {
@@ -157,8 +160,10 @@ class AiEngine(
                 }.onFailure { if (it is CancellationException) throw it; if (refresh) throw asAiException(p, it, key) }
             }
         }
-        return listed(p).map { it.toInfo(p) }
+        listed(p).map { it.toInfo(p) }
     }
+
+    private val lastFetchAttempt = java.util.concurrent.ConcurrentHashMap<AiProviderId, Long>()
 
     /** Models shown in pickers for [p] (catalogue + live, without hidden snapshots). */
     fun listed(p: AiProviderId): List<ModelSpec> = models.known(p)
@@ -571,7 +576,11 @@ class AiEngine(
     // ------------------------------------------------------------------ transcription
 
     /** Transcribes ordered audio segments with the TRANSCRIPTION model; null when unavailable. */
-    suspend fun transcribe(recordingId: String, segments: List<File>, segmentDurationsMs: List<Long>, language: String?): Transcript? {
+    suspend fun transcribe(recordingId: String, segments: List<File>, segmentDurationsMs: List<Long>, language: String?): Transcript? = withContext(io) {
+        transcribeOnIo(recordingId, segments, segmentDurationsMs, language)
+    }
+
+    private suspend fun transcribeOnIo(recordingId: String, segments: List<File>, segmentDurationsMs: List<Long>, language: String?): Transcript? {
         if (!isAvailable(AiTask.TRANSCRIPTION)) return null
         val ref = modelFor(AiTask.TRANSCRIPTION) ?: return null
         val adapter = providers.find(ref.provider) as? OpenAiAdapter ?: return null
@@ -613,7 +622,9 @@ class AiEngine(
     // ------------------------------------------------------------------ embeddings
 
     /** Embeddings in batches of 64; null when semantic search or an embedding model is unavailable. */
-    suspend fun embed(texts: List<String>, documentId: String? = null): List<FloatArray>? {
+    suspend fun embed(texts: List<String>, documentId: String? = null): List<FloatArray>? = withContext(io) { embedOnIo(texts, documentId) }
+
+    private suspend fun embedOnIo(texts: List<String>, documentId: String?): List<FloatArray>? {
         if (!isAvailable(AiTask.EMBEDDINGS)) return null
         val ref = modelFor(AiTask.EMBEDDINGS) ?: return null
         val adapter = providers.find(ref.provider) as? OpenAiAdapter ?: return null
@@ -650,6 +661,7 @@ class AiEngine(
 
     companion object {
         const val MAX_RETRIES = 2
+        const val FETCH_RETRY_MS = 10L * 60 * 1000
         const val BASE_BACKOFF_MS = 1_000L
         const val MAX_RETRY_AFTER_MS = 30_000L
         const val MAX_ERROR_BODY = 64L * 1024

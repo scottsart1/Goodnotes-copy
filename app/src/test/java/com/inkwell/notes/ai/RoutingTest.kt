@@ -14,6 +14,7 @@ import com.inkwell.notes.core.model.AiRequest
 import com.inkwell.notes.core.model.AiRole
 import com.inkwell.notes.core.model.AiTask
 import com.inkwell.notes.core.model.ModelRef
+import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -122,6 +123,19 @@ class RoutingTest {
         assertTrue(vision.all { it.ref.provider == MOONSHOT && AiCapability.VISION in it.capabilities })
         val text = h.engine.modelsWith(AiCapability.TEXT)
         assertTrue(text.any { it.ref.provider == DEEPSEEK })
+    }
+
+    @Test fun plainHttpCustomEndpointIsRejected() {
+        val prefs = AiPrefs(providers = AiProviderId.entries.map { AiProviderSettings(it, customBaseUrl = if (it == OPENAI) "http://insecure.example.com/v1" else null) })
+        val engine = com.inkwell.notes.ai.engine.AiEngine(
+            http = okhttp3.OkHttpClient(), prefs = { prefs }, keys = FakeKeys(OPENAI to "sk-test-000000000000"), usage = FakeUsage(),
+            models = com.inkwell.notes.ai.engine.ModelRegistry(com.inkwell.notes.ai.provider.ProviderRegistry.default(), com.inkwell.notes.ai.engine.MemoryStore(), com.inkwell.notes.ai.engine.MemoryStore()),
+        )
+        val failed = runBlocking { engine.streamDetailed(AiRequest(AiTask.CHAT, listOf(AiMessage(AiRole.USER, "Hi")))).toList() }.single() as EngineEvent.Failed
+        assertTrue(failed.failure.message.contains("https://"))
+        val check = runBlocking { engine.checkKey(OPENAI, "sk-test-000000000000", "http://insecure.example.com/v1") }
+        assertFalse(check.ok)
+        assertTrue(check.message.contains("https://"))
     }
 
     @Test fun explicitModelWithoutKeyFailsClearly() {

@@ -10,7 +10,9 @@ import com.inkwell.notes.core.model.AiRequest
 import com.inkwell.notes.core.model.AiRole
 import com.inkwell.notes.core.model.AiTask
 import com.inkwell.notes.core.model.ModelRef
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.flow.toList
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.boolean
 import kotlinx.serialization.json.int
@@ -170,6 +172,29 @@ class OpenAiStreamTest {
         val r = h.engine.complete(request())
         assertEquals("Hello world", r.text)
         assertNotNull(r.usage.estimatedCostUsd)
+    }
+
+    @Test fun cancellingMidStreamStopsPromptlyAndRecordsPartialUsage() = runBlocking {
+        val first = "data: " + """{"choices":[{"delta":{"content":"First words "}}]}""" + "\n\n"
+        val rest = (1..3).joinToString("") { "data: " + """{"choices":[{"delta":{"content":"more "}}]}""" + "\n\n" } + "data: [DONE]\n\n"
+        h.server.enqueue(
+            okhttp3.mockwebserver.MockResponse().setHeader("Content-Type", "text/event-stream").setBody(first + rest)
+                .throttleBody(first.length.toLong(), 1, java.util.concurrent.TimeUnit.SECONDS),
+        )
+        val gotText = kotlinx.coroutines.CompletableDeferred<Unit>()
+        val texts = mutableListOf<String>()
+        val job = launch(kotlinx.coroutines.Dispatchers.IO) {
+            h.engine.streamDetailed(request()).collect { e -> if (e is EngineEvent.Text) { texts += e.delta; gotText.complete(Unit) } }
+        }
+        kotlinx.coroutines.withTimeout(10_000) { gotText.await() }
+        val started = System.nanoTime()
+        kotlinx.coroutines.withTimeout(10_000) { job.cancelAndJoin() }
+        val tookMs = (System.nanoTime() - started) / 1_000_000
+        assertTrue("cancellation took $tookMs ms", tookMs < 1_500)
+        assertEquals("First words ", texts.joinToString(""))
+        val row = h.usage.rows.single()
+        assertTrue(row.outputTokens > 0)
+        assertEquals("gpt-4o", row.model)
     }
 
     @Test fun refusalDeltaIsReportedAsRefusal() = runBlocking {

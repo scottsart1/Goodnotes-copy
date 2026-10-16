@@ -31,6 +31,7 @@ import com.inkwell.notes.core.model.AiRole
 import com.inkwell.notes.core.model.AiTask
 import com.inkwell.notes.core.model.AiUsage
 import com.inkwell.notes.core.model.AppSettings
+import com.inkwell.notes.core.model.DocKind
 import com.inkwell.notes.core.model.ModelRef
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -106,6 +107,7 @@ internal class AiPanelViewModel(private val graph: AppGraph, val docId: String) 
     var language by mutableStateOf(defaultLanguage())
     var documentTitle by mutableStateOf<String?>(null); private set
     var pageCount by mutableStateOf(0); private set
+    var docKind by mutableStateOf<DocKind?>(null); private set
     /** Notes shown under assistant messages (cut off, stopped, images not sent, retrieval). In memory only. */
     val messageNotes = mutableStateMapOf<String, List<String>>()
     val messageReasoning = mutableStateMapOf<String, String>()
@@ -125,7 +127,7 @@ internal class AiPanelViewModel(private val graph: AppGraph, val docId: String) 
             threadId = runCatching { chats?.latestThread(docId) }.getOrNull() ?: ChatStore.newThreadId()
         }
         viewModelScope.launch {
-            runCatching { graph.library.getDocument(docId) }.getOrNull()?.let { documentTitle = it.title; pageCount = it.pageCount }
+            runCatching { graph.library.getDocument(docId) }.getOrNull()?.let { documentTitle = it.title; pageCount = it.pageCount; docKind = it.kind }
         }
         viewModelScope.launch { refreshModels() }
         viewModelScope.launch { refreshSpend() }
@@ -245,7 +247,10 @@ internal class AiPanelViewModel(private val graph: AppGraph, val docId: String) 
 
     private suspend fun prepare(prompt: String, action: Prompts.QuickAction?, persistUser: Boolean): PendingSend? {
         val ai = ai ?: return null
-        val model = selectedModel ?: ai.modelFor(AiTask.CHAT)
+        val earlyScope = if (action != null && hasSelection) ContextScope.SELECTION else scope
+        val task = action?.task ?: if (earlyScope == ContextScope.DOCUMENT && docKind == DocKind.PDF) AiTask.PDF_ANALYSIS else AiTask.CHAT
+        // Routing applies (e.g. Solve -> the MATH model) unless the user picked a model in the switcher.
+        val model = (if (userPickedModel) selectedModel else ai.modelFor(task) ?: selectedModel) ?: ai.modelFor(AiTask.CHAT)
         if (model == null) {
             error = PanelError("No chat model is available. Add an API key in AI settings.")
             return null
@@ -291,7 +296,6 @@ internal class AiPanelViewModel(private val graph: AppGraph, val docId: String) 
         }
         val history = history(messages.value)
         val userMessage = AiMessage(AiRole.USER, assembled.images + AiPart.Text(content))
-        val task = action?.task ?: AiTask.CHAT
         val request = AiRequest(
             task = task,
             messages = history + userMessage,
