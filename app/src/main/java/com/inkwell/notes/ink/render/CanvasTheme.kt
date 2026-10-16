@@ -11,6 +11,7 @@ class CanvasTheme(val dark: Boolean) {
     val desk = c.desk.toArgb()
     val pageShadow = c.pageShadow.toArgb()
     val accent = c.accent.toArgb()
+    val onAccent = c.onAccent.toArgb()
     val selection = c.selection.toArgb()
     val ink = c.ink.toArgb()
     val inkMuted = c.inkMuted.toArgb()

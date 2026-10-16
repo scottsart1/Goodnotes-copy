@@ -37,6 +37,10 @@ import com.inkwell.notes.ink.render.RenderHost
 import com.inkwell.notes.ink.render.RenderManager
 import com.inkwell.notes.ink.render.WetInkHost
 import com.inkwell.notes.ink.render.WetInkPresenter
+import com.inkwell.notes.ink.input.TapTracker
+import com.inkwell.notes.ink.select.Handle
+import com.inkwell.notes.ink.select.SelectionController
+import com.inkwell.notes.ink.select.SelectionTool
 import com.inkwell.notes.ink.tools.EditSession
 import com.inkwell.notes.ink.tools.InkTool
 import com.inkwell.notes.ink.tools.OverlayDrawer
@@ -96,6 +100,10 @@ internal class InkEngine(val view: InkCanvasView) : ToolHost, CommandTarget, Ren
     val router = InputRouter(this)
     val editor = CanvasEditor(this)
     val painter = EnginePainter(this)
+    val selection = SelectionController(this)
+    val selectionTool = SelectionTool(selection)
+    val keys = KeyboardController(this)
+    override val taps = TapTracker(slopPx = 32f * density)
 
     var audioClock: AudioClock? = null
     var playback: PlaybackHighlight? = null
@@ -184,9 +192,15 @@ internal class InkEngine(val view: InkCanvasView) : ToolHost, CommandTarget, Ren
 
     fun setToolState(state: ToolState) {
         val toolChanged = state.tool != toolState.tool
+        if (toolChanged && selection.isManipulating) selection.commit()
         toolState = state
         router.onToolStateChanged(state)
-        if (toolChanged) invalidateOverlay()
+        if (toolChanged) {
+            // Picking a writing or creating tool ends the selection (lasso and hand keep it).
+            if (state.tool != com.inkwell.notes.core.model.ToolType.LASSO && state.tool != com.inkwell.notes.core.model.ToolType.HAND) clearSelection()
+            taps.reset()
+            invalidateOverlay()
+        }
     }
 
     fun setInputPrefs(prefs: InputPrefs) {
@@ -684,6 +698,8 @@ internal class InkEngine(val view: InkCanvasView) : ToolHost, CommandTarget, Ren
         }
         if (!ok) history.discard(cmd)
         notifyUndoRedo()
+        // Undo/redo may have moved or resized selected items: hosts re-anchor their menu.
+        if (selPageId != null) reportSelection()
         // Bring the change into view.
         val target = cmd.pageIds.firstNotNullOfOrNull { id -> indexOf(id).takeIf { it >= 0 } }
         if (target != null && !viewportCtl.isPageVisible(target)) viewportCtl.scrollToPage(target, smooth = true)
@@ -724,6 +740,8 @@ internal class InkEngine(val view: InkCanvasView) : ToolHost, CommandTarget, Ren
 
     /** Drops selected ids that no longer exist. */
     private fun pruneSelection() {
+        // Items lifted for a drag are temporarily off the page; they come back on release.
+        if (selection.isLifted) return
         val h = selPageId?.let { byId[it] } ?: return
         if (!h.isLoaded) return
         val existing = selIds.filterTo(LinkedHashSet()) { ContentOps.find(h.content, it) != null }
@@ -736,7 +754,48 @@ internal class InkEngine(val view: InkCanvasView) : ToolHost, CommandTarget, Ren
 
     /** Re-reports the selection after the viewport moved (its view bounds changed). */
     fun reportSelectionMoved() {
+        if (selection.isManipulating) return
         if (selPageId != null) listener?.onSelectionChanged(editor.buildSelection())
+    }
+
+    /** Reports the current selection with fresh bounds (cleared when its items are gone). */
+    fun reportSelection() {
+        if (selPageId == null) return
+        val sel = editor.buildSelection()
+        if (sel == null) clearSelection() else listener?.onSelectionChanged(sel)
+        invalidateOverlay()
+    }
+
+    /** Asks the host to edit a text box or sticky note. */
+    override fun requestEdit(pageIndex: Int, item: Any, pageX: Float, pageY: Float) {
+        val h = page(pageIndex) ?: return
+        if (!isEditable(pageIndex)) return
+        val r = RectF()
+        pageBoundsToView(pageIndex, ItemGeometry.bounds(item, Bounds(), h.content), r)
+        when (item) {
+            is com.inkwell.notes.core.model.TextItem -> listener?.onTextEditRequested(h.id, item.id, pageX, pageY, r)
+            is com.inkwell.notes.core.model.StickyItem -> listener?.onStickyEditRequested(h.id, item.id, r)
+        }
+    }
+
+    override fun beginItemDrag(pageIndex: Int, itemId: String, viewX: Float, viewY: Float, isFinger: Boolean): InkTool? {
+        val h = page(pageIndex) ?: return null
+        if (!h.isLoaded || !isEditable(pageIndex)) return null
+        if (ContentOps.find(h.content, itemId) == null) return null
+        setSelection(pageIndex, com.inkwell.notes.ink.tools.LassoSelector.expandGroups(h.content, setOf(itemId)))
+        return if (selection.begin(viewX, viewY, Handle.BODY, isFinger)) selectionTool else null
+    }
+
+    override fun schedule(delayMs: Long, action: Runnable) {
+        view.removeCallbacks(action)
+        view.postDelayed(action, delayMs)
+    }
+
+    override fun unschedule(action: Runnable) { view.removeCallbacks(action) }
+
+    override fun haptic() {
+        val c = if (android.os.Build.VERSION.SDK_INT >= 30) android.view.HapticFeedbackConstants.CONFIRM else android.view.HapticFeedbackConstants.KEYBOARD_TAP
+        try { view.performHapticFeedback(c) } catch (_: Throwable) {}
     }
 
     // ---------------------------------------------------------------- Playback highlight
@@ -752,11 +811,14 @@ internal class InkEngine(val view: InkCanvasView) : ToolHost, CommandTarget, Ren
     fun tool(type: com.inkwell.notes.core.model.ToolType): InkTool = tools[type]
 
     fun flushTools() {
+        try { selection.commit() } catch (e: Throwable) { Log.e(TAG, "Selection commit failed", e) }
         for (t in tools.all) if (t.isActive) try { t.flush(this) } catch (e: Throwable) { Log.e(TAG, "Tool flush failed", e) }
+        try { keys.flush() } catch (e: Throwable) { Log.e(TAG, "Nudge commit failed", e) }
         router.endGestures()
     }
 
     private fun cancelActiveTools() {
+        selection.cancel()
         for (t in tools.all) if (t.isActive) t.onCancel(this)
         if (wetInk.isActive) wetInk.cancel()
     }

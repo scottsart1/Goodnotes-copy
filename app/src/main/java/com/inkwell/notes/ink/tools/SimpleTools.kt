@@ -73,7 +73,10 @@ class HandTool : InkTool {
     private fun tapItem(host: ToolHost, e: ToolEvent) {
         val holder = host.page(e.pageIndex) ?: return
         if (!holder.isLoaded) return
-        val hit = holder.index().hitTest(e.x, e.y, 6f * host.density / host.scale) ?: return
+        val hit = holder.index().hitTest(e.x, e.y, 6f * host.density / host.scale)
+        val double = host.taps.tap(e.eventTime, e.viewX, e.viewY, hit?.let { com.inkwell.notes.ink.model.Items.id(it) })
+        if (hit == null) return
+        if (double && (hit is TextItem || hit is StickyItem)) { host.requestEdit(e.pageIndex, hit, e.x, e.y); return }
         host.listener?.onItemTapped(com.inkwell.notes.ink.model.Items.ref(holder.id, hit))
     }
 
@@ -88,30 +91,65 @@ class HandTool : InkTool {
     companion object { private const val HISTORY = 16 }
 }
 
-/** Base for tools acting on a tap (TEXT, IMAGE, STICKY): fires when the pointer lifts without moving. */
+/**
+ * Base for tools acting on a tap (TEXT, IMAGE, STICKY): fires when the pointer lifts without
+ * moving. Dragging an item the tool owns (a text box for TEXT, ...) selects and moves it instead.
+ */
 abstract class TapTool : InkTool {
     private var downX = 0f
     private var downY = 0f
     private var moved = false
     private var active = false
-    override val isActive: Boolean get() = active
+    private var pageIndex = -1
+    private var dragTarget: String? = null
+    private var delegate: InkTool? = null
+    override val isActive: Boolean get() = active || delegate?.isActive == true
+
+    /** Items this tool picks up and moves when a drag starts on them. */
+    protected open fun movable(item: Any): Boolean = false
 
     override fun onDown(host: ToolHost, e: ToolEvent) {
         active = true
+        delegate = null
         downX = e.viewX; downY = e.viewY; moved = false
+        pageIndex = e.pageIndex
+        val holder = host.page(e.pageIndex)
+        dragTarget = if (holder != null && holder.isLoaded) {
+            holder.index().hitTest(e.x, e.y, 4f * host.density / host.scale) { movable(it) }?.let { com.inkwell.notes.ink.model.Items.id(it) }
+        } else null
     }
 
     override fun onMove(host: ToolHost, e: ToolEvent) {
-        if (Geo.dist(downX, downY, e.viewX, e.viewY) > 10f * host.density) moved = true
+        delegate?.let { it.onMove(host, e); return }
+        if (!active) return
+        if (!moved && Geo.dist(downX, downY, e.viewX, e.viewY) > 10f * host.density) {
+            moved = true
+            val target = dragTarget ?: return
+            active = false
+            delegate = host.beginItemDrag(pageIndex, target, downX, downY, e.isFinger)
+            delegate?.onMove(host, e)
+        }
     }
 
     override fun onUp(host: ToolHost, e: ToolEvent) {
+        delegate?.let { it.onUp(host, e); delegate = null; return }
         if (!active) return
         active = false
         if (!moved && Geo.dist(downX, downY, e.viewX, e.viewY) <= 10f * host.density) onTap(host, e)
     }
 
-    override fun onCancel(host: ToolHost) { active = false }
+    override fun onCancel(host: ToolHost) {
+        delegate?.onCancel(host)
+        delegate = null
+        active = false
+    }
+
+    override fun flush(host: ToolHost) {
+        delegate?.flush(host)
+        delegate = null
+    }
+
+    override fun onViewportChanged(host: ToolHost) { delegate?.onViewportChanged(host) }
 
     protected abstract fun onTap(host: ToolHost, e: ToolEvent)
 }
@@ -120,6 +158,8 @@ abstract class TapTool : InkTool {
 class TextTool : TapTool() {
     override val type: ToolType get() = ToolType.TEXT
     private val rect = RectF()
+
+    override fun movable(item: Any): Boolean = item is TextItem
 
     override fun onTap(host: ToolHost, e: ToolEvent) {
         val holder = host.page(e.pageIndex) ?: return
@@ -140,11 +180,20 @@ class TextTool : TapTool() {
     companion object { const val DEFAULT_TEXT_WIDTH = 280f }
 }
 
-/** IMAGE: tap to ask the host for an image to place there. */
+/** IMAGE: tap empty space to ask the host for an image to place there; tap or drag an image to select or move it. */
 class ImageTool : TapTool() {
     override val type: ToolType get() = ToolType.IMAGE
+
+    override fun movable(item: Any): Boolean = item is ImageItem
+
     override fun onTap(host: ToolHost, e: ToolEvent) {
         if (!host.isEditable(e.pageIndex)) return
+        val holder = host.page(e.pageIndex)
+        val hit = if (holder != null && holder.isLoaded) holder.index().hitTest(e.x, e.y, 2f * host.density / host.scale) { it is ImageItem } else null
+        if (hit != null) {
+            host.setSelection(e.pageIndex, LassoSelector.expandGroups(holder!!.content, setOf((hit as ImageItem).id)))
+            return
+        }
         host.listener?.onImagePlacementRequested(e.pageIndex, e.x, e.y)
     }
 }
@@ -155,16 +204,27 @@ interface StickyHost {
     fun addStickyAt(pageIndex: Int, x: Float, y: Float): String?
 }
 
-/** STICKY: tap a sticky to edit it, or empty space to add one. */
+/**
+ * STICKY: tap empty space to place a sticky note and edit it; tap a sticky to select it (drag to
+ * move it), double-tap to edit it.
+ */
 class StickyTool(private val stickies: StickyHost) : TapTool() {
     override val type: ToolType get() = ToolType.STICKY
     private val rect = RectF()
+
+    override fun movable(item: Any): Boolean = item is StickyItem
 
     override fun onTap(host: ToolHost, e: ToolEvent) {
         val holder = host.page(e.pageIndex) ?: return
         if (!host.isEditable(e.pageIndex)) return
         val hit = holder.index().hitTest(e.x, e.y, 2f * host.density / host.scale) { it is StickyItem } as StickyItem?
-        val id = hit?.id ?: stickies.addStickyAt(e.pageIndex, e.x, e.y) ?: return
+        val double = host.taps.tap(e.eventTime, e.viewX, e.viewY, hit?.id)
+        if (hit != null) {
+            if (double) host.requestEdit(e.pageIndex, hit, e.x, e.y)
+            else host.setSelection(e.pageIndex, LassoSelector.expandGroups(holder.content, setOf(hit.id)))
+            return
+        }
+        val id = stickies.addStickyAt(e.pageIndex, e.x, e.y) ?: return
         val item = host.page(e.pageIndex)?.content?.stickies?.firstOrNull { it.id == id } ?: return
         host.pageBoundsToView(e.pageIndex, Bounds(item.x, item.y, item.x + item.width, item.y + item.height), rect)
         host.listener?.onStickyEditRequested(holder.id, id, RectF(rect))
@@ -231,15 +291,29 @@ class ConnectorTool : InkTool {
     override fun drawOverlay(host: ToolHost, canvas: Canvas) {
         if (!active) return
         val holder = host.page(pageIndex) ?: return
+        val toId = holder.index().hitTest(x1, y1, 4f * host.density / host.scale, ::attachable)?.let { com.inkwell.notes.ink.model.Items.id(it) }?.takeIf { it != fromId }
         canvas.save()
         if (host.pageClip(pageIndex, clip)) canvas.clipRect(clip)
         host.pageMatrix(pageIndex, matrix)
         canvas.concat(matrix)
-        val preview = ConnectorItem("preview", fromItemId = fromId, fromX = x0, fromY = y0, toX = x1, toY = y1,
+        val preview = ConnectorItem("preview", fromItemId = fromId, toItemId = toId, fromX = x0, fromY = y0, toX = x1, toY = y1,
             color = host.toolState.shape.strokeColor, width = host.toolState.shape.strokeWidth.coerceIn(0.5f, 20f))
         PageRenderer.drawConnector(canvas, preview, holder.content)
         canvas.restore()
+        // Outline the items the arrow attaches to.
+        val t = host.theme
+        targetPaint.color = t.withAlpha(t.accent, 0xB3)
+        targetPaint.strokeWidth = 1.5f * host.density
+        for (id in listOfNotNull(fromId, toId)) {
+            val b = ItemGeometry.attachBounds(holder.content, id, Bounds()) ?: continue
+            host.pageBoundsToView(pageIndex, b, clip)
+            val pad = 4f * host.density
+            clip.inset(-pad, -pad)
+            canvas.drawRoundRect(clip, 6f * host.density, 6f * host.density, targetPaint)
+        }
     }
+
+    private val targetPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply { style = android.graphics.Paint.Style.STROKE }
 }
 
 /** Maps tool types to tool instances. Other features may replace or add tools here. */

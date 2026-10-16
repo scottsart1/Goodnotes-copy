@@ -174,4 +174,24 @@ interface ToolHost {
     /** Extension overlays drawn above the active tool's overlay. */
     fun addOverlay(drawer: OverlayDrawer)
     fun removeOverlay(drawer: OverlayDrawer)
+
+    // ---- Gestures
+    /** Shared double-tap detection (taps on the same item across tools). */
+    val taps: com.inkwell.notes.ink.input.TapTracker
+
+    /** Runs [action] on the main thread after [delayMs] (replacing an earlier schedule of it). */
+    fun schedule(delayMs: Long, action: Runnable)
+    fun unschedule(action: Runnable)
+
+    /** A light confirmation tick (shape snapped, gesture recognised). */
+    fun haptic()
+
+    /** Asks the host to edit a text box or sticky note (a no-op for other items). */
+    fun requestEdit(pageIndex: Int, item: Any, pageX: Float, pageY: Float)
+
+    /**
+     * Selects the item [itemId] (with its group) and starts moving it from view point
+     * ([viewX], [viewY]). Returns the tool that continues the gesture, or null.
+     */
+    fun beginItemDrag(pageIndex: Int, itemId: String, viewX: Float, viewY: Float, isFinger: Boolean): InkTool?
 }

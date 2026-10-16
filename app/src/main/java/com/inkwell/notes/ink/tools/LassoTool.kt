@@ -5,15 +5,21 @@ import android.graphics.DashPathEffect
 import android.graphics.Matrix
 import android.graphics.Paint
 import android.graphics.Path
+import android.os.SystemClock
 import com.inkwell.notes.core.model.LassoMode
+import com.inkwell.notes.core.model.StickyItem
+import com.inkwell.notes.core.model.TextItem
 import com.inkwell.notes.core.model.ToolType
 import com.inkwell.notes.ink.geometry.FloatList
 import com.inkwell.notes.ink.geometry.Geo
 import com.inkwell.notes.ink.model.Items
 
 /**
- * Freeform or rectangle lasso. Items mostly inside the loop are selected (groups expand); a tap
- * selects the item under it or clears the selection and reports the tap.
+ * Freeform or rectangle lasso (ToolState.lassoMode) filtered by ToolState.lassoFilter. While
+ * drawing, the loop shows as marching ants closed back to its start. Items mostly inside are
+ * selected (strokes by their samples, boxes by their centre; groups expand). A tap selects the
+ * item under it (its whole group), a double tap on a text box or sticky note edits it, and a tap
+ * on empty space clears the selection.
  */
 class LassoTool : InkTool {
     override val type: ToolType get() = ToolType.LASSO
@@ -26,7 +32,6 @@ class LassoTool : InkTool {
     private var maxTravel = 0f
     private val path = Path()
     private val matrix = Matrix()
-    private val tmp = FloatArray(2)
 
     override fun onDown(host: ToolHost, e: ToolEvent) {
         active = true
@@ -58,19 +63,26 @@ class LassoTool : InkTool {
         if (!holder.isLoaded) return
         val tapSlop = 8f * host.density
         if (maxTravel < tapSlop) {
-            tap(host, e.x, e.y)
+            tap(host, e)
             return
         }
+        host.taps.reset()
         val poly = polygon(host)
         val ids = LassoSelector.select(holder.content, holder.index(), poly, host.toolState.lassoFilter)
         if (ids.isEmpty()) host.clearSelection() else host.setSelection(pageIndex, ids)
     }
 
-    private fun tap(host: ToolHost, x: Float, y: Float) {
+    private fun tap(host: ToolHost, e: ToolEvent) {
         val holder = host.page(pageIndex) ?: return
+        val x = e.x; val y = e.y
         val tol = 6f * host.density / host.scale
         val hit = holder.index().hitTest(x, y, tol) { LassoSelector.accepts(host.toolState.lassoFilter, it) }
+        val double = host.taps.tap(e.eventTime, e.viewX, e.viewY, hit?.let { Items.id(it) })
         if (hit == null) { host.clearSelection(); return }
+        if (double && (hit is TextItem || hit is StickyItem)) {
+            host.requestEdit(pageIndex, hit, x, y)
+            return
+        }
         val ids = LassoSelector.expandGroups(holder.content, setOf(Items.id(hit)))
         host.setSelection(pageIndex, ids)
         host.listener?.onItemTapped(Items.ref(holder.id, hit))
@@ -93,25 +105,38 @@ class LassoTool : InkTool {
         path.reset()
         if (host.toolState.lassoMode == LassoMode.RECTANGLE) {
             val x0 = pts[0]; val y0 = pts[1]; val x1 = pts[pts.size - 2]; val y1 = pts[pts.size - 1]
-            path.moveTo(x0, y0); path.lineTo(x1, y0); path.lineTo(x1, y1); path.lineTo(x0, y1); path.close()
+            path.moveTo(x0, y0); path.lineTo(x1, y0); path.lineTo(x1, y1); path.lineTo(x0, y1)
         } else {
             path.moveTo(pts[0], pts[1])
             var i = 2
             while (i + 1 < pts.size) { path.lineTo(pts[i], pts[i + 1]); i += 2 }
         }
+        // Closed back to the start: the loop shows exactly what will be selected.
+        path.close()
         host.pageMatrix(pageIndex, matrix)
         path.transform(matrix)
         val t = host.theme
-        fillPaint.color = t.withAlpha(t.selection, 22)
+        val d = host.density
+        fillPaint.color = t.withAlpha(t.selection, 20)
         canvas.drawPath(path, fillPaint)
-        linePaint.color = t.selection
-        linePaint.strokeWidth = 1.5f * host.density
-        linePaint.pathEffect = DashPathEffect(floatArrayOf(6f * host.density, 4f * host.density), 0f)
-        canvas.drawPath(path, linePaint)
+        // Marching ants: a light under-line with accent dashes moving along it.
+        underPaint.color = t.withAlpha(t.surface, 0xCC)
+        underPaint.strokeWidth = 2.5f * d
+        canvas.drawPath(path, underPaint)
+        val dash = 6f * d; val gap = 4f * d
+        val phase = (SystemClock.uptimeMillis() % MARCH_PERIOD_MS) / MARCH_PERIOD_MS.toFloat() * (dash + gap)
+        antsPaint.color = t.selection
+        antsPaint.strokeWidth = 1.5f * d
+        antsPaint.pathEffect = DashPathEffect(floatArrayOf(dash, gap), -phase)
+        canvas.drawPath(path, antsPaint)
+        // Keep the ants marching while the loop is drawn.
+        host.invalidateOverlay()
     }
 
     companion object {
+        private const val MARCH_PERIOD_MS = 600L
         private val fillPaint = Paint(Paint.ANTI_ALIAS_FLAG)
-        private val linePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeJoin = Paint.Join.ROUND }
+        private val underPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeJoin = Paint.Join.ROUND }
+        private val antsPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeJoin = Paint.Join.ROUND }
     }
 }

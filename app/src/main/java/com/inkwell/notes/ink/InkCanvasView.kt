@@ -8,6 +8,7 @@ import android.graphics.PointF
 import android.graphics.RectF
 import android.util.AttributeSet
 import android.util.Log
+import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.PointerIcon
 import android.view.ViewGroup
@@ -62,6 +63,10 @@ class InkCanvasView @JvmOverloads constructor(
 
     init {
         setWillNotDraw(true)
+        // Focusable so physical-keyboard shortcuts (DeX) reach the canvas; no focus highlight.
+        isFocusable = true
+        isFocusableInTouchMode = true
+        defaultFocusHighlightEnabled = false
         isMotionEventSplittingEnabled = false
         contentDescription = context.getString(R.string.ink_canvas_description)
         addView(engine.pageView, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
@@ -77,6 +82,9 @@ class InkCanvasView @JvmOverloads constructor(
     }
 
     override fun dispatchTouchEvent(event: MotionEvent): Boolean = engine.router.onTouchEvent(event)
+
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean =
+        (isFocused && engine.keys.onKeyEvent(event)) || super.dispatchKeyEvent(event)
 
     override fun dispatchGenericMotionEvent(event: MotionEvent): Boolean =
         engine.router.onGenericMotionEvent(event) || super.dispatchGenericMotionEvent(event)

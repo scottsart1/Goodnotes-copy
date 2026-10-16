@@ -137,6 +137,8 @@ internal class InputRouter(private val e: InkEngine) {
             when (event.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
                     view.parent?.requestDisallowInterceptTouchEvent(true)
+                    // With a physical keyboard (DeX) the canvas takes focus so shortcuts reach it.
+                    if (!view.isFocused && (e.keys.hasHardwareKeyboard() || event.isFromSource(InputDevice.SOURCE_MOUSE))) view.requestFocus()
                     pointerDown(event, 0)
                 }
                 MotionEvent.ACTION_POINTER_DOWN -> pointerDown(event, event.actionIndex)
@@ -247,7 +249,9 @@ internal class InputRouter(private val e: InkEngine) {
     }
 
     private fun startStylusTool(type: ToolType) {
-        val tool = e.tool(type)
+        // A contact on the selection box moves, resizes or rotates it with any tool but the eraser.
+        val onSelection = type != ToolType.ERASER && e.selection.hit(lastSX, lastSY) != null
+        val tool = if (onSelection) e.selectionTool else e.tool(type)
         stylusTool = tool
         stylusToolType = type
         fillSingle(ev, stylusPage, lastSX, lastSY, lastSPressure, lastSTilt, lastSTime, stylus = !stylusIsMouse)
@@ -547,10 +551,12 @@ internal class InputRouter(private val e: InkEngine) {
             e.viewportCtl.stop()
             handler.postDelayed(longPress, longPressMs)
             val role = if (mouse) FingerRole.NAVIGATE else policy.fingerRole()
-            if (role != FingerRole.NAVIGATE) {
+            // A finger on the selection box drags it, whatever the finger otherwise does.
+            val onSelection = e.selection.hit(f.x, f.y) != null
+            if (onSelection || role != FingerRole.NAVIGATE) {
                 pendingSamples.clear()
                 pendingSamples += Sample(f.x, f.y, event.eventTime)
-                fingerTool = e.tool(if (role == FingerRole.SELECT) ToolType.LASSO else e.toolState.tool)
+                fingerTool = if (onSelection) e.selectionTool else e.tool(if (role == FingerRole.SELECT) ToolType.LASSO else e.toolState.tool)
                 fingerToolStarted = false
                 fingerToolPage = e.pageIndexAt(f.x, f.y)
                 handler.postDelayed(startFingerTool, TouchPolicy.FINGER_INK_DELAY_MS)
@@ -823,7 +829,14 @@ internal class InputRouter(private val e: InkEngine) {
         if (!h.isLoaded) return
         e.viewToPage(page, x, y, tmp)
         val hit = h.index().hitTest(tmp[0], tmp[1], 8f * e.density / e.scale) ?: run {
+            e.taps.tap(SystemClock.uptimeMillis(), x, y, null)
             if (e.selectedIds.isNotEmpty()) e.clearSelection()
+            return
+        }
+        // Double-tap a sticky note or text box to edit it.
+        val double = e.taps.tap(SystemClock.uptimeMillis(), x, y, Items.id(hit))
+        if (double && (hit is com.inkwell.notes.core.model.StickyItem || hit is com.inkwell.notes.core.model.TextItem)) {
+            e.requestEdit(page, hit, tmp[0], tmp[1])
             return
         }
         e.listener?.onItemTapped(Items.ref(h.id, hit))

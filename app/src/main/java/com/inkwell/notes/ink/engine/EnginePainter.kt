@@ -2,7 +2,6 @@ package com.inkwell.notes.ink.engine
 
 import android.graphics.Canvas
 import android.graphics.Color
-import android.graphics.DashPathEffect
 import android.graphics.Matrix
 import android.graphics.Paint
 import android.graphics.RectF
@@ -41,7 +40,6 @@ internal class EnginePainter(private val e: InkEngine) {
     private val tmpBounds = Bounds()
 
     private val shadowPaint = Paint(Paint.ANTI_ALIAS_FLAG)
-    private val selectionPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE }
     private val fillPaint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val ringPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE }
     private val messagePaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply { textAlign = Paint.Align.CENTER }
@@ -220,23 +218,7 @@ internal class EnginePainter(private val e: InkEngine) {
     }
 
     private fun drawSelection(canvas: Canvas) {
-        val i = e.selectionPageIndex
-        if (i < 0 || e.selectedIds.isEmpty()) return
-        val h = e.page(i) ?: return
-        if (!h.isLoaded) return
-        val b = Bounds()
-        for (id in e.selectedIds) ContentOps.find(h.content, id)?.let { b.union(ItemGeometry.bounds(it, tmpBounds, h.content)) }
-        if (b.isEmpty) return
-        e.pageBoundsToView(i, b, rect)
-        val pad = 6f * e.density
-        rect.inset(-pad, -pad)
-        val t = e.theme
-        fillPaint.color = t.withAlpha(t.selection, 0x14)
-        canvas.drawRoundRect(rect, 4f * e.density, 4f * e.density, fillPaint)
-        selectionPaint.color = t.selection
-        selectionPaint.strokeWidth = 1.5f * e.density
-        selectionPaint.pathEffect = DashPathEffect(floatArrayOf(6f * e.density, 4f * e.density), 0f)
-        canvas.drawRoundRect(rect, 4f * e.density, 4f * e.density, selectionPaint)
+        e.selection.draw(canvas)
     }
 
     private fun drawFlash(canvas: Canvas) {

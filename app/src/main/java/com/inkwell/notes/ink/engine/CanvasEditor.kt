@@ -9,6 +9,7 @@ import android.text.StaticLayout
 import android.text.TextPaint
 import android.util.Log
 import com.inkwell.notes.core.model.ImageItem
+import com.inkwell.notes.core.model.InkPoints
 import com.inkwell.notes.core.model.PageContent
 import com.inkwell.notes.core.model.PenType
 import com.inkwell.notes.core.model.StickyItem
@@ -19,10 +20,12 @@ import com.inkwell.notes.ink.InkSelection
 import com.inkwell.notes.ink.ItemRef
 import com.inkwell.notes.ink.ItemType
 import com.inkwell.notes.ink.geometry.Bounds
+import com.inkwell.notes.ink.geometry.Geo
 import com.inkwell.notes.ink.geometry.ItemGeometry
 import com.inkwell.notes.ink.model.ContentOps
 import com.inkwell.notes.ink.model.Items
 import com.inkwell.notes.ink.render.PageRenderer
+import com.inkwell.notes.ink.select.SelectionClipboard
 import kotlin.math.max
 import kotlin.math.min
 
@@ -52,6 +55,7 @@ internal class CanvasEditor(private val e: InkEngine) {
     // ---------------------------------------------------------------- Insertion
 
     fun insertItems(pageIndex: Int?, fragment: PageContent, at: PointF?, select: Boolean) {
+        e.flushTools()
         val i = resolvePage(pageIndex)
         if (!e.isEditable(i)) return
         val items = ContentOps.allItems(fragment)
@@ -80,6 +84,7 @@ internal class CanvasEditor(private val e: InkEngine) {
     }
 
     fun insertImage(pageIndex: Int?, assetId: String, widthPx: Int, heightPx: Int, at: PointF?) {
+        e.flushTools()
         val i = resolvePage(pageIndex)
         if (!e.isEditable(i)) return
         val wpx = widthPx.coerceAtLeast(1).toFloat(); val hpx = heightPx.coerceAtLeast(1).toFloat()
@@ -112,6 +117,7 @@ internal class CanvasEditor(private val e: InkEngine) {
     }
 
     fun insertText(pageIndex: Int?, text: String, at: PointF?, config: TextConfig?, origin: String?): ItemRef? {
+        e.flushTools()
         val i = resolvePage(pageIndex)
         if (!e.isEditable(i)) return null
         val h = e.page(i) ?: return null
@@ -131,6 +137,7 @@ internal class CanvasEditor(private val e: InkEngine) {
     }
 
     fun updateText(ref: ItemRef, text: String, config: TextConfig?) {
+        e.flushTools()
         val i = e.indexOf(ref.pageId)
         if (i < 0) return
         e.applyEdit(i, "Edit text") { c ->
@@ -148,7 +155,25 @@ internal class CanvasEditor(private val e: InkEngine) {
         }
     }
 
+    /**
+     * [t] after a transform of [original]: when its width changed but its font did not (an edge
+     * resize), the height follows the re-wrapped text; the box keeps its top edge.
+     */
+    fun refitText(t: TextItem, original: TextItem): TextItem {
+        if (t.text.isEmpty()) return t
+        val cfg = TextConfig(t.fontSizePt, t.color, t.bold, t.italic)
+        val (_, h) = try { measureText(t.text, cfg, t.width, fixedWidth = t.width) } catch (x: Throwable) { return t }
+        if (kotlin.math.abs(h - t.height) < 0.5f) return t
+        // Grow or shrink downwards in the box's own (rotated) frame.
+        val a = t.rotation * Math.PI.toFloat() / 180f
+        val dh = (h - t.height) / 2f
+        val cx = t.x + t.width / 2f - kotlin.math.sin(a) * dh
+        val cy = t.y + t.height / 2f + kotlin.math.cos(a) * dh
+        return t.copy(x = cx - t.width / 2f, y = cy - h / 2f, height = h)
+    }
+
     fun addSticky(pageIndex: Int?, at: PointF?, color: Int?): ItemRef? {
+        e.flushTools()
         val i = resolvePage(pageIndex)
         if (!e.isEditable(i)) return null
         val h = e.page(i) ?: return null
@@ -163,6 +188,7 @@ internal class CanvasEditor(private val e: InkEngine) {
     }
 
     fun updateSticky(ref: ItemRef, text: String, color: Int?) {
+        e.flushTools()
         val i = e.indexOf(ref.pageId)
         if (i < 0) return
         e.applyEdit(i, "Edit sticky") { c ->
@@ -201,6 +227,7 @@ internal class CanvasEditor(private val e: InkEngine) {
     }
 
     fun selectAll(pageIndex: Int?) {
+        e.flushTools()
         val i = resolvePage(pageIndex)
         val h = e.page(i) ?: return
         if (!h.isLoaded) return
@@ -209,6 +236,7 @@ internal class CanvasEditor(private val e: InkEngine) {
     }
 
     fun selectItems(pageId: String, itemIds: Collection<String>) {
+        e.flushTools()
         val i = e.indexOf(pageId)
         val h = e.page(i) ?: return
         if (!h.isLoaded) return
@@ -217,6 +245,7 @@ internal class CanvasEditor(private val e: InkEngine) {
     }
 
     private inline fun editSelection(label: String, crossinline transform: (PageContent, Set<String>) -> PageContent): Boolean {
+        e.flushTools()
         val i = selectionPage()
         if (i < 0) return false
         val ids = e.selectedIds
@@ -227,14 +256,28 @@ internal class CanvasEditor(private val e: InkEngine) {
     }
 
     fun deleteSelection() {
+        e.flushTools()
         val i = selectionPage()
         if (i < 0) return
         val ids = e.selectedIds
-        e.applyEdit(i, "Delete") { ContentOps.remove(it, ids) }
+        // Connectors attached to deleted items keep a free end where the item was.
+        e.applyEdit(i, "Delete") { c ->
+            val keep = ContentOps.allItems(c).map { Items.id(it) }.filterTo(HashSet()) { it !in ids }
+            val detached = c.connectors.filter { it.id !in ids && (it.fromItemId in ids || it.toItemId in ids) }
+                .associate { it.id to (SelectionClipboard.detachOutside(it, c, keep) as Any) }
+            ContentOps.replace(ContentOps.remove(c, ids), detached)
+        }
         e.clearSelection()
     }
 
-    fun copySelection(): PageContent? = buildSelection()?.content
+    /** The selected items as a fragment whose bounds start at (0, 0) (see [SelectionClipboard.copy]). */
+    fun copySelection(): PageContent? {
+        e.flushTools()
+        val i = selectionPage()
+        val h = e.page(i) ?: return null
+        if (!h.isLoaded) return null
+        return SelectionClipboard.copy(h.content, e.selectedIds)
+    }
 
     fun cutSelection(): PageContent? {
         val c = copySelection() ?: return null
@@ -243,6 +286,7 @@ internal class CanvasEditor(private val e: InkEngine) {
     }
 
     fun duplicateSelection() {
+        e.flushTools()
         val sel = buildSelection() ?: return
         val b = sel.boundsPage
         insertItems(sel.pageIndex, sel.content, PointF(b.centerX() + DUPLICATE_OFFSET, b.centerY() + DUPLICATE_OFFSET), select = true)
@@ -283,24 +327,49 @@ internal class CanvasEditor(private val e: InkEngine) {
         }
     }
 
-    /** Replaces the selected handwriting by a text box (convert to text). */
-    fun replaceSelectionWithText(text: String) {
+    /** Selected handwriting (no highlighter) on the selection page, after committing pending edits. */
+    private fun selectedHandwriting(): Pair<Int, List<Stroke>>? {
+        e.flushTools()
         val i = selectionPage()
-        val h = e.page(i) ?: return
-        if (!h.isLoaded || text.isBlank()) return
+        val h = e.page(i) ?: return null
+        if (!h.isLoaded || !e.isEditable(i)) return null
         val ids = e.selectedIds
         val strokes = h.content.strokes.filter { it.id in ids && it.pen != PenType.HIGHLIGHTER }
-        if (strokes.isEmpty()) return
+        return if (strokes.isEmpty()) null else i to strokes
+    }
+
+    private fun inkBounds(strokes: List<Stroke>): Bounds {
         val b = Bounds()
         val t = Bounds()
-        for (s in strokes) b.union(ItemGeometry.bounds(s, t))
-        val heights = strokes.map { ItemGeometry.strokeInkHeight(it) }.sorted()
-        val fontSize = (heights[heights.size / 2] * 0.95f).coerceIn(10f, 48f)
-        val cfg = e.toolState.text.copy(fontSizePt = fontSize, color = strokes.first().color or 0xFF000000.toInt())
-        val maxWidth = max(b.width, 120f)
-        val (w, ht) = measureText(text, cfg, maxWidth)
+        for (s in strokes) b.union(Geo.polylineBounds(s.points, InkPoints.STRIDE, t))
+        return b
+    }
+
+    /**
+     * Replaces the selected handwriting by a text box holding [text] (convert to text): the box
+     * takes the handwriting's place and width, its font size follows the handwriting's line height
+     * (shrinking a little when the text runs much longer than the writing), and its colour is the
+     * handwriting's main colour. Marked with origin "handwriting".
+     */
+    fun replaceSelectionWithText(text: String) {
+        if (text.isBlank()) return
+        val (i, strokes) = selectedHandwriting() ?: return
+        val b = inkBounds(strokes)
+        if (b.isEmpty) return
+        var size = HandwritingLayout.estimateFontSize(strokes)
+        val color = strokes.groupingBy { it.color }.eachCount().maxByOrNull { it.value }!!.key or 0xFF000000.toInt()
+        val width = max(b.width, 60f)
+        var cfg = e.toolState.text.copy(fontSizePt = size, color = color)
+        var measured = measureText(text, cfg, width, fixedWidth = width)
+        var tries = 0
+        while (measured.second > max(b.height * 1.3f, size * 1.4f) && size > MIN_CONVERTED_FONT && tries < 12) {
+            size = max(MIN_CONVERTED_FONT, size * 0.9f)
+            cfg = cfg.copy(fontSizePt = size)
+            measured = measureText(text, cfg, width, fixedWidth = width)
+            tries++
+        }
         val item = TextItem(
-            id = e.newId(), x = b.left, y = b.top, width = max(w, min(b.width, maxWidth)), height = ht, text = text,
+            id = e.newId(), x = b.left, y = b.top, width = measured.first, height = measured.second, text = text,
             fontSizePt = cfg.fontSizePt, color = cfg.color, bold = cfg.bold, italic = cfg.italic,
             z = strokes.maxOf { it.z }, createdAt = System.currentTimeMillis(), origin = "handwriting",
             audio = strokes.firstNotNullOfOrNull { it.audio },
@@ -311,18 +380,12 @@ internal class CanvasEditor(private val e: InkEngine) {
         }
     }
 
-    /** Rotates selected handwriting so its baseline is horizontal. */
+    /** Rotates selected handwriting so its baseline (a regression through letter bottoms) is horizontal. */
     fun straightenSelection() {
-        val i = selectionPage()
-        val h = e.page(i) ?: return
-        val ids = e.selectedIds
-        val strokes = h.content.strokes.filter { it.id in ids && it.pen != PenType.HIGHLIGHTER }
-        if (strokes.isEmpty()) return
+        val (_, strokes) = selectedHandwriting() ?: return
         val angle = HandwritingLayout.baselineAngle(strokes)
         if (kotlin.math.abs(angle) < 0.004f) return
-        val b = Bounds()
-        val t = Bounds()
-        for (s in strokes) b.union(ItemGeometry.bounds(s, t))
+        val b = inkBounds(strokes)
         val strokeIds = strokes.mapTo(HashSet()) { it.id }
         editSelection("Straighten") { c, _ ->
             ContentOps.mapItems(c, strokeIds) { HandwritingLayout.rotate(it as Stroke, -angle, b.centerX, b.centerY) }
@@ -331,14 +394,8 @@ internal class CanvasEditor(private val e: InkEngine) {
 
     /** Re-wraps selected handwritten words into lines of [widthPt] (null = page text width). */
     fun reflowSelection(widthPt: Float?) {
-        val i = selectionPage()
-        val h = e.page(i) ?: return
-        val ids = e.selectedIds
-        val strokes = h.content.strokes.filter { it.id in ids && it.pen != PenType.HIGHLIGHTER }
-        if (strokes.isEmpty()) return
-        val b = Bounds()
-        val t = Bounds()
-        for (s in strokes) b.union(ItemGeometry.bounds(s, t))
+        val (i, strokes) = selectedHandwriting() ?: return
+        val b = inkBounds(strokes)
         val pageW = pageWidthOr(i, 0f)
         val width = widthPt?.coerceAtLeast(40f) ?: if (pageW > 0f) max(80f, pageW - b.left - TEXT_MARGIN) else max(b.width, 400f)
         val moves = HandwritingLayout.reflow(strokes, b.left, b.top, width) ?: return
@@ -347,29 +404,36 @@ internal class CanvasEditor(private val e: InkEngine) {
 
     /** Scales the gaps between handwritten words of the selection by [factor]. */
     fun adjustSelectionWordSpacing(factor: Float) {
-        val i = selectionPage()
-        val h = e.page(i) ?: return
-        val ids = e.selectedIds
-        val strokes = h.content.strokes.filter { it.id in ids && it.pen != PenType.HIGHLIGHTER }
-        if (strokes.isEmpty() || factor <= 0f) return
+        if (factor <= 0f || !factor.isFinite()) return
+        val (_, strokes) = selectedHandwriting() ?: return
         val moves = HandwritingLayout.respace(strokes, factor) ?: return
         editSelection("Word spacing") { c, _ -> ContentOps.mapItems(c, moves.keys) { s -> moves.getValue((s as Stroke).id).let { (dx, dy) -> Items.translate(s, dx, dy) } } }
     }
 
-    /** Crops the single selected image by insets (fractions of the source image, 0..1). */
+    /**
+     * Crops the single selected image by insets (fractions of the source image, 0..1). The
+     * visible part stays where it was on the page, also for rotated images.
+     */
     fun cropSelectedImage(left: Float, top: Float, right: Float, bottom: Float) {
+        e.flushTools()
         val i = selectionPage()
         val h = e.page(i) ?: return
-        val img = h.content.images.singleOrNull { it.id in e.selectedIds } ?: return
         if (e.selectedIds.size != 1) return
+        val img = h.content.images.singleOrNull { it.id in e.selectedIds } ?: return
         val l = left.coerceIn(0f, 0.95f); val r = right.coerceIn(0f, 0.95f - l)
         val tp = top.coerceIn(0f, 0.95f); val bt = bottom.coerceIn(0f, 0.95f - tp)
         val oldFx = (1f - img.cropLeft - img.cropRight).coerceAtLeast(0.05f)
         val oldFy = (1f - img.cropTop - img.cropBottom).coerceAtLeast(0.05f)
         val ptPerFx = img.width / oldFx; val ptPerFy = img.height / oldFy
+        val nw = (1f - l - r) * ptPerFx; val nh = (1f - tp - bt) * ptPerFy
+        // Centre shift in the image's own frame, then rotated onto the page.
+        val dxl = (l - img.cropLeft) * ptPerFx + nw / 2f - img.width / 2f
+        val dyl = (tp - img.cropTop) * ptPerFy + nh / 2f - img.height / 2f
+        val a = img.rotation * Math.PI.toFloat() / 180f
+        val cx = img.x + img.width / 2f + dxl * kotlin.math.cos(a) - dyl * kotlin.math.sin(a)
+        val cy = img.y + img.height / 2f + dxl * kotlin.math.sin(a) + dyl * kotlin.math.cos(a)
         val cropped = img.copy(
-            x = img.x + (l - img.cropLeft) * ptPerFx, y = img.y + (tp - img.cropTop) * ptPerFy,
-            width = (1f - l - r) * ptPerFx, height = (1f - tp - bt) * ptPerFy,
+            x = cx - nw / 2f, y = cy - nh / 2f, width = nw, height = nh,
             cropLeft = l, cropTop = tp, cropRight = r, cropBottom = bt,
         )
         editSelection("Crop") { c, _ -> ContentOps.replace(c, mapOf(img.id to cropped)) }
@@ -415,5 +479,6 @@ internal class CanvasEditor(private val e: InkEngine) {
         private const val TAG = "InkEditor"
         private const val DUPLICATE_OFFSET = 16f
         private const val TEXT_MARGIN = 48f
+        private const val MIN_CONVERTED_FONT = 8f
     }
 }
