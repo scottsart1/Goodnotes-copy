@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.BoxWithConstraintsScope
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.offset
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.State
 import androidx.compose.runtime.derivedStateOf
@@ -63,14 +64,22 @@ internal fun RecordingDockImpl(docId: String, modifier: Modifier = Modifier) {
     val active by remember { derivedStateOf { (recording.value as? RecordingState.Active)?.let { ActiveKey(it.recordingId, it.docId, it.paused) } } }
     val error by remember { derivedStateOf { recording.value as? RecordingState.Error } }
 
-    RequestRecordingNotificationPermission(recordingActive = active != null)
+    // Only one dock shows the recorder when two editors are on screen (split view).
+    val token = remember { Any() }
+    DisposableEffect(token, docId) {
+        DockRegistry.attach(token, docId)
+        onDispose { DockRegistry.detach(token) }
+    }
+
+    RequestRecordingNotificationPermission(recordingActive = active != null && DockRegistry.isPrimary(token))
 
     BoxWithConstraints(modifier.fillMaxSize()) {
         val a = active
-        if (a != null) {
+        if (a != null && DockRegistry.shows(token, docId, a.docId)) {
             key(a.recordingId) { DockedControl(graph, a, recording, otherDocument = a.docId != docId) }
         }
-        error?.let { e -> DockErrorToast(e) }
+        val e = error
+        if (e != null && DockRegistry.isPrimary(token)) DockErrorToast(e)
     }
 }
 
