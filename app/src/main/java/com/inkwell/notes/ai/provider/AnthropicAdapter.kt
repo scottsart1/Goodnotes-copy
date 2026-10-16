@@ -138,9 +138,24 @@ class AnthropicAdapter : ProviderAdapter {
 
     override fun newDecoder(): StreamDecoder = AnthropicStreamDecoder()
 
+    /**
+     * A model outside the catalogue (typed into routing) gets the default output budget, which
+     * older models reject with "max_tokens: 16000 > 8192, which is the maximum allowed ...".
+     * Retry once with the limit the API named.
+     */
+    override fun variantAfterError(call: ChatCall, status: Int, body: String): ChatCall? {
+        if (status != 400 || call.variant and VARIANT_MAX_TOKENS_CLAMPED != 0) return null
+        val message = ErrorMapper.providerMessage(body) ?: body.take(2000)
+        val m = MAX_TOKENS_LIMIT.find(message) ?: return null
+        val limit = m.groupValues[1].toIntOrNull()?.takeIf { it in 1 until call.maxOutputTokens } ?: return null
+        return call.copy(maxOutputTokens = limit, variant = call.variant or VARIANT_MAX_TOKENS_CLAMPED)
+    }
+
     companion object {
         const val API_VERSION = "2023-06-01"
         const val FALLBACK_BETA = "server-side-fallback-2026-07-01"
+        const val VARIANT_MAX_TOKENS_CLAMPED = 1
+        private val MAX_TOKENS_LIMIT = Regex("""max_tokens:?\s*\d+\s*>\s*(\d+)""")
         private val PLAIN_JSON = "application/json".toMediaType()
         private val CLAUDE_CAPS = setOf(AiCapability.TEXT, AiCapability.VISION)
 

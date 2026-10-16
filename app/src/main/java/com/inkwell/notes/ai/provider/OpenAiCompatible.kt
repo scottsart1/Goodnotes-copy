@@ -507,9 +507,10 @@ object TranscriptionParser {
     /** Only whisper-1 returns segment timestamps (verbose_json); the gpt-4o transcribe models return text. */
     fun supportsSegments(model: String): Boolean = model.lowercase().startsWith("whisper")
 
-    /** "en-US" -> "en" (ISO-639-1 as the API expects). */
+    /** "en-US" -> "en" (ISO-639-1 as the API expects); anything else (names, 3-letter codes) is a 400, so omit it and let the model detect. */
     fun isoLanguage(tag: String?): String? =
-        tag?.trim()?.takeIf { it.isNotEmpty() }?.substringBefore('-')?.substringBefore('_')?.lowercase()?.takeIf { it.length in 2..3 }
+        tag?.trim()?.takeIf { it.isNotEmpty() }?.substringBefore('-')?.substringBefore('_')?.lowercase()
+            ?.takeIf { it.length == 2 && it.all { c -> c in 'a'..'z' } }
 
     data class Parsed(
         val segments: List<TranscriptSegment>,
