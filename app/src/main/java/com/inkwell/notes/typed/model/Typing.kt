@@ -89,8 +89,11 @@ object Typing {
         pendingMarks: Marks?,
         newId: () -> String,
     ): TypingResult {
-        // Enter on an empty list item or quote: outdent, or leave the list.
-        if (edit.inserted == "\n" && block.text.isEmpty() && (BlockOps.isList(block.type) || block.type == BlockType.QUOTE)) {
+        // Enter on an empty list item, quote or heading: outdent, or leave the list / become a
+        // paragraph (an empty heading left behind would be an invisible block).
+        if (edit.inserted == "\n" && block.text.isEmpty() &&
+            (BlockOps.isList(block.type) || block.type == BlockType.QUOTE || block.type == BlockType.HEADING)
+        ) {
             val replacement = if (BlockOps.isList(block.type) && block.level > 0) block.copy(level = block.level - 1)
             else block.copy(type = BlockType.PARAGRAPH, level = 0, checked = false)
             return TypingResult(blocks.replaceAt(index, replacement), index, 0, structural = true)

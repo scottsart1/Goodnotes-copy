@@ -24,6 +24,7 @@ import com.inkwell.notes.core.model.ToolState
 import com.inkwell.notes.core.model.ToolType
 import com.inkwell.notes.editor.logic.FragmentOps
 import com.inkwell.notes.editor.logic.ImageMath
+import com.inkwell.notes.editor.logic.PageDiff
 import com.inkwell.notes.editor.logic.PageRanges
 import com.inkwell.notes.editor.logic.Placement
 import com.inkwell.notes.editor.logic.ToolSelection
@@ -112,7 +113,7 @@ class NotebookController(
     private var docSeen = false
     private var pendingScrollPageId: String? = null
     private var toolSaveJob: Job? = null
-    private var pendingToolState: ToolState? = null
+    @Volatile private var pendingToolState: ToolState? = null
     private val unreadablePages: MutableSet<String> = Collections.synchronizedSet(HashSet())
 
     private val docSaver = DocSaver.forDocument(graph, docId)
@@ -158,9 +159,12 @@ class NotebookController(
     }
 
     private fun onPages(list: List<PageMeta>) {
+        // Autosave (modifiedAt) and the thumbnail service emit a new list a few hundred
+        // milliseconds after every stroke; only structural changes reach the canvas.
+        val structural = !PageDiff.isBookkeepingOnly(pages, list)
         pages = list
         pagesLoaded = true
-        if (bound) canvas.updatePages(list) else tryBind()
+        if (bound) { if (structural) canvas.updatePages(list) } else tryBind()
         currentPage = PageRanges.clampIndex(currentPage, list.size)
         pendingScrollPageId?.let { id ->
             val i = list.indexOfFirst { it.id == id }
@@ -329,15 +333,24 @@ class NotebookController(
         toolSaveJob?.cancel()
         toolSaveJob = graph.appScope.launch {
             delay(TOOL_SAVE_DEBOUNCE_MS)
-            saveToolsNow()
+            // Persist the state this timer was started for (a newer change cancelled this job);
+            // reading pendingToolState from this worker thread could drop a change made on Main.
+            persistTools(state)
+            if (pendingToolState === state) pendingToolState = null
         }
     }
 
+    /** Main thread: writes whatever has not been persisted yet (stop, dispose). */
     private fun saveToolsNow() {
         val state = pendingToolState ?: return
         pendingToolState = null
+        persistTools(state)
+    }
+
+    private fun persistTools(state: ToolState) {
         graph.appScope.launch {
-            runCatching { graph.settings.update { it.copy(lastTools = state) } }.onFailure { Log.w(TAG, "Saving tools failed", it) }
+            runCatching { graph.settings.update { if (it.lastTools == state) it else it.copy(lastTools = state) } }
+                .onFailure { Log.w(TAG, "Saving tools failed", it) }
         }
     }
 

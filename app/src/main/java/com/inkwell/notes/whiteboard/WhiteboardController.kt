@@ -329,7 +329,8 @@ class WhiteboardController(val graph: AppGraph, val docId: String) : InkCanvasLi
         } else {
             c.updateText(ItemRef(req.pageId, req.itemId, ItemType.TEXT), text, config)
         }
-        if (config != tools.text) updateTools(tools.copy(text = config))
+        // Adopt the format only when the user changed it here (not an old box's own style).
+        if (config != req.config && config != tools.text) updateTools(tools.copy(text = config))
     }
 
     fun commitSticky(req: StickyEditRequest, text: String, color: Int) {
