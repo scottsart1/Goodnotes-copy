@@ -127,7 +127,9 @@ object MarkdownBlocks {
                 }
                 text.startsWith("**", i) || text.startsWith("__", i) -> {
                     val marker = text.substring(i, i + 2)
-                    val end = text.indexOf(marker, i + 2)
+                    var end = text.indexOf(marker, i + 2)
+                    // "***" closing "**...*...***": the bold marker is the last two.
+                    while (end > 0 && end + 2 < text.length && text[end + 2] == marker[0]) end++
                     if (end > i + 2) {
                         val (inner, innerSpans) = inline(text.substring(i + 2, end))
                         val start = sb.length
