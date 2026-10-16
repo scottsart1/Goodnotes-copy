@@ -1,15 +1,17 @@
 package com.inkwell.notes.ink.render
 
 import android.graphics.Bitmap
-import android.graphics.BlendMode
 import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.Matrix
 import android.graphics.Paint
 import android.graphics.Path
+import android.graphics.Rect
 import android.graphics.RectF
 import android.text.Layout
 import android.text.StaticLayout
 import android.text.TextPaint
+import android.util.Log
 import com.inkwell.notes.core.model.ConnectorItem
 import com.inkwell.notes.core.model.ImageItem
 import com.inkwell.notes.core.model.InkPoints
@@ -17,28 +19,74 @@ import com.inkwell.notes.core.model.PageContent
 import com.inkwell.notes.core.model.PageMeta
 import com.inkwell.notes.core.model.PaperSpec
 import com.inkwell.notes.core.model.PaperStyle
-import com.inkwell.notes.core.model.PenType
 import com.inkwell.notes.core.model.ShapeItem
 import com.inkwell.notes.core.model.ShapeKind
 import com.inkwell.notes.core.model.StickyItem
 import com.inkwell.notes.core.model.Stroke
 import com.inkwell.notes.core.model.TextItem
+import com.inkwell.notes.ink.geometry.Bounds
+import com.inkwell.notes.ink.geometry.FloatList
+import com.inkwell.notes.ink.geometry.Geo
+import com.inkwell.notes.ink.geometry.ItemGeometry
+import com.inkwell.notes.ink.viewport.PageRotation
+import kotlin.math.abs
 import kotlin.math.atan2
+import kotlin.math.ceil
 import kotlin.math.cos
-import kotlin.math.hypot
+import kotlin.math.floor
 import kotlin.math.max
 import kotlin.math.min
-import kotlin.math.pow
 import kotlin.math.sin
+import kotlin.math.sqrt
 
 /**
  * Draws pages (paper, PDF background, vector content) onto any Canvas in page-point space.
  * The canvas must already be scaled so that 1 unit = 1 page point (canvas.scale(pxPerPt)).
  * Shared by the live canvas, export (PNG/PDF), thumbnails and AI vision snapshots.
+ *
+ * Thread safe: every thread gets its own paints, paths and outline buffers.
  */
 object PageRenderer {
+    private const val TAG = "PageRenderer"
+    private const val MAX_BITMAP_PIXELS = 36_000_000L
+    private const val MAX_BITMAP_SIDE = 16_384
 
-    /** Renders a full page into a new bitmap of [widthPx] width. */
+    private class Scratch {
+        val paperPaint = Paint(Paint.ANTI_ALIAS_FLAG)
+        val linePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE }
+        val dotPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeCap = Paint.Cap.ROUND }
+        val bitmapPaint = Paint(Paint.FILTER_BITMAP_FLAG or Paint.ANTI_ALIAS_FLAG)
+        val strokePaint = Paint(Paint.ANTI_ALIAS_FLAG)
+        val haloPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeJoin = Paint.Join.ROUND }
+        val shapePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { strokeJoin = Paint.Join.ROUND; strokeCap = Paint.Cap.ROUND }
+        val textPaint = TextPaint(Paint.ANTI_ALIAS_FLAG)
+        val boxPaint = Paint(Paint.ANTI_ALIAS_FLAG)
+        val strokePath = Path()
+        val shapePath = Path()
+        val arrowPath = Path()
+        val outliner = StrokeOutliner()
+        val lines = FloatList(256)
+        val rectF = RectF()
+        val rect = Rect()
+        val matrix = Matrix()
+        val affine = FloatArray(6)
+        val endpoints = FloatArray(4)
+        val bounds = Bounds()
+    }
+
+    private val scratchLocal = ThreadLocal.withInitial { Scratch() }
+    private val s: Scratch get() = scratchLocal.get()!!
+
+    /** Emphasis halo colour for items highlighted during audio playback. */
+    @Volatile var emphasisColor: Int = 0x662952CC
+
+    // ---------------------------------------------------------------- Whole pages
+
+    /**
+     * Renders a full page into a new bitmap of [widthPx] width (displayed orientation, so
+     * rotated pages come out rotated). Very tall results are scaled down to stay within memory
+     * limits; unbounded pages render their content bounds.
+     */
     fun renderToBitmap(
         page: PageMeta,
         content: PageContent,
@@ -47,21 +95,41 @@ object PageRenderer {
         images: (String) -> Bitmap? = { null },
         drawPaper: Boolean = true,
     ): Bitmap {
-        val w = if (page.isInfinite) contentBounds(content)?.width()?.coerceAtLeast(1f) ?: 1000f else page.widthPt
-        val h = if (page.isInfinite) contentBounds(content)?.height()?.coerceAtLeast(1f) ?: 1000f else page.heightPt
-        val scale = widthPx / w
-        val bmp = Bitmap.createBitmap(widthPx.coerceAtLeast(1), (h * scale).toInt().coerceAtLeast(1), Bitmap.Config.ARGB_8888)
-        val c = Canvas(bmp)
-        c.scale(scale, scale)
-        if (page.isInfinite) {
-            val b = contentBounds(content)
-            c.drawColor(page.paper.color)
-            if (b != null) c.translate(-b.left, -b.top)
-        } else {
-            drawPage(c, page, content, background, images, drawPaper)
+        val region: Bounds? = if (page.isInfinite) (contentBoundsOf(content)?.outset(24f) ?: Bounds(0f, 0f, 1000f, 1000f)) else null
+        val rotation = if (page.isInfinite) 0 else PageRotation.normalize(page.rotation)
+        val dw = region?.width ?: PageRotation.displayWidth(page.widthPt, page.heightPt, rotation)
+        val dh = region?.height ?: PageRotation.displayHeight(page.widthPt, page.heightPt, rotation)
+        var scale = widthPx.coerceAtLeast(1) / dw.coerceAtLeast(1f)
+        val maxSide = MAX_BITMAP_SIDE.toFloat()
+        if (dh * scale > maxSide) scale = maxSide / dh
+        if (dw * scale * dh * scale > MAX_BITMAP_PIXELS) scale = sqrt(MAX_BITMAP_PIXELS / (dw * dh))
+        var attempt = 0
+        while (true) {
+            try {
+                val w = (dw * scale).toInt().coerceAtLeast(1)
+                val h = (dh * scale).toInt().coerceAtLeast(1)
+                val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+                val c = Canvas(bmp)
+                c.scale(scale, scale)
+                if (region != null) {
+                    c.translate(-region.left, -region.top)
+                    if (drawPaper) drawPaperRegion(c, 0f, 0f, page.paper, null, region, scale, infinite = true)
+                    drawContent(c, content, images)
+                } else {
+                    val sc = s
+                    PageRotation.affine(page.widthPt, page.heightPt, rotation, sc.affine)
+                    sc.matrix.setValues(floatArrayOf(sc.affine[0], sc.affine[2], sc.affine[4], sc.affine[1], sc.affine[3], sc.affine[5], 0f, 0f, 1f))
+                    c.concat(sc.matrix)
+                    drawPage(c, page, content, background, images, drawPaper)
+                }
+                return bmp
+            } catch (oom: OutOfMemoryError) {
+                attempt++
+                Log.w(TAG, "Out of memory rendering page bitmap, retrying smaller")
+                if (attempt >= 4) return Bitmap.createBitmap(1, 1, Bitmap.Config.ARGB_8888)
+                scale *= 0.5f
+            }
         }
-        if (page.isInfinite) drawContent(c, content, images)
-        return bmp
     }
 
     fun drawPage(
@@ -72,216 +140,187 @@ object PageRenderer {
         images: (String) -> Bitmap?,
         drawPaper: Boolean = true,
     ) {
+        canvas.save()
+        if (!page.isInfinite) canvas.clipRect(0f, 0f, page.widthPt, page.heightPt)
         if (drawPaper) drawPaper(canvas, page.widthPt, page.heightPt, page.paper, background)
         drawContent(canvas, content, images)
+        canvas.restore()
     }
 
     // ---------------------------------------------------------------- Paper
 
-    private val paperPaint = Paint(Paint.ANTI_ALIAS_FLAG)
-    private val linePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE }
-    private val bitmapPaint = Paint(Paint.FILTER_BITMAP_FLAG or Paint.ANTI_ALIAS_FLAG)
-
     fun drawPaper(canvas: Canvas, widthPt: Float, heightPt: Float, paper: PaperSpec, background: Bitmap?) {
-        paperPaint.color = paper.color
-        canvas.drawRect(0f, 0f, widthPt, heightPt, paperPaint)
-        if (background != null) {
-            canvas.drawBitmap(background, null, RectF(0f, 0f, widthPt, heightPt), bitmapPaint)
+        drawPaperRegion(canvas, widthPt, heightPt, paper, background, null, 4f, infinite = false)
+    }
+
+    /**
+     * Paper fill, PDF background and line pattern restricted to [region] (page points; null =
+     * whole page). [pxPerPt] picks a pattern density that stays legible when zoomed out. With
+     * [infinite] the pattern covers the region without page edges or margins.
+     */
+    internal fun drawPaperRegion(
+        canvas: Canvas, widthPt: Float, heightPt: Float, paper: PaperSpec, background: Bitmap?,
+        region: Bounds?, pxPerPt: Float, infinite: Boolean,
+    ) {
+        val sc = s
+        val l: Float; val t: Float; val r: Float; val b: Float
+        if (infinite) {
+            val reg = region ?: return
+            l = reg.left; t = reg.top; r = reg.right; b = reg.bottom
+        } else {
+            l = max(0f, region?.left ?: 0f); t = max(0f, region?.top ?: 0f)
+            r = min(widthPt, region?.right ?: widthPt); b = min(heightPt, region?.bottom ?: heightPt)
+        }
+        if (l >= r || t >= b) return
+        sc.paperPaint.color = paper.color
+        sc.paperPaint.style = Paint.Style.FILL
+        if (infinite) canvas.drawRect(l, t, r, b, sc.paperPaint) else canvas.drawRect(0f, 0f, widthPt, heightPt, sc.paperPaint)
+        if (background != null && !infinite) {
+            sc.rectF.set(0f, 0f, widthPt, heightPt)
+            sc.bitmapPaint.alpha = 255
+            canvas.drawBitmap(background, null, sc.rectF, sc.bitmapPaint)
             return
         }
-        val s = paper.effectiveSpacing()
-        if (s <= 0f || paper.style == PaperStyle.BLANK) return
-        linePaint.color = paper.lineColor
-        linePaint.strokeWidth = 0.6f
+        val base = paper.effectiveSpacing()
+        if (base <= 0f || paper.style == PaperStyle.BLANK) return
+        val isDots = paper.style == PaperStyle.DOT_GRID
+        // Level of detail: thin the pattern out instead of drawing sub-pixel mush.
+        val minPx = if (isDots) 7f else 5f
+        var step = base
+        var multiple = 1
+        while (step * pxPerPt < minPx && multiple < 100_000) { step *= 5f; multiple *= 5 }
+        val lines = sc.lines
+        lines.clear()
+        sc.linePaint.color = paper.lineColor
         when (paper.style) {
             PaperStyle.RULED, PaperStyle.NARROW_RULED, PaperStyle.WIDE_RULED -> {
-                var y = s * 3f
-                while (y < heightPt - s * 0.5f) {
-                    canvas.drawLine(0f, y, widthPt, y, linePaint)
-                    y += s
+                val firstLine = if (infinite) 0f else base * 3f
+                val last = if (infinite) b else min(b, heightPt - base * 0.5f)
+                var y = if (infinite) floor(t / step) * step else firstLine + ceil(max(0f, t - firstLine) / step) * step
+                while (y <= last) {
+                    if (y >= t) { lines.add(l); lines.add(y); lines.add(r); lines.add(y) }
+                    y += step
                 }
-                // Left margin.
-                linePaint.color = Color.argb(90, 220, 90, 90)
-                canvas.drawLine(s * 3f, 0f, s * 3f, heightPt, linePaint)
+                sc.linePaint.strokeWidth = 0.6f
+                drawLines(canvas, lines, sc.linePaint)
+                if (!infinite) {
+                    val mx = base * 3f
+                    if (mx in l..r) {
+                        sc.linePaint.color = Color.argb(90, 220, 90, 90)
+                        canvas.drawLine(mx, t, mx, b, sc.linePaint)
+                    }
+                }
             }
             PaperStyle.GRID, PaperStyle.GRAPH -> {
-                var x = 0f
-                var i = 0
-                while (x <= widthPt) {
-                    linePaint.strokeWidth = if (paper.style == PaperStyle.GRAPH && i % 5 == 0) 0.9f else 0.45f
-                    canvas.drawLine(x, 0f, x, heightPt, linePaint)
-                    x += s; i++
-                }
-                var y = 0f
-                i = 0
-                while (y <= heightPt) {
-                    linePaint.strokeWidth = if (paper.style == PaperStyle.GRAPH && i % 5 == 0) 0.9f else 0.45f
-                    canvas.drawLine(0f, y, widthPt, y, linePaint)
-                    y += s; i++
+                val graph = paper.style == PaperStyle.GRAPH
+                for (pass in 0..1) {
+                    // pass 0: minor lines, pass 1: major lines (graph paper only).
+                    if (pass == 1 && !graph) break
+                    lines.clear()
+                    var x = floor(l / step) * step
+                    while (x <= r) {
+                        val major = graph && Math.round(x / base) % 5 == 0
+                        if ((pass == 1) == major && (infinite || (x >= 0f && x <= widthPt))) { lines.add(x); lines.add(t); lines.add(x); lines.add(b) }
+                        x += step
+                    }
+                    var y = floor(t / step) * step
+                    while (y <= b) {
+                        val major = graph && Math.round(y / base) % 5 == 0
+                        if ((pass == 1) == major && (infinite || (y >= 0f && y <= heightPt))) { lines.add(l); lines.add(y); lines.add(r); lines.add(y) }
+                        y += step
+                    }
+                    sc.linePaint.strokeWidth = if (pass == 1) 0.9f else 0.45f
+                    drawLines(canvas, lines, sc.linePaint)
                 }
             }
             PaperStyle.DOT_GRID -> {
-                paperPaint.color = paper.lineColor
-                var y = s
-                while (y < heightPt) {
-                    var x = s
-                    while (x < widthPt) {
-                        canvas.drawCircle(x, y, 0.9f, paperPaint)
-                        x += s
+                var y = if (infinite) floor(t / step) * step else max(step, ceil(t / step) * step)
+                while (y <= b && (infinite || y < heightPt)) {
+                    var x = if (infinite) floor(l / step) * step else max(step, ceil(l / step) * step)
+                    while (x <= r && (infinite || x < widthPt)) {
+                        lines.add(x); lines.add(y)
+                        x += step
                     }
-                    y += s
+                    y += step
                 }
+                sc.dotPaint.color = paper.lineColor
+                sc.dotPaint.strokeWidth = 1.8f
+                if (lines.size > 0) canvas.drawPoints(lines.toArray(), sc.dotPaint)
             }
             PaperStyle.BLANK -> Unit
         }
     }
 
+    private fun drawLines(canvas: Canvas, lines: FloatList, paint: Paint) {
+        if (lines.size >= 4) canvas.drawLines(lines.toArray(), paint)
+    }
+
     // ---------------------------------------------------------------- Content
 
-    private enum class Kind { STROKE, HIGHLIGHT, SHAPE, TEXT, IMAGE, STICKY, CONNECTOR }
-    private class Entry(val z: Int, val kind: Kind, val item: Any)
-
-    /** Draws every item ordered by z; highlighter strokes go beneath ink of the same z. */
+    /** Draws every item in paint order (see [RenderOrder]); highlighter lies beneath handwriting. */
     fun drawContent(canvas: Canvas, content: PageContent, images: (String) -> Bitmap?, emphasis: ((String) -> Boolean)? = null) {
-        val entries = ArrayList<Entry>(content.strokes.size + content.shapes.size + content.texts.size + content.images.size)
-        content.strokes.forEach { entries += Entry(it.z * 2 + if (it.pen == PenType.HIGHLIGHTER) 0 else 1, if (it.pen == PenType.HIGHLIGHTER) Kind.HIGHLIGHT else Kind.STROKE, it) }
-        content.shapes.forEach { entries += Entry(it.z * 2 + 1, Kind.SHAPE, it) }
-        content.texts.forEach { entries += Entry(it.z * 2 + 1, Kind.TEXT, it) }
-        content.images.forEach { entries += Entry(it.z * 2, Kind.IMAGE, it) }
-        content.stickies.forEach { entries += Entry(it.z * 2, Kind.STICKY, it) }
-        content.connectors.forEach { entries += Entry(it.z * 2, Kind.CONNECTOR, it) }
-        entries.sortBy { it.z }
-        for (e in entries) {
-            when (e.kind) {
-                Kind.STROKE, Kind.HIGHLIGHT -> drawStroke(canvas, e.item as Stroke, emphasis?.invoke(e.item.id) == true)
-                Kind.SHAPE -> drawShape(canvas, e.item as ShapeItem)
-                Kind.TEXT -> drawText(canvas, e.item as TextItem)
-                Kind.IMAGE -> drawImage(canvas, e.item as ImageItem, images)
-                Kind.STICKY -> drawSticky(canvas, e.item as StickyItem)
-                Kind.CONNECTOR -> drawConnector(canvas, e.item as ConnectorItem, content)
+        drawItems(canvas, content, RenderOrder.order(content), images, emphasis, null)
+    }
+
+    /**
+     * Draws [ordered] items of [content]. [pathFor] may supply cached stroke outlines (tiles);
+     * when it returns null the outline is built on the fly.
+     */
+    internal fun drawItems(
+        canvas: Canvas,
+        content: PageContent,
+        ordered: List<Any>,
+        images: (String) -> Bitmap?,
+        emphasis: ((String) -> Boolean)?,
+        pathFor: ((Stroke) -> Path?)?,
+    ) {
+        for (item in ordered) {
+            when (item) {
+                is Stroke -> {
+                    val cached = pathFor?.invoke(item)
+                    if (cached != null) drawStrokePath(canvas, item, cached, emphasis?.invoke(item.id) == true)
+                    else drawStroke(canvas, item, emphasis?.invoke(item.id) == true)
+                }
+                is ShapeItem -> drawShape(canvas, item)
+                is TextItem -> drawText(canvas, item)
+                is ImageItem -> drawImage(canvas, item, images)
+                is StickyItem -> drawSticky(canvas, item)
+                is ConnectorItem -> drawConnector(canvas, item, content)
             }
         }
     }
 
-    private val strokePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
-    private val strokePath = Path()
-
     fun drawStroke(canvas: Canvas, stroke: Stroke, emphasized: Boolean = false) {
-        val n = stroke.pointCount
-        if (n == 0) return
-        strokePaint.color = stroke.color
-        strokePaint.blendMode = null
-        when (stroke.pen) {
-            PenType.HIGHLIGHTER -> {
-                strokePaint.alpha = 115
-                strokePaint.blendMode = BlendMode.MULTIPLY
-            }
-            PenType.PENCIL -> strokePaint.alpha = (Color.alpha(stroke.color) * 0.85f).toInt()
-            else -> Unit
+        if (stroke.pointCount == 0) return
+        val sc = s
+        sc.outliner.build(stroke, sc.strokePath)
+        drawStrokePath(canvas, stroke, sc.strokePath, emphasized)
+    }
+
+    /** Draws a stroke whose outline [path] was already built. */
+    internal fun drawStrokePath(canvas: Canvas, stroke: Stroke, path: Path, emphasized: Boolean) {
+        val sc = s
+        if (emphasized) {
+            sc.haloPaint.color = emphasisColor
+            sc.haloPaint.strokeWidth = max(2.5f, stroke.width * 1.2f)
+            canvas.drawPath(path, sc.haloPaint)
         }
-        if (emphasized) strokePaint.setShadowLayer(3f, 0f, 0f, 0x802952CC.toInt()) else strokePaint.clearShadowLayer()
-        buildStrokeOutline(stroke, strokePath)
-        canvas.drawPath(strokePath, strokePaint)
-        strokePaint.blendMode = null
-        strokePaint.clearShadowLayer()
+        InkPaints.configureStroke(sc.strokePaint, stroke.pen, stroke.color)
+        canvas.drawPath(path, sc.strokePaint)
+        sc.strokePaint.shader = null
+        sc.strokePaint.blendMode = null
     }
 
     /** Width of a stroke at a sample, from nominal width, pressure and pen type. */
-    fun widthAt(stroke: Stroke, pressure: Float, speed: Float = 0f): Float {
-        val p = pressure.coerceIn(0f, 1f)
-        val s = stroke.pressureSensitivity.coerceIn(0f, 1f)
-        val w = stroke.width
-        return when (stroke.pen) {
-            PenType.BALLPOINT -> w * (1f - 0.25f * s + 0.25f * s * p)
-            PenType.FOUNTAIN -> w * (0.45f + s * 0.9f * p.pow(0.8f) + (1f - s) * 0.55f)
-            PenType.BRUSH -> w * (0.2f + s * 1.8f * p.pow(1.2f) + (1f - s) * 0.8f)
-            PenType.PENCIL -> w * (0.7f + 0.5f * s * p)
-            PenType.HIGHLIGHTER -> w
-        }.coerceAtLeast(0.15f)
-    }
+    fun widthAt(stroke: Stroke, pressure: Float, speed: Float = 0f): Float =
+        stroke.width * PenModel.widthFactor(stroke.pen, pressure, stroke.pressureSensitivity, speed)
 
-    /** Builds a filled outline polygon (with round caps) for a variable-width stroke. */
+    /** Builds the filled outline (round caps, chisel ends for highlighters) of a variable-width stroke. */
     fun buildStrokeOutline(stroke: Stroke, out: Path) {
-        out.reset()
-        val pts = stroke.points
-        val n = stroke.pointCount
-        val st = InkPoints.STRIDE
-        if (n == 1) {
-            val r = widthAt(stroke, pts[InkPoints.PRESSURE]) / 2f
-            out.addCircle(pts[0], pts[1], r, Path.Direction.CW)
-            return
-        }
-        if (stroke.pen == PenType.HIGHLIGHTER) {
-            // Chisel highlighter: constant width, square-ish ends.
-            val hw = stroke.width / 2f
-            val left = FloatArray(n * 2)
-            val right = FloatArray(n * 2)
-            for (i in 0 until n) {
-                val x = pts[i * st]; val y = pts[i * st + 1]
-                val j0 = max(0, i - 1); val j1 = min(n - 1, i + 1)
-                val dx = pts[j1 * st] - pts[j0 * st]; val dy = pts[j1 * st + 1] - pts[j0 * st + 1]
-                val len = hypot(dx, dy).coerceAtLeast(1e-4f)
-                val nx = -dy / len * hw; val ny = dx / len * hw
-                left[i * 2] = x + nx; left[i * 2 + 1] = y + ny
-                right[i * 2] = x - nx; right[i * 2 + 1] = y - ny
-            }
-            out.moveTo(left[0], left[1])
-            for (i in 1 until n) out.lineTo(left[i * 2], left[i * 2 + 1])
-            for (i in n - 1 downTo 0) out.lineTo(right[i * 2], right[i * 2 + 1])
-            out.close()
-            return
-        }
-        val left = FloatArray(n * 2)
-        val right = FloatArray(n * 2)
-        val radius = FloatArray(n)
-        for (i in 0 until n) {
-            val x = pts[i * st]; val y = pts[i * st + 1]
-            val j0 = max(0, i - 1); val j1 = min(n - 1, i + 1)
-            val dx = pts[j1 * st] - pts[j0 * st]; val dy = pts[j1 * st + 1] - pts[j0 * st + 1]
-            val len = hypot(dx, dy).coerceAtLeast(1e-4f)
-            var r = widthAt(stroke, pts[i * st + InkPoints.PRESSURE]) / 2f
-            // Taper the first/last samples slightly for a natural pen lift.
-            if (stroke.pen == PenType.FOUNTAIN || stroke.pen == PenType.BRUSH) {
-                val edge = min(i, n - 1 - i)
-                if (edge < 3) r *= 0.55f + 0.15f * edge
-            }
-            radius[i] = r
-            val nx = -dy / len * r; val ny = dx / len * r
-            left[i * 2] = x + nx; left[i * 2 + 1] = y + ny
-            right[i * 2] = x - nx; right[i * 2 + 1] = y - ny
-        }
-        out.moveTo(left[0], left[1])
-        for (i in 1 until n) {
-            val mx = (left[(i - 1) * 2] + left[i * 2]) / 2f; val my = (left[(i - 1) * 2 + 1] + left[i * 2 + 1]) / 2f
-            out.quadTo(left[(i - 1) * 2], left[(i - 1) * 2 + 1], mx, my)
-        }
-        out.lineTo(left[(n - 1) * 2], left[(n - 1) * 2 + 1])
-        // End cap.
-        val ex = pts[(n - 1) * st]; val ey = pts[(n - 1) * st + 1]
-        val endAngle = atan2(left[(n - 1) * 2 + 1] - ey, left[(n - 1) * 2] - ex)
-        addArc(out, ex, ey, radius[n - 1], endAngle, -Math.PI.toFloat())
-        out.lineTo(right[(n - 1) * 2], right[(n - 1) * 2 + 1])
-        for (i in n - 2 downTo 0) {
-            val mx = (right[(i + 1) * 2] + right[i * 2]) / 2f; val my = (right[(i + 1) * 2 + 1] + right[i * 2 + 1]) / 2f
-            out.quadTo(right[(i + 1) * 2], right[(i + 1) * 2 + 1], mx, my)
-        }
-        out.lineTo(right[0], right[1])
-        val sx = pts[0]; val sy = pts[1]
-        val startAngle = atan2(right[1] - sy, right[0] - sx)
-        addArc(out, sx, sy, radius[0], startAngle, -Math.PI.toFloat())
-        out.close()
+        s.outliner.build(stroke, out)
     }
 
-    private fun addArc(path: Path, cx: Float, cy: Float, r: Float, start: Float, sweep: Float) {
-        val steps = 6
-        for (k in 1..steps) {
-            val a = start + sweep * k / steps
-            path.lineTo(cx + r * cos(a), cy + r * sin(a))
-        }
-    }
-
-    private val shapePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { strokeJoin = Paint.Join.ROUND; strokeCap = Paint.Cap.ROUND }
-    private val shapePath = Path()
+    // ---------------------------------------------------------------- Shapes
 
     fun shapePath(shape: ShapeItem, out: Path) {
         out.reset()
@@ -294,11 +333,14 @@ object PageRenderer {
                 val r = RectF(min(p[0], p[2]), min(p[1], p[3]), max(p[0], p[2]), max(p[1], p[3]))
                 when (shape.kind) {
                     ShapeKind.RECTANGLE -> out.addRect(r, Path.Direction.CW)
-                    ShapeKind.ROUNDED_RECTANGLE -> out.addRoundRect(r, shape.cornerRadius, shape.cornerRadius, Path.Direction.CW)
+                    ShapeKind.ROUNDED_RECTANGLE -> {
+                        val cr = min(shape.cornerRadius, min(r.width(), r.height()) / 2f)
+                        out.addRoundRect(r, cr, cr, Path.Direction.CW)
+                    }
                     else -> out.addOval(r, Path.Direction.CW)
                 }
                 if (shape.rotation != 0f) {
-                    val m = android.graphics.Matrix()
+                    val m = Matrix()
                     m.setRotate(shape.rotation, r.centerX(), r.centerY())
                     out.transform(m)
                 }
@@ -313,16 +355,19 @@ object PageRenderer {
     }
 
     fun drawShape(canvas: Canvas, shape: ShapeItem) {
-        shapePath(shape, shapePath)
-        if (shape.fillColor != 0 && shape.kind !in setOf(ShapeKind.LINE, ShapeKind.ARROW, ShapeKind.DOUBLE_ARROW)) {
-            shapePaint.style = Paint.Style.FILL
-            shapePaint.color = shape.fillColor
-            canvas.drawPath(shapePath, shapePaint)
+        val sc = s
+        shapePath(shape, sc.shapePath)
+        val closed = ItemGeometry.isClosed(shape.kind)
+        sc.shapePaint.blendMode = null
+        if (shape.fillColor != 0 && closed) {
+            sc.shapePaint.style = Paint.Style.FILL
+            sc.shapePaint.color = shape.fillColor
+            canvas.drawPath(sc.shapePath, sc.shapePaint)
         }
-        shapePaint.style = Paint.Style.STROKE
-        shapePaint.color = shape.strokeColor
-        shapePaint.strokeWidth = shape.strokeWidth
-        canvas.drawPath(shapePath, shapePaint)
+        sc.shapePaint.style = Paint.Style.STROKE
+        sc.shapePaint.color = shape.strokeColor
+        sc.shapePaint.strokeWidth = shape.strokeWidth
+        canvas.drawPath(sc.shapePath, sc.shapePaint)
         val p = shape.points
         if (p.size >= 4 && (shape.kind == ShapeKind.ARROW || shape.kind == ShapeKind.DOUBLE_ARROW)) {
             drawArrowHead(canvas, p[0], p[1], p[2], p[3], shape.strokeWidth, shape.strokeColor)
@@ -330,75 +375,83 @@ object PageRenderer {
         }
     }
 
-    private val arrowPath = Path()
-
     fun drawArrowHead(canvas: Canvas, fromX: Float, fromY: Float, toX: Float, toY: Float, width: Float, color: Int) {
+        val sc = s
+        if (abs(toX - fromX) + abs(toY - fromY) < 1e-3f) return
         val a = atan2(toY - fromY, toX - fromX)
         val len = 6f + width * 3f
-        arrowPath.reset()
-        arrowPath.moveTo(toX, toY)
-        arrowPath.lineTo(toX - len * cos(a - 0.45f), toY - len * sin(a - 0.45f))
-        arrowPath.lineTo(toX - len * cos(a + 0.45f), toY - len * sin(a + 0.45f))
-        arrowPath.close()
-        shapePaint.style = Paint.Style.FILL
-        shapePaint.color = color
-        canvas.drawPath(arrowPath, shapePaint)
+        sc.arrowPath.reset()
+        sc.arrowPath.moveTo(toX, toY)
+        sc.arrowPath.lineTo(toX - len * cos(a - 0.45f), toY - len * sin(a - 0.45f))
+        sc.arrowPath.lineTo(toX - len * cos(a + 0.45f), toY - len * sin(a + 0.45f))
+        sc.arrowPath.close()
+        sc.shapePaint.style = Paint.Style.FILL
+        sc.shapePaint.color = color
+        canvas.drawPath(sc.arrowPath, sc.shapePaint)
     }
 
-    private val textPaint = TextPaint(Paint.ANTI_ALIAS_FLAG)
-    private val boxPaint = Paint(Paint.ANTI_ALIAS_FLAG)
+    // ---------------------------------------------------------------- Boxes
 
     fun drawText(canvas: Canvas, item: TextItem) {
+        val sc = s
         canvas.save()
         if (item.rotation != 0f) canvas.rotate(item.rotation, item.x + item.width / 2f, item.y + item.height / 2f)
         if (item.background != 0) {
-            boxPaint.color = item.background
-            canvas.drawRoundRect(item.x, item.y, item.x + item.width, item.y + item.height, 4f, 4f, boxPaint)
+            sc.boxPaint.color = item.background
+            canvas.drawRoundRect(item.x, item.y, item.x + item.width, item.y + item.height, 4f, 4f, sc.boxPaint)
         }
-        textPaint.color = item.color
-        textPaint.textSize = item.fontSizePt
-        textPaint.isFakeBoldText = item.bold
-        textPaint.textSkewX = if (item.italic) -0.2f else 0f
-        val layout = StaticLayout.Builder.obtain(item.text, 0, item.text.length, textPaint, max(1, item.width.toInt()))
-            .setAlignment(Layout.Alignment.ALIGN_NORMAL)
-            .setIncludePad(false)
-            .build()
-        canvas.translate(item.x, item.y)
-        layout.draw(canvas)
+        val tp = sc.textPaint
+        tp.color = item.color
+        tp.textSize = item.fontSizePt.coerceIn(1f, 1000f)
+        tp.isFakeBoldText = item.bold
+        tp.textSkewX = if (item.italic) -0.2f else 0f
+        if (item.text.isNotEmpty()) {
+            val layout = StaticLayout.Builder.obtain(item.text, 0, item.text.length, tp, max(1, item.width.toInt()))
+                .setAlignment(Layout.Alignment.ALIGN_NORMAL)
+                .setIncludePad(false)
+                .build()
+            canvas.translate(item.x, item.y)
+            layout.draw(canvas)
+        }
         canvas.restore()
     }
 
     fun drawImage(canvas: Canvas, item: ImageItem, images: (String) -> Bitmap?) {
+        val sc = s
         val bmp = images(item.assetId)
         canvas.save()
         if (item.rotation != 0f) canvas.rotate(item.rotation, item.x + item.width / 2f, item.y + item.height / 2f)
-        val dst = RectF(item.x, item.y, item.x + item.width, item.y + item.height)
-        if (bmp != null) {
-            val src = android.graphics.Rect(
-                (bmp.width * item.cropLeft).toInt(), (bmp.height * item.cropTop).toInt(),
-                (bmp.width * (1f - item.cropRight)).toInt(), (bmp.height * (1f - item.cropBottom)).toInt(),
-            )
-            bitmapPaint.alpha = (item.opacity * 255).toInt().coerceIn(0, 255)
-            canvas.drawBitmap(bmp, src, dst, bitmapPaint)
-            bitmapPaint.alpha = 255
+        sc.rectF.set(item.x, item.y, item.x + item.width, item.y + item.height)
+        if (bmp != null && !bmp.isRecycled) {
+            val l = (bmp.width * item.cropLeft).toInt().coerceIn(0, bmp.width - 1)
+            val t = (bmp.height * item.cropTop).toInt().coerceIn(0, bmp.height - 1)
+            val r = (bmp.width * (1f - item.cropRight)).toInt().coerceIn(l + 1, bmp.width)
+            val b = (bmp.height * (1f - item.cropBottom)).toInt().coerceIn(t + 1, bmp.height)
+            sc.rect.set(l, t, r, b)
+            sc.bitmapPaint.alpha = (item.opacity * 255).toInt().coerceIn(0, 255)
+            canvas.drawBitmap(bmp, sc.rect, sc.rectF, sc.bitmapPaint)
+            sc.bitmapPaint.alpha = 255
         } else {
-            boxPaint.color = 0xFFEDEBE5.toInt()
-            canvas.drawRect(dst, boxPaint)
+            sc.boxPaint.color = 0xFFEDEBE5.toInt()
+            canvas.drawRect(sc.rectF, sc.boxPaint)
         }
         canvas.restore()
     }
 
     fun drawSticky(canvas: Canvas, item: StickyItem) {
-        boxPaint.color = 0x22000000
-        canvas.drawRoundRect(item.x + 1.5f, item.y + 2.5f, item.x + item.width + 1.5f, item.y + item.height + 2.5f, 6f, 6f, boxPaint)
-        boxPaint.color = item.color
-        canvas.drawRoundRect(item.x, item.y, item.x + item.width, item.y + item.height, 6f, 6f, boxPaint)
+        val sc = s
+        sc.boxPaint.color = 0x1A000000
+        canvas.drawRoundRect(item.x + 1f, item.y + 2f, item.x + item.width + 1f, item.y + item.height + 2f, 6f, 6f, sc.boxPaint)
+        sc.boxPaint.color = item.color
+        canvas.drawRoundRect(item.x, item.y, item.x + item.width, item.y + item.height, 6f, 6f, sc.boxPaint)
         if (item.text.isNotEmpty()) {
-            textPaint.color = 0xFF1A1916.toInt()
-            textPaint.textSize = 14f
-            textPaint.isFakeBoldText = false
-            textPaint.textSkewX = 0f
-            val layout = StaticLayout.Builder.obtain(item.text, 0, item.text.length, textPaint, max(1, (item.width - 20f).toInt())).build()
+            val tp = sc.textPaint
+            tp.color = 0xFF1A1916.toInt()
+            tp.textSize = 14f
+            tp.isFakeBoldText = false
+            tp.textSkewX = 0f
+            val w = max(1, (item.width - 20f).toInt())
+            val layout = StaticLayout.Builder.obtain(item.text, 0, item.text.length, tp, w).setIncludePad(false).build()
             canvas.save()
             canvas.translate(item.x + 10f, item.y + 10f)
             canvas.clipRect(0f, 0f, item.width - 20f, item.height - 20f)
@@ -407,67 +460,61 @@ object PageRenderer {
         }
     }
 
+    // ---------------------------------------------------------------- Connectors & bounds
+
     /** Bounds of any item by id (used for connector endpoints). */
-    fun itemBounds(content: PageContent, id: String): RectF? {
-        content.stickies.firstOrNull { it.id == id }?.let { return RectF(it.x, it.y, it.x + it.width, it.y + it.height) }
-        content.texts.firstOrNull { it.id == id }?.let { return RectF(it.x, it.y, it.x + it.width, it.y + it.height) }
-        content.images.firstOrNull { it.id == id }?.let { return RectF(it.x, it.y, it.x + it.width, it.y + it.height) }
-        content.shapes.firstOrNull { it.id == id }?.let { s -> return pointsBounds(s.points, 2) }
-        content.strokes.firstOrNull { it.id == id }?.let { s -> return pointsBounds(s.points, InkPoints.STRIDE) }
-        return null
-    }
+    fun itemBounds(content: PageContent, id: String): RectF? =
+        ItemGeometry.attachBounds(content, id, Bounds())?.toRectF()
 
     /** Resolves a connector's live endpoints: nearest edge midpoints of the attached items. */
-    fun connectorEndpoints(c: ConnectorItem, content: PageContent): FloatArray {
-        val fromB = c.fromItemId?.let { itemBounds(content, it) }
-        val toB = c.toItemId?.let { itemBounds(content, it) }
-        var fx = c.fromX; var fy = c.fromY; var tx = c.toX; var ty = c.toY
-        val fc = fromB?.let { floatArrayOf(it.centerX(), it.centerY()) }
-        val tc = toB?.let { floatArrayOf(it.centerX(), it.centerY()) }
-        if (fromB != null) { val p = edgePoint(fromB, tc?.get(0) ?: tx, tc?.get(1) ?: ty); fx = p[0]; fy = p[1] }
-        if (toB != null) { val p = edgePoint(toB, fc?.get(0) ?: fx, fc?.get(1) ?: fy); tx = p[0]; ty = p[1] }
-        return floatArrayOf(fx, fy, tx, ty)
-    }
-
-    private fun edgePoint(r: RectF, towardX: Float, towardY: Float): FloatArray {
-        val dx = towardX - r.centerX(); val dy = towardY - r.centerY()
-        return if (kotlin.math.abs(dx) * r.height() > kotlin.math.abs(dy) * r.width()) {
-            floatArrayOf(if (dx > 0) r.right else r.left, r.centerY())
-        } else {
-            floatArrayOf(r.centerX(), if (dy > 0) r.bottom else r.top)
-        }
-    }
+    fun connectorEndpoints(c: ConnectorItem, content: PageContent): FloatArray =
+        ItemGeometry.connectorEndpoints(c, content, FloatArray(4))
 
     fun drawConnector(canvas: Canvas, c: ConnectorItem, content: PageContent) {
-        val e = connectorEndpoints(c, content)
-        shapePaint.style = Paint.Style.STROKE
-        shapePaint.color = c.color
-        shapePaint.strokeWidth = c.width
-        canvas.drawLine(e[0], e[1], e[2], e[3], shapePaint)
-        if (c.arrowEnd) drawArrowHead(canvas, e[0], e[1], e[2], e[3], c.width, c.color)
-        if (c.arrowStart) drawArrowHead(canvas, e[2], e[3], e[0], e[1], c.width, c.color)
+        val sc = s
+        val e = ItemGeometry.connectorEndpoints(c, content, sc.endpoints)
+        val fx = e[0]; val fy = e[1]; val tx = e[2]; val ty = e[3]
+        sc.shapePaint.style = Paint.Style.STROKE
+        sc.shapePaint.color = c.color
+        sc.shapePaint.strokeWidth = c.width
+        canvas.drawLine(fx, fy, tx, ty, sc.shapePaint)
+        if (c.arrowEnd) drawArrowHead(canvas, fx, fy, tx, ty, c.width, c.color)
+        if (c.arrowStart) drawArrowHead(canvas, tx, ty, fx, fy, c.width, c.color)
+        if (c.label.isNotEmpty()) {
+            val tp = sc.textPaint
+            tp.color = c.color
+            tp.textSize = 12f
+            tp.isFakeBoldText = false
+            tp.textSkewX = 0f
+            val mx = (fx + tx) / 2f; val my = (fy + ty) / 2f
+            val w = tp.measureText(c.label)
+            canvas.drawText(c.label, mx - w / 2f, my - 4f, tp)
+        }
     }
 
     fun pointsBounds(points: FloatArray, stride: Int): RectF? {
         if (points.size < 2) return null
-        var l = Float.MAX_VALUE; var t = Float.MAX_VALUE; var r = -Float.MAX_VALUE; var b = -Float.MAX_VALUE
-        var i = 0
-        while (i + 1 < points.size) {
-            l = min(l, points[i]); r = max(r, points[i]); t = min(t, points[i + 1]); b = max(b, points[i + 1])
-            i += stride
-        }
-        return RectF(l, t, r, b)
+        return Geo.polylineBounds(points, stride, Bounds()).toRectF()
     }
 
     /** Union bounds of all items, or null when empty. */
-    fun contentBounds(content: PageContent): RectF? {
-        var out: RectF? = null
-        fun add(r: RectF?) { if (r != null) { if (out == null) out = RectF(r) else out!!.union(r) } }
-        content.strokes.forEach { s -> add(pointsBounds(s.points, InkPoints.STRIDE)?.apply { inset(-s.width, -s.width) }) }
-        content.shapes.forEach { add(pointsBounds(it.points, 2)) }
-        content.texts.forEach { add(RectF(it.x, it.y, it.x + it.width, it.y + it.height)) }
-        content.images.forEach { add(RectF(it.x, it.y, it.x + it.width, it.y + it.height)) }
-        content.stickies.forEach { add(RectF(it.x, it.y, it.x + it.width, it.y + it.height)) }
-        return out
+    fun contentBounds(content: PageContent): RectF? = contentBoundsOf(content)?.toRectF()
+
+    /** Plain-Kotlin variant of [contentBounds]. */
+    fun contentBoundsOf(content: PageContent): Bounds? {
+        val out = Bounds()
+        val tmp = Bounds()
+        content.strokes.forEach { out.union(ItemGeometry.bounds(it, tmp, content)) }
+        content.shapes.forEach { out.union(ItemGeometry.bounds(it, tmp, content)) }
+        content.texts.forEach { out.union(ItemGeometry.bounds(it, tmp, content)) }
+        content.images.forEach { out.union(ItemGeometry.bounds(it, tmp, content)) }
+        content.stickies.forEach { out.union(ItemGeometry.bounds(it, tmp, content)) }
+        content.connectors.forEach { out.union(ItemGeometry.bounds(it, tmp, content)) }
+        return if (out.isEmpty) null else out
     }
+
+    private fun Bounds.toRectF(): RectF = RectF(left, top, right, bottom)
+
+    /** Number of stroke samples, for cost estimates. */
+    internal fun pointCount(s: Stroke): Int = s.points.size / InkPoints.STRIDE
 }
