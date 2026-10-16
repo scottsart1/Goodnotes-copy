@@ -75,7 +75,7 @@ internal class BackgroundCache(private val scope: CoroutineScope) {
         val h = ceil(w * page.heightPt / page.widthPt).toInt().coerceAtLeast(1)
         e.job = scope.launch {
             try {
-                val bmp = withContext(Dispatchers.IO) { src.renderBackground(page, w, h) }
+                val bmp = withContext(Dispatchers.IO) { src.renderBackground(page, w, h)?.let { Bitmaps.prepare(it, 0) } }
                 if (source !== src) return@launch
                 if (bmp == null) {
                     if (page.pdfPageIndex == null) e.none = true

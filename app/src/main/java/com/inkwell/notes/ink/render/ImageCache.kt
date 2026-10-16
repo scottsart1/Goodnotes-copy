@@ -42,7 +42,7 @@ internal class ImageCache(private val scope: CoroutineScope, maxBytes: Int) {
         if (!inFlight.add(assetId)) return
         scope.launch {
             try {
-                val bmp = withContext(Dispatchers.IO) { src.loadImage(assetId) }
+                val bmp = withContext(Dispatchers.IO) { src.loadImage(assetId)?.let { Bitmaps.prepare(it, MAX_IMAGE_SIDE) } }
                 if (bmp != null && source === src) {
                     lru.put(assetId, bmp)
                     failedAt.remove(assetId)
@@ -71,5 +71,7 @@ internal class ImageCache(private val scope: CoroutineScope, maxBytes: Int) {
     companion object {
         private const val TAG = "InkImages"
         private const val RETRY_MS = 30_000L
+        /** Images are kept at most this large; page images rarely need more on a tablet. */
+        private const val MAX_IMAGE_SIDE = 2560
     }
 }

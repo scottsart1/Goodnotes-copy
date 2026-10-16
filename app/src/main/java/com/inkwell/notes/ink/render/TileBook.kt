@@ -23,6 +23,8 @@ class TileBook<B : Any> {
         val increments = ArrayList<Increment>()
         var inFlight = false
         var failures = 0
+        /** Uptime (ms) of the last failed render, for retry backoff. */
+        var failedAt = 0L
         var lastUsedFrame = 0L
     }
 

@@ -294,7 +294,7 @@ internal class RenderManager(private val host: RenderHost, scope: CoroutineScope
                     val tile = book.getOrCreate(ix, iy)
                     val need = book.need(tile, holder.visualVersion)
                     if (need == TileBook.Need.NONE) continue
-                    if (tile.failures > 3) continue
+                    if (tile.failures > 0 && now - tile.failedAt < FAILURE_BACKOFF_MS * tile.failures.coerceAtMost(8)) continue
                     val tx = ox + (ix + 0.5f) * tileSize * k2; val ty = oy + (iy + 0.5f) * tileSize * k2
                     val onScreen = tx > -tileSize * k2 / 2 && ty > -tileSize * k2 / 2 && tx < vp.viewWidth + tileSize * k2 / 2 && ty < vp.viewHeight + tileSize * k2 / 2
                     val dist = abs(tx - cx) + abs(ty - cy)
@@ -339,6 +339,7 @@ internal class RenderManager(private val host: RenderHost, scope: CoroutineScope
             val p = pages[done.pageId]
             val h = host.holderById(done.pageId)
             if (p != null && h != null && p.level === book) {
+                if (done.result == null) tile.failedAt = SystemClock.uptimeMillis()
                 if (book.finish(tile, ticket, done.result, h.visualVersion)) {
                     host.invalidatePages()
                     checkPending()
@@ -549,6 +550,7 @@ internal class RenderManager(private val host: RenderHost, scope: CoroutineScope
 
     companion object {
         private const val MAX_IN_FLIGHT = 2
+        private const val FAILURE_BACKOFF_MS = 1500L
         private const val SNAPSHOT_IDLE_MS = 1200L
         private const val SNAPSHOT_PIXELS = 1_000_000f
         private const val SNAPSHOT_PIXELS_INFINITE = 1_500_000f

@@ -177,10 +177,11 @@ object PageRenderer {
         sc.paperPaint.color = paper.color
         sc.paperPaint.style = Paint.Style.FILL
         if (infinite) canvas.drawRect(l, t, r, b, sc.paperPaint) else canvas.drawRect(0f, 0f, widthPt, heightPt, sc.paperPaint)
-        if (background != null && !infinite) {
+        val bg = if (background != null && !infinite) Bitmaps.drawable(background, canvas) else null
+        if (bg != null) {
             sc.rectF.set(0f, 0f, widthPt, heightPt)
             sc.bitmapPaint.alpha = 255
-            canvas.drawBitmap(background, null, sc.rectF, sc.bitmapPaint)
+            canvas.drawBitmap(bg, null, sc.rectF, sc.bitmapPaint)
             return
         }
         val base = paper.effectiveSpacing()
@@ -420,7 +421,7 @@ object PageRenderer {
 
     fun drawImage(canvas: Canvas, item: ImageItem, images: (String) -> Bitmap?) {
         val sc = s
-        val bmp = images(item.assetId)
+        val bmp = images(item.assetId)?.let { Bitmaps.drawable(it, canvas) }
         canvas.save()
         if (item.rotation != 0f) canvas.rotate(item.rotation, item.x + item.width / 2f, item.y + item.height / 2f)
         sc.rectF.set(item.x, item.y, item.x + item.width, item.y + item.height)
