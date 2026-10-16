@@ -50,7 +50,7 @@ import com.inkwell.notes.settings.ui.Note
 import com.inkwell.notes.settings.ui.NoteTone
 import com.inkwell.notes.settings.ui.QuietButton
 import com.inkwell.notes.settings.ui.RowDivider
-import com.inkwell.notes.settings.ui.SegmentedRow
+import com.inkwell.notes.settings.ui.ChipsRow
 import com.inkwell.notes.settings.ui.SettingsActions
 import com.inkwell.notes.settings.ui.SettingsGroup
 import com.inkwell.notes.settings.ui.SwitchRow
@@ -132,11 +132,11 @@ internal fun PrivacySection(s: AppSettings, actions: SettingsActions) {
                 }
             }
             RowDivider()
-            SegmentedRow(
+            ChipsRow(
                 title = "Lock after",
                 subtitle = "How long Inkwell can stay in the background before it locks. Returning from a file picker or share sheet gets a few minutes' grace.",
                 choices = LockPolicy.DELAY_CHOICES.map { sec ->
-                    Choice(sec, if (sec == 0) "Immediately" else SettingsFormat.minutesLabel(sec))
+                    Choice(sec, if (sec == 0) "Immediately" else "After ${SettingsFormat.minutesLabel(sec)}")
                 },
                 selected = privacy.lockAfterSeconds,
                 onSelect = { sec -> set { it.copy(lockAfterSeconds = sec) } },

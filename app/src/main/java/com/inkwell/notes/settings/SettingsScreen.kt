@@ -117,7 +117,7 @@ fun SettingsScreen(section: SettingsSection, nav: AppNavigator) {
                 wide -> Row(Modifier.fillMaxSize()) {
                     SectionList(
                         selected = selected,
-                        onSelect = { selected = it },
+                        onSelect = { selected = it; narrowDetail = true },
                         withSummaries = false,
                         modifier = Modifier.width(ListPaneWidth).fillMaxHeight(),
                     )

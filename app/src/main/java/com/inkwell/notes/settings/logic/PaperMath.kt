@@ -19,7 +19,7 @@ object PaperMath {
     const val MIN_CUSTOM_MM = 50f
     const val MAX_CUSTOM_MM = 1200f
 
-    const val SPACING_MIN_PT = 12f
+    const val SPACING_MIN_PT = 8f
     const val SPACING_MAX_PT = 48f
     const val SPACING_STEP_PT = 2f
 

@@ -8,8 +8,6 @@ import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -50,6 +48,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
@@ -88,7 +87,11 @@ internal fun OnboardingOverlay(delayHours: Int, onFinish: () -> Unit) {
             .fillMaxSize()
             .background(c.desk.copy(alpha = 0.88f))
             // Swallow touches so nothing underneath reacts while the introduction is up.
-            .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = {})
+            .pointerInput(Unit) {
+                awaitPointerEventScope {
+                    while (true) awaitPointerEvent().changes.forEach { it.consume() }
+                }
+            }
             .windowInsetsPadding(WindowInsets.safeDrawing)
             .padding(16.dp),
         contentAlignment = Alignment.Center,

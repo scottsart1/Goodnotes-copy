@@ -21,6 +21,7 @@ import kotlinx.coroutines.flow.asStateFlow
  */
 internal object AppLockManager {
     private const val TAG = "AppLock"
+    private const val MAX_AUTH_MS = 3 * 60_000L
 
     private val policy = LockPolicy()
     private val _locked = MutableStateFlow(false)
@@ -35,9 +36,21 @@ internal object AppLockManager {
     /** Bumped whenever the lock screen should check [consumeAutoPrompt] again. */
     val promptRequests: StateFlow<Int> = _promptRequests.asStateFlow()
 
-    /** Set while our own BiometricPrompt is showing (its credential screen backgrounds the app). */
     @Volatile
-    var authInProgress: Boolean = false
+    private var authStartedAt = 0L
+
+    /**
+     * True while our own BiometricPrompt is showing (its credential screen backgrounds the app).
+     * Expires after [MAX_AUTH_MS] so a prompt that never reports back cannot disable the lock.
+     */
+    var authInProgress: Boolean
+        get() {
+            val started = authStartedAt
+            return started != 0L && SystemClock.elapsedRealtime() - started < MAX_AUTH_MS
+        }
+        set(value) {
+            authStartedAt = if (value) SystemClock.elapsedRealtime().coerceAtLeast(1L) else 0L
+        }
 
     /** Idempotent; call on the main thread before reading [locked] for the first frame. */
     @MainThread

@@ -63,10 +63,7 @@ internal fun LockScreen(onUnlocked: () -> Unit) {
     val promptRequest by AppLockManager.promptRequests.collectAsState()
     var message by remember { mutableStateOf<String?>(null) }
     var notSetUp by remember { mutableStateOf(false) }
-    var prompting by remember { mutableStateOf(false) }
-
     fun prompt() {
-        if (prompting) return
         val act = activity
         if (act == null) {
             message = "Couldn't show the unlock prompt. Close and reopen Inkwell."
@@ -80,18 +77,15 @@ internal fun LockScreen(onUnlocked: () -> Unit) {
             }
             else -> notSetUp = false
         }
-        prompting = true
         Biometrics.authenticate(
             activity = act,
             title = "Unlock Inkwell",
             subtitle = null,
             onSuccess = {
-                prompting = false
                 message = null
                 onUnlocked()
             },
             onFailure = { failure ->
-                prompting = false
                 when (failure.kind) {
                     AuthFailureKind.CANCELLED -> message = null
                     AuthFailureKind.NOT_SET_UP -> {
@@ -140,7 +134,6 @@ internal fun LockScreen(onUnlocked: () -> Unit) {
             if (!notSetUp) {
                 Button(
                     onClick = { prompt() },
-                    enabled = !prompting,
                     shape = Radius8,
                     colors = ButtonDefaults.buttonColors(containerColor = c.accent, contentColor = c.onAccent),
                     modifier = Modifier.heightIn(min = 48.dp).widthIn(min = 180.dp),

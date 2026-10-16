@@ -21,6 +21,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.snapshots.SnapshotStateMap
@@ -199,7 +200,8 @@ private fun LanguageList(ocr: OcrPrefs, actions: SettingsActions, downloading: S
                 Column(Modifier.weight(1f)) {
                     slice.forEachIndexed { i, lang ->
                         if (i > 0) RowDivider()
-                        LanguageRow(
+                        key(lang.tag) {
+                            LanguageRow(
                             lang = lang,
                             selected = HandwritingLanguages.isSelected(selection, lang.tag),
                             primary = lang.tag.equals(primary, ignoreCase = true),
@@ -208,8 +210,9 @@ private fun LanguageList(ocr: OcrPrefs, actions: SettingsActions, downloading: S
                             enabled = enabled,
                             onToggle = { status -> toggle(lang, status) },
                             onDownload = { download(lang) },
-                            onMakePrimary = { makePrimary(lang) },
-                        )
+                                onMakePrimary = { makePrimary(lang) },
+                            )
+                        }
                     }
                 }
             }

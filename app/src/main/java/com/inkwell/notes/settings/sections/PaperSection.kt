@@ -4,6 +4,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
@@ -154,17 +155,9 @@ private fun PageTemplate.heightPtPortraitBase(): Float = maxOf(size.widthPt, siz
 private fun TemplateSummary(t: PageTemplate) {
     val c = Inkwell.colors
     val description = "${PaperMath.sizeLabel(t)}, ${PaperMath.orientationLabel(t.orientation)}, ${PaperMath.styleLabel(t.paper.style)}, ${PaperMath.matchColor(t.paper)?.name ?: "custom colour"}"
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .clip(Radius8)
-            .background(c.desk)
-            .padding(20.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(20.dp),
-    ) {
-        val ratio = (t.widthPt() / t.heightPt()).takeIf { it.isFinite() && it > 0f } ?: (595f / 842f)
-        Box(Modifier.height(168.dp).aspectRatio(ratio, matchHeightConstraintsFirst = true)) {
+    val ratio = (t.widthPt() / t.heightPt()).takeIf { it.isFinite() && it > 0f } ?: (595f / 842f)
+    val preview: @Composable (Modifier) -> Unit = { m ->
+        Box(m.aspectRatio(ratio, matchHeightConstraintsFirst = true)) {
             PagePreview(
                 style = t.paper.style,
                 paperArgb = t.paper.color,
@@ -175,7 +168,9 @@ private fun TemplateSummary(t: PageTemplate) {
                 modifier = Modifier.fillMaxSize(),
             )
         }
-        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+    }
+    val text: @Composable (Modifier) -> Unit = { m ->
+        Column(m, verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text("New pages", style = MaterialTheme.typography.labelMedium, color = c.inkMuted)
             Text(PaperMath.sizeLabel(t), style = MaterialTheme.typography.titleMedium, color = c.ink)
             Text(
@@ -183,6 +178,19 @@ private fun TemplateSummary(t: PageTemplate) {
                 style = MaterialTheme.typography.bodyMedium,
                 color = c.inkMuted,
             )
+        }
+    }
+    BoxWithConstraints(Modifier.fillMaxWidth().clip(Radius8).background(c.desk).padding(20.dp)) {
+        if (maxWidth >= 440.dp) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(20.dp)) {
+                preview(Modifier.height(168.dp))
+                text(Modifier.weight(1f))
+            }
+        } else {
+            Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                preview(Modifier.height(132.dp))
+                text(Modifier.fillMaxWidth())
+            }
         }
     }
 }

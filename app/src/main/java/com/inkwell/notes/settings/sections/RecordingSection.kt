@@ -17,6 +17,7 @@ import com.inkwell.notes.settings.ui.Choice
 import com.inkwell.notes.settings.ui.Note
 import com.inkwell.notes.settings.ui.NoteTone
 import com.inkwell.notes.settings.ui.QuietButton
+import com.inkwell.notes.settings.ui.RadioRow
 import com.inkwell.notes.settings.ui.RowDivider
 import com.inkwell.notes.settings.ui.SegmentedRow
 import com.inkwell.notes.settings.ui.SettingsActions
@@ -24,6 +25,7 @@ import com.inkwell.notes.settings.ui.SettingsGroup
 import com.inkwell.notes.settings.ui.SwitchRow
 
 internal val SegmentChoices = listOf(60, 120, 300)
+private val QualityChoices = listOf(64_000 to "Standard", 96_000 to "High", 128_000 to "Max")
 
 @Composable
 internal fun RecordingSection(s: AppSettings, actions: SettingsActions, openSection: (SettingsSection) -> Unit) {
@@ -34,7 +36,7 @@ internal fun RecordingSection(s: AppSettings, actions: SettingsActions, openSect
     SectionColumn {
         SettingsGroup("Recorder") {
             SegmentedRow(
-                title = "Dock the recorder on the",
+                title = "Recorder position",
                 subtitle = "The recording control sits at this edge of the editor and collapses into a slim sliver.",
                 choices = listOf(Choice(DockSide.LEFT, "Left edge"), Choice(DockSide.RIGHT, "Right edge")),
                 selected = rec.dockSide,
@@ -81,19 +83,16 @@ internal fun RecordingSection(s: AppSettings, actions: SettingsActions, openSect
             }
         }
 
-        SettingsGroup("Audio") {
-            SegmentedRow(
-                title = "Quality",
-                choices = listOf(
-                    Choice(64_000, "Standard"),
-                    Choice(96_000, "High"),
-                    Choice(128_000, "Max"),
-                ),
-                selected = rec.bitrate,
-                onSelect = { b -> set { it.copy(bitrate = b) } },
-                footer = { Note(SettingsFormat.audioQualityLabel(rec.bitrate)) },
-            )
-            RowDivider()
+        SettingsGroup("Audio", description = "Higher quality sounds clearer and takes more space.") {
+            QualityChoices.forEach { (bitrate, label) ->
+                RadioRow(
+                    title = label,
+                    selected = rec.bitrate == bitrate,
+                    onClick = { set { it.copy(bitrate = bitrate) } },
+                    subtitle = SettingsFormat.audioQualityLabel(bitrate),
+                )
+                RowDivider()
+            }
             SegmentedRow(
                 title = "Crash-safe segments",
                 subtitle = "Audio is saved in short segments while you record, so a crash or a flat battery loses at most the last one.",
