@@ -1,0 +1,381 @@
+package com.inkwell.notes.export.sync
+
+import com.inkwell.notes.core.model.DestinationPrefs
+import com.inkwell.notes.core.model.DocKind
+import com.inkwell.notes.core.model.DocumentMeta
+import com.inkwell.notes.core.model.Recording
+import com.inkwell.notes.core.model.RecordingStatus
+import com.inkwell.notes.core.model.TranscriptStatus
+import com.inkwell.notes.core.storage.db.SyncQueueDao
+import com.inkwell.notes.core.storage.db.SyncQueueEntity
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.map
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.jsonObject
+import okhttp3.OkHttpClient
+import okhttp3.mockwebserver.Dispatcher
+import okhttp3.mockwebserver.MockResponse
+import okhttp3.mockwebserver.MockWebServer
+import okhttp3.mockwebserver.RecordedRequest
+import java.io.File
+import java.io.FileInputStream
+import java.io.FileOutputStream
+import java.io.InputStream
+import java.io.OutputStream
+import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.TimeUnit
+
+/** In-memory [SyncQueueDao] with the same semantics as the Room queries. */
+class FakeSyncQueueDao : SyncQueueDao {
+    private var nextId = 1L
+    val rows = MutableStateFlow<List<SyncQueueEntity>>(emptyList())
+
+    val all: List<SyncQueueEntity> get() = rows.value
+    fun pendingRows() = all.filter { it.status == SyncItemStatus.PENDING }
+
+    override suspend fun enqueue(item: SyncQueueEntity): Long {
+        val id = nextId++
+        rows.value = rows.value + item.copy(rowId = id)
+        return id
+    }
+
+    override suspend fun pending(limit: Int): List<SyncQueueEntity> =
+        pendingRows().sortedBy { it.enqueuedAt }.take(limit)
+
+    override fun observePendingCount(): Flow<Int> = rows.map { list -> list.count { it.status == SyncItemStatus.PENDING } }
+
+    override fun observeRecent(limit: Int): Flow<List<SyncQueueEntity>> = rows.map { it.sortedByDescending { r -> r.enqueuedAt }.take(limit) }
+
+    override suspend fun update(item: SyncQueueEntity) {
+        rows.value = rows.value.filter { it.rowId != item.rowId } + item
+    }
+
+    override suspend fun pruneDone(before: Long) {
+        rows.value = rows.value.filterNot { it.status == SyncItemStatus.DONE && it.enqueuedAt < before }
+    }
+
+    override suspend fun dropPendingDuplicates(docId: String, kind: String, target: String) {
+        rows.value = rows.value.filterNot { it.documentId == docId && it.kind == kind && it.target == target && it.status == SyncItemStatus.PENDING }
+    }
+
+    override suspend fun dropOpenDuplicates(docId: String, kind: String, target: String, refId: String?) {
+        rows.value = rows.value.filterNot {
+            it.documentId == docId && it.kind == kind && it.target == target && it.refId == refId &&
+                (it.status == SyncItemStatus.PENDING || it.status == SyncItemStatus.FAILED)
+        }
+    }
+
+    override suspend fun pendingCount(): Int = pendingRows().size
+
+    override fun observeFailedCount(): Flow<Int> = rows.map { list -> list.count { it.status == SyncItemStatus.FAILED } }
+
+    override suspend fun setOutcome(rowId: Long, status: String, attempts: Int, lastError: String?) {
+        rows.value = rows.value.map { if (it.rowId == rowId) it.copy(status = status, attempts = attempts, lastError = lastError) else it }
+    }
+
+    override suspend fun dropOpenForDocument(docId: String) {
+        rows.value = rows.value.filterNot { it.documentId == docId && it.status != SyncItemStatus.DONE }
+    }
+
+    override suspend fun dropOpenFor(kind: String, target: String) {
+        rows.value = rows.value.filterNot { it.kind == kind && it.target == target && it.status != SyncItemStatus.DONE }
+    }
+
+    override suspend fun failPendingForTarget(target: String, error: String): Int {
+        var n = 0
+        rows.value = rows.value.map {
+            if (it.target == target && it.status == SyncItemStatus.PENDING) {
+                n++
+                it.copy(status = SyncItemStatus.FAILED, lastError = error)
+            } else it
+        }
+        return n
+    }
+
+    override suspend fun retryFailed(): Int {
+        var n = 0
+        rows.value = rows.value.map {
+            if (it.status == SyncItemStatus.FAILED) {
+                n++
+                it.copy(status = SyncItemStatus.PENDING, attempts = 0, lastError = null)
+            } else it
+        }
+        return n
+    }
+
+    override suspend fun pruneFailed(before: Long) {
+        rows.value = rows.value.filterNot { it.status == SyncItemStatus.FAILED && it.enqueuedAt < before }
+    }
+}
+
+/** [SyncSource] over plain maps. */
+class FakeSource(private val tmp: File) : SyncSource {
+    val docs = LinkedHashMap<String, DocumentMeta>()
+    val folders = HashMap<String, Pair<String, String?>>() // id -> name, parent
+    val markdowns = HashMap<String, String>()
+    val recordings = LinkedHashMap<String, Recording>()
+    val transcripts = HashMap<String, StoredTranscript>()
+    val synced = HashMap<String, Long>()
+    var pdfExports = 0
+    var audioExports = 0
+    var failExport: Throwable? = null
+
+    override suspend fun document(docId: String) = docs[docId]
+    override suspend fun allDocuments() = docs.values.toList()
+
+    override suspend fun folderPath(folderId: String?): String = folderNames(folderId).joinToString(" / ")
+
+    override suspend fun folderNames(folderId: String?): List<String> {
+        val out = ArrayList<String>()
+        var id = folderId
+        while (id != null) {
+            val (name, parent) = folders[id] ?: break
+            out += name
+            id = parent
+        }
+        return out.asReversed()
+    }
+
+    override suspend fun markdown(docId: String) = markdowns[docId] ?: "# ${docs[docId]?.title}\n"
+
+    override suspend fun exportPdf(docId: String): File {
+        failExport?.let { throw it }
+        pdfExports++
+        return File(tmp, "export-$docId-$pdfExports.pdf").apply { writeBytes(pdfBytes(docId)) }
+    }
+
+    override suspend fun exportAudio(recordingId: String): File {
+        audioExports++
+        return File(tmp, "export-$recordingId.m4a").apply { writeBytes(audioBytes(recordingId)) }
+    }
+
+    override fun isTemporary(file: File) = file.parentFile == tmp
+
+    override suspend fun recording(recordingId: String) = recordings[recordingId]
+    override suspend fun recordings(docId: String) = recordings.values.filter { it.documentId == docId }
+    override suspend fun transcript(recordingId: String) = transcripts[recordingId]
+
+    override suspend fun markSynced(docId: String, at: Long) {
+        synced[docId] = at
+        docs[docId]?.let { docs[docId] = it.copy(lastSyncedAt = at) }
+    }
+
+    companion object {
+        fun pdfBytes(docId: String) = "%PDF-1.7 fake for $docId".encodeToByteArray()
+        fun audioBytes(recId: String) = ByteArray(2048) { (it + recId.length).toByte() }
+    }
+}
+
+class FakeNetwork(var online: Boolean = true, var unmetered: Boolean = true) : NetworkState {
+    override fun isOnline() = online
+    override fun isUnmetered() = unmetered
+}
+
+class MemoryCredentials(var pw: String? = "correct horse") : VaultCredentials {
+    var stored: VaultSession? = null
+    val saves = CopyOnWriteArrayList<VaultSession?>()
+    override fun password(): String? = pw
+    override fun session(): VaultSession? = stored
+    override fun saveSession(session: VaultSession?) {
+        stored = session
+        saves += session
+    }
+}
+
+/** [FolderNode] over java.io, behaving like a SAF provider (unique names, optional rename support). */
+class JavaFileNode(file: File, private val supportsRename: Boolean = true) : FolderNode {
+    var file: File = file
+        private set
+    override val name: String get() = file.name
+    override val isDirectory: Boolean get() = file.isDirectory
+
+    override fun children(): List<FolderNode> = file.listFiles()?.sortedBy { it.name }?.map { JavaFileNode(it, supportsRename) } ?: emptyList()
+
+    override fun createDirectory(name: String): FolderNode? {
+        val target = unique(name)
+        return if (target.mkdir()) JavaFileNode(target, supportsRename) else null
+    }
+
+    override fun createFile(mimeType: String, name: String): FolderNode? {
+        val target = unique(name)
+        return if (target.createNewFile()) JavaFileNode(target, supportsRename) else null
+    }
+
+    override fun openOutput(): OutputStream = FileOutputStream(file)
+    override fun openInput(): InputStream = FileInputStream(file)
+    override fun delete(): Boolean = if (file.isDirectory) file.list()?.isEmpty() == true && file.delete() else file.delete()
+
+    override fun renameTo(name: String): Boolean {
+        if (!supportsRename) return false
+        val target = File(file.parentFile, name)
+        if (target.exists()) return false
+        val ok = file.renameTo(target)
+        if (ok) file = target
+        return ok
+    }
+
+    /** Like SAF providers: "name (1).ext" when the name is taken. */
+    private fun unique(name: String): File {
+        var candidate = File(file, name)
+        var i = 1
+        while (candidate.exists()) {
+            val dot = name.lastIndexOf('.')
+            val stem = if (dot > 0) name.substring(0, dot) else name
+            val ext = if (dot > 0) name.substring(dot) else ""
+            candidate = File(file, "$stem ($i)$ext")
+            i++
+        }
+        return candidate
+    }
+}
+
+/** A vault double that follows docs/VAULT_API.md closely enough to drive the client. */
+class FakeVault(
+    val linkId: String = "Lk7xQ2pLmn0",
+    val password: String = "correct horse",
+) : AutoCloseable {
+    val server = MockWebServer()
+    val requests = CopyOnWriteArrayList<RecordedRequest>()
+    val issuedTokens = CopyOnWriteArrayList<String>()
+    val docIds = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+    /** Tokens the server accepts. Clear it to simulate an expired/invalidated session. */
+    val validTokens = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+    @Volatile var lockedSeconds: Long? = null
+    @Volatile var failNext: MutableList<MockResponse> = CopyOnWriteArrayList()
+    private var counter = 0
+
+    init {
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse {
+                requests += request
+                failNext.removeFirstOrNull()?.let { return it }
+                return handle(request)
+            }
+        }
+        server.start()
+    }
+
+    val base: String get() = server.url("/notes/$linkId").toString().trimEnd('/')
+    val endpoint: VaultEndpoint get() = VaultEndpoint.insecureForTests(server.url("/notes/$linkId"))
+
+    fun client(credentials: VaultCredentials, clock: () -> Long = System::currentTimeMillis) = VaultClient(httpClient(), endpoint, credentials, clock)
+
+    /** Requests without the login/listing chatter, as "METHOD /path-after-link". */
+    fun calls(): List<String> = requests.map { "${it.method} ${relative(it)}" }
+
+    fun relative(r: RecordedRequest): String = r.requestUrl!!.encodedPath.removePrefix("/notes/$linkId")
+
+    private fun handle(r: RecordedRequest): MockResponse {
+        val path = r.requestUrl!!.encodedPath
+        val prefix = "/notes/$linkId"
+        if (!path.startsWith("$prefix/") && path != prefix) return MockResponse().setResponseCode(404).setHeader("Content-Type", "text/plain").setBody("Not Found\n")
+        val rest = path.removePrefix(prefix)
+        if (rest == "/api/session" && r.method == "POST") {
+            lockedSeconds?.let {
+                return json(429, """{"error":"locked","retryAfterSeconds":$it}""").setHeader("Retry-After", it.toString())
+            }
+            val body = r.body.clone().readUtf8()
+            val pw = Json.parseToJsonElement(body).jsonObject["password"]?.toString()?.trim('"')
+            if (pw != password) return json(401, """{"error":"invalid_password"}""")
+            val token = "tok-${++counter}.sig"
+            issuedTokens += token
+            validTokens += token
+            return json(200, """{"token":"$token","expiresAt":${System.currentTimeMillis() + 30L * 24 * 3600 * 1000}}""")
+                .setHeader("Set-Cookie", "nv_session=$token; HttpOnly; Secure")
+        }
+        val auth = r.getHeader("Authorization")
+        val token = auth?.removePrefix("Bearer ").orEmpty()
+        if (auth == null || !validTokens.contains(token)) return json(401, """{"error":"unauthorized"}""")
+        return when {
+            rest == "/api/ping" && r.method == "GET" -> json(200, """{"ok":true,"name":"Your Pit Box · Notes"}""")
+            rest == "/api/docs" && r.method == "GET" -> json(200, """{"docs":[${docIds.joinToString(",") { """{"id":"$it","title":"t","kind":"NOTEBOOK"}""" }}]}""")
+            rest.startsWith("/api/docs/") && r.method == "GET" && rest.removePrefix("/api/docs/").none { it == '/' } ->
+                if (rest.removePrefix("/api/docs/") in docIds) json(200, """{"id":"${rest.removePrefix("/api/docs/")}","title":"t","kind":"NOTEBOOK"}""")
+                else json(404, """{"error":"not_found"}""")
+            rest.startsWith("/api/docs/") && r.method == "PUT" -> {
+                val parts = rest.removePrefix("/api/docs/").split("/")
+                docIds += parts[0]
+                if (parts.size == 3 && parts[1] == "files" && r.getHeader("Content-Length") == null) json(411, """{"error":"length_required"}""")
+                else json(200, """{"ok":true}""")
+            }
+            else -> json(404, """{"error":"not_found"}""")
+        }
+    }
+
+    override fun close() {
+        runCatching { server.shutdown() }
+    }
+
+    companion object {
+        fun json(code: Int, body: String): MockResponse =
+            MockResponse().setResponseCode(code).setHeader("Content-Type", "application/json; charset=utf-8").setBody(body)
+
+        fun httpClient(): OkHttpClient = OkHttpClient.Builder()
+            .connectTimeout(5, TimeUnit.SECONDS).readTimeout(10, TimeUnit.SECONDS).build()
+
+        fun jsonOf(r: RecordedRequest): JsonObject = Json.parseToJsonElement(r.body.clone().readUtf8()).jsonObject
+    }
+}
+
+fun doc(
+    id: String = "0b6f2c1e-8a4d-4c1b-9f7e-1d2c3b4a5f60",
+    title: String = "20261015_Financial Markets",
+    folderId: String? = null,
+    modifiedAt: Long = 1_760_500_000_000,
+    lastSyncedAt: Long = 0,
+    kind: DocKind = DocKind.NOTEBOOK,
+) = DocumentMeta(
+    id = id, title = title, kind = kind, folderId = folderId, createdAt = 1_760_486_400_000, modifiedAt = modifiedAt,
+    pageCount = 12, tags = listOf("finance", "lecture"), lastSyncedAt = lastSyncedAt,
+)
+
+fun recording(
+    id: String = "rec-1",
+    docId: String = "0b6f2c1e-8a4d-4c1b-9f7e-1d2c3b4a5f60",
+    title: String = "Lecture 3",
+    startedAt: Long = 1_760_490_000_000,
+    status: RecordingStatus = RecordingStatus.COMPLETE,
+    transcriptStatus: TranscriptStatus = TranscriptStatus.DONE,
+) = Recording(
+    id = id, documentId = docId, title = title, segmentFiles = listOf("/data/seg_000.m4a"), segmentDurationsMs = listOf(65_000),
+    durationMs = 65_000, startedAt = startedAt, endedAt = startedAt + 65_000, status = status, transcriptStatus = transcriptStatus,
+)
+
+/** Builds an engine over fakes. */
+class EngineHarness(
+    val tmp: File,
+    var prefs: DestinationPrefs = DestinationPrefs(),
+    val vault: FakeVault? = null,
+    val credentials: MemoryCredentials = MemoryCredentials(),
+    val folderRoot: File? = null,
+    val folderRename: Boolean = true,
+    /** Overrides the vault endpoint (a real server); by default the [vault] double is used. */
+    val endpoint: VaultEndpoint? = null,
+) {
+    val dao = FakeSyncQueueDao()
+    val source = FakeSource(File(tmp, "exports").apply { mkdirs() })
+    val network = FakeNetwork()
+    val state = InMemorySyncState()
+    var revoked = 0
+    var folderAccess: FolderAccess = FolderAccess { _ ->
+        JavaFileNode(folderRoot ?: throw FolderRevokedException(), folderRename)
+    }
+    var now = 1_760_600_000_000
+
+    val engine = SyncEngine(
+        queue = { dao },
+        source = source,
+        prefs = { prefs },
+        vaultClient = { endpoint -> VaultClient(FakeVault.httpClient(), endpoint, credentials) },
+        folders = FolderAccess { uri -> folderAccess.root(uri) },
+        network = network,
+        state = state,
+        onFolderRevoked = { revoked++; prefs = prefs.withoutFolder() },
+        clock = { now },
+        io = Dispatchers.Unconfined,
+        endpointFor = { url -> if (url.isNotBlank()) endpoint ?: vault?.endpoint else null },
+    )
+}

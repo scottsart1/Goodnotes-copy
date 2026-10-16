@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Storage, sync and backup settings (export/sync). -->
+<resources>
+    <string name="sync_where_title">Where outputs are saved</string>
+    <string name="sync_where_subtitle">This tablet always keeps the original. Copies go to the places you pick.</string>
+    <string name="sync_row_notes">Notes</string>
+    <string name="sync_row_transcripts">Meeting transcripts</string>
+    <string name="sync_row_audio">Audio recordings</string>
+    <string name="sync_chip_device">This tablet</string>
+    <string name="sync_chip_folder">Folder</string>
+    <string name="sync_chip_vault">Your Pit Box vault</string>
+    <string name="sync_chip_device_note">Always on: the original stays on this tablet.</string>
+    <string name="sync_notes_format">Notes format</string>
+    <string name="sync_format_pdf">PDF</string>
+    <string name="sync_format_markdown">Markdown</string>
+    <string name="sync_format_both">Both</string>
+
+    <string name="sync_folder_title">Folder</string>
+    <string name="sync_folder_subtitle">Google Drive, Files, an SD card, or any folder another app offers.</string>
+    <string name="sync_folder_none">No folder chosen</string>
+    <string name="sync_folder_choose">Choose folder…</string>
+    <string name="sync_folder_change">Change folder…</string>
+    <string name="sync_folder_test">Test</string>
+    <string name="sync_testing">Testing…</string>
+    <string name="sync_folder_layout">Files are saved as Inkwell / folder / document / notes.pdf, notes.md, transcript_…md and audio_…m4a.</string>
+    <string name="sync_folder_permission_error">Inkwell couldn\'t keep access to that folder. Choose it again.</string>
+    <string name="sync_folder_not_writable">This folder can\'t be written to. Choose another one.</string>
+
+    <string name="sync_vault_title">Your Pit Box vault</string>
+    <string name="sync_vault_subtitle">Your private notes vault on yourpitbox.com. The link and password stay on this tablet.</string>
+    <string name="sync_vault_url">Vault link</string>
+    <string name="sync_vault_password">Password</string>
+    <string name="sync_vault_password_saved">Saved. Type a new one to replace it.</string>
+    <string name="sync_vault_password_hint">Vault password</string>
+    <string name="sync_vault_password_show">Show password</string>
+    <string name="sync_vault_password_hide">Hide password</string>
+    <string name="sync_vault_forget">Forget password</string>
+    <string name="sync_vault_test">Test connection</string>
+    <string name="sync_vault_open">Open vault in browser</string>
+    <string name="sync_vault_needs_setup">Add the vault link and password to start uploading.</string>
+    <string name="sync_vault_browser_error">No browser is available to open the vault.</string>
+
+    <string name="sync_section_title">Sync</string>
+    <string name="sync_auto_title">Sync automatically</string>
+    <string name="sync_auto_on">Notes are copied 30 seconds after you stop writing; transcripts and audio as soon as they\'re ready.</string>
+    <string name="sync_auto_off">Copies are made only when you tap Sync now.</string>
+    <string name="sync_wifi_title">Upload audio on Wi-Fi only</string>
+    <string name="sync_wifi_subtitle">Recordings wait for an unmetered connection before going to the vault.</string>
+    <string name="sync_now">Sync now</string>
+    <string name="sync_syncing">Syncing…</string>
+    <string name="sync_status_up_to_date">Up to date</string>
+    <string name="sync_status_never">Not synced yet</string>
+    <string name="sync_status_last">Last sync %1$s</string>
+    <string name="sync_status_off">Nothing leaves this tablet. Pick a folder or the vault above to copy outputs.</string>
+    <plurals name="sync_status_waiting">
+        <item quantity="one">%d item waiting</item>
+        <item quantity="other">%d items waiting</item>
+    </plurals>
+    <plurals name="sync_status_failed">
+        <item quantity="one">%d failed (Sync now retries it)</item>
+        <item quantity="other">%d failed (Sync now retries them)</item>
+    </plurals>
+
+    <string name="sync_backup_title">Backup</string>
+    <string name="sync_backup_now">Back up library now…</string>
+    <string name="sync_backup_restore">Restore from backup…</string>
+    <string name="sync_backup_running">Backing up your library…</string>
+    <string name="sync_restore_running">Restoring from backup…</string>
+    <string name="sync_backup_auto">Automatic backup</string>
+    <string name="sync_backup_auto_on">Every day to %1$s</string>
+    <string name="sync_backup_auto_off">Off</string>
+    <string name="sync_backup_change">Change folder…</string>
+    <string name="sync_backup_explainer">Sync copies your latest notes to the places you chose. Backups are separate snapshots: deleting a note never deletes its backups.</string>
+    <string name="sync_restore_confirm_title">Restore from this backup?</string>
+    <string name="sync_restore_confirm_body">The documents in the backup are restored into your library. Large backups can take a few minutes.</string>
+    <string name="sync_restore_confirm">Restore</string>
+    <string name="sync_cancel">Cancel</string>
+    <string name="sync_dismiss">Dismiss</string>
+    <string name="sync_no_picker">No file picker is available on this device.</string>
+    <string name="sync_password_store_failed">The password couldn\'t be stored securely on this device.</string>
+    <string name="sync_backup_schedule_failed">Automatic backup couldn\'t be scheduled.</string>
+</resources>

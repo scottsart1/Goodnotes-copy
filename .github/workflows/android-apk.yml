@@ -1,0 +1,83 @@
+# Builds, tests and publishes the Inkwell APK. Every push to main (or a manual
+# run on any branch) publishes a GitHub Release marked latest, so the tablet
+# can always download from https://github.com/<owner>/<repo>/releases/latest.
+name: Android APK
+
+on:
+  push:
+    branches: [main, "claude/**"]
+    paths-ignore: ["web/**", "**/*.md"]
+  pull_request:
+    paths-ignore: ["web/**", "**/*.md"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: android-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+          log-accepted-android-sdk-licenses: false
+
+      - name: Install the Android build platform
+        run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Unit tests
+        run: ./gradlew --no-daemon :app:testDebugUnitTest
+
+      - name: Build release APK
+        run: ./gradlew --no-daemon :app:assembleRelease
+
+      - name: Name the APK
+        id: apk
+        run: |
+          version=$(grep -oP 'versionName = "\K[^"]+' app/build.gradle.kts)
+          cp app/build/outputs/apk/release/app-release.apk "Inkwell-${version}.apk"
+          sha=$(sha256sum "Inkwell-${version}.apk" | cut -d' ' -f1)
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "file=Inkwell-${version}.apk" >> "$GITHUB_OUTPUT"
+          echo "sha256=${sha}" >> "$GITHUB_OUTPUT"
+          echo "## Inkwell-${version}.apk" >> "$GITHUB_STEP_SUMMARY"
+          echo "SHA-256: ${sha}" >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.apk.outputs.file }}
+          path: ${{ steps.apk.outputs.file }}
+          if-no-files-found: error
+
+      - name: Publish a release (newest is always /releases/latest)
+        if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.apk.outputs.version }}-build.${{ github.run_number }}
+          target_commitish: ${{ github.sha }}
+          name: Inkwell ${{ steps.apk.outputs.version }} (build ${{ github.run_number }})
+          make_latest: true
+          body: |
+            Built from ${{ github.sha }} on ${{ github.ref_name }}.
+
+            Install on the Galaxy Tab: open this page on the tablet, download the APK and allow
+            "Install unknown apps" for your browser when asked. New builds install over the
+            previous one (same signing key), keeping your notes.
+
+            SHA-256: ${{ steps.apk.outputs.sha256 }}
+          files: ${{ steps.apk.outputs.file }}
