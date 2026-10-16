@@ -111,7 +111,7 @@ interface TextIndexDao {
 
     // ---- ocr/search additions
 
-    /** Full-text matches with their page index, excluding documents in the trash. */
+    /** Full-text matches with their page index, most recently edited documents first, excluding the trash. */
     @Query(
         """SELECT t.rowId AS rowId, t.documentId AS documentId, t.pageId AS pageId, t.recordingId AS recordingId,
                   t.source AS source, t.text AS text, t.confidence AS confidence, t.timestampMs AS timestampMs,
@@ -121,6 +121,7 @@ interface TextIndexDao {
            LEFT JOIN pages p ON p.id = t.pageId
            WHERE t.rowId IN (SELECT rowid FROM text_index_fts WHERE text_index_fts MATCH :ftsQuery)
              AND d.trashedAt IS NULL
+           ORDER BY d.modifiedAt DESC, t.rowId
            LIMIT :limit"""
     )
     suspend fun searchLive(ftsQuery: String, limit: Int): List<TextSearchRow>
@@ -134,6 +135,7 @@ interface TextIndexDao {
            JOIN documents d ON d.id = t.documentId
            LEFT JOIN pages p ON p.id = t.pageId
            WHERE t.text LIKE '%' || :needle || '%' ESCAPE '\' AND d.trashedAt IS NULL
+           ORDER BY d.modifiedAt DESC, t.rowId
            LIMIT :limit"""
     )
     suspend fun searchLiveLike(needle: String, limit: Int): List<TextSearchRow>
@@ -181,6 +183,13 @@ interface TextIndexDao {
 
     @Query("SELECT COUNT(*) FROM text_index")
     suspend fun count(): Int
+
+    /** Pages (of documents not in the trash) that were never indexed, e.g. imported without a modification time. */
+    @Query(
+        """SELECT p.* FROM pages p JOIN documents d ON d.id = p.documentId
+           WHERE p.indexedAt = 0 AND d.trashedAt IS NULL ORDER BY p.modifiedAt DESC LIMIT :limit"""
+    )
+    suspend fun pagesNeverIndexed(limit: Int): List<PageEntity>
 }
 
 @Dao

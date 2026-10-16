@@ -74,9 +74,11 @@ class SearchViewModel(private val graph: AppGraph, initialQuery: String) : ViewM
             semanticFlow.value = on
             _state.update { it.copy(recent = recent, semanticAvailable = available, semanticOn = on) }
         }
-        viewModelScope.launch { refreshPending() }
-        // Anything edited while indexing was interrupted is picked up shortly.
-        runCatching { (graph.indexing as? IndexingSchedulerImpl)?.catchUpSoon() }
+        viewModelScope.launch {
+            refreshPending()
+            // Pages edited while indexing was interrupted are picked up shortly.
+            if (_state.value.pendingPages > 0) runCatching { (graph.indexing as? IndexingSchedulerImpl)?.catchUpSoon() }
+        }
         viewModelScope.launch {
             combine(queries, semanticFlow) { q, s -> q.trim() to s }
                 .debounce(DEBOUNCE_MS)
@@ -171,7 +173,10 @@ class SearchViewModel(private val graph: AppGraph, initialQuery: String) : ViewM
         val pending = withContext(Dispatchers.IO) {
             runCatching {
                 val live = graph.db.documents().getAll().filter { it.trashedAt == null }.mapTo(HashSet()) { it.id }
-                graph.db.pages().needingIndex().count { it.documentId in live }
+                (graph.db.pages().needingIndex() + graph.db.textIndex().pagesNeverIndexed(PENDING_SCAN))
+                    .filter { it.documentId in live }
+                    .distinctBy { it.id }
+                    .size
             }.getOrDefault(0)
         }
         _state.update { it.copy(pendingPages = pending) }
@@ -223,5 +228,6 @@ class SearchViewModel(private val graph: AppGraph, initialQuery: String) : ViewM
         const val RESULT_LIMIT = 200
         private const val PREVIEW_WIDTH_PX = 160
         private const val PREVIEW_CACHE = 64
+        private const val PENDING_SCAN = 1_000
     }
 }

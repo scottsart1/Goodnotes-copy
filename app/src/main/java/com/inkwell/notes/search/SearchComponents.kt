@@ -303,7 +303,7 @@ private fun PagePreview(vm: SearchViewModel, docId: String, pageId: String, page
                 stringResource(R.string.search_page_preview, pageIndex + 1),
                 contentScale = ContentScale.Crop,
                 alignment = Alignment.TopCenter,
-                modifier = Modifier.fillMaxSize().background(Color.White),
+                modifier = Modifier.fillMaxSize().background(Inkwell.colors.surface),
             )
         }
     }
@@ -343,8 +343,9 @@ internal fun DocumentResultCard(
             DocThumbnail(group.thumbnailPath, group.kind)
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
+                val title = remember(group.title, terms, c.accent) { highlighted(group.title, terms, c.accent) }
                 Text(
-                    highlighted(group.title, terms, c.accent),
+                    title,
                     style = MaterialTheme.typography.titleMedium,
                     color = c.ink,
                     maxLines = 2,
@@ -423,8 +424,9 @@ private fun MatchRow(hit: SearchHit, terms: List<String>, wide: Boolean, vm: Sea
                 }
                 Spacer(Modifier.height(2.dp))
             }
+            val excerpt = remember(hit.excerpt, terms, c.accent, primary) { highlighted(hit.excerpt, terms, c.accent, primary) }
             Text(
-                highlighted(hit.excerpt, terms, c.accent, primary),
+                excerpt,
                 style = MaterialTheme.typography.bodyMedium,
                 color = c.ink,
                 maxLines = 3,

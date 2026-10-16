@@ -132,8 +132,9 @@ internal class CatchUpWorker(context: Context, params: WorkerParameters) : Index
             indexer.indexMeta(docId)
         }
         val docs = withContext(Dispatchers.IO) { db.documents().getAll() }.filter { it.trashedAt == null }.associateBy { it.id }
-        val stale = withContext(Dispatchers.IO) { db.pages().needingIndex() }
+        val stale = withContext(Dispatchers.IO) { db.pages().needingIndex() + db.textIndex().pagesNeverIndexed(NEVER_INDEXED_BATCH) }
             .filter { it.documentId in docs }
+            .distinctBy { it.id }
             .sortedByDescending { it.modifiedAt }
         for (p in stale) {
             if (isStopped) return
@@ -144,6 +145,10 @@ internal class CatchUpWorker(context: Context, params: WorkerParameters) : Index
             if (indexer.typedNeedsIndex(d.id)) indexer.indexTyped(d.id)
         }
         embeddings(maxBatches = 16)
+    }
+
+    private companion object {
+        const val NEVER_INDEXED_BATCH = 500
     }
 }
 
