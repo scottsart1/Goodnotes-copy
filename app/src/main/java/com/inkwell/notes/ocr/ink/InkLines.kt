@@ -55,7 +55,8 @@ object InkLines {
     const val DRAWING = 5f
     const val BAND = 0.6f
     const val MIN_OVERLAP = 0.35f
-    const val DOT_REACH = 0.9f
+    const val DOT_REACH = 1.0f
+    const val ABOVE_WEIGHT = 0.7f
     const val WORD_GAP = 0.6f
     const val COLUMN_GAP = 4f
     private const val NEIGHBOURS = 3
@@ -221,8 +222,9 @@ object InkLines {
     private fun smallScore(line: Acc, s: StrokeBox, h: Float): Float {
         val c = line.centerNear(s.centerX)
         val reach = DOT_REACH * h
-        val d = abs(s.centerY - c)
-        // Dots above a letter (i, j) sit higher than descending punctuation; both are within reach.
+        // Dots and accents above the letters (i, j, é) sit further from the centre than
+        // punctuation on the baseline, and belong to the line below them: weigh them closer.
+        val d = if (s.centerY < c) (c - s.centerY) * ABOVE_WEIGHT else s.centerY - c
         if (d > reach) return 0f
         // Prefer lines that actually extend over the dot horizontally.
         val horizontal = if (s.centerX >= line.left - h && s.centerX <= line.right + h) 0.5f else 0f
