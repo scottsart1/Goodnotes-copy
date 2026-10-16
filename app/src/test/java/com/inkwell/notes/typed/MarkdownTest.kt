@@ -74,6 +74,8 @@ class MarkdownTest {
         assertEquals(TextEdit(2, 0, "a"), TextDiff.compute("aa", "aaa", caretAfter = 3))
         // Backspace in the middle of "abba" -> "aba", caret 1
         assertEquals(TextEdit(1, 1, ""), TextDiff.compute("abba", "aba", caretAfter = 1))
+        // Autocorrect after a space only touches the corrected letters.
+        assertEquals(TextEdit(1, 2, "he"), TextDiff.compute("teh ", "the ", caretAfter = 4))
         // Inconsistent caret falls back to prefix/suffix diff
         assertEquals(TextEdit(3, 0, "d"), TextDiff.compute("abc", "abcd", caretAfter = 0))
     }

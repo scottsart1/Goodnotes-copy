@@ -19,7 +19,12 @@ object TextDiff {
             if (suffixLen <= old.length && new.regionMatches(caretAfter, old, old.length - suffixLen, suffixLen)) {
                 val oldHeadEnd = old.length - suffixLen
                 val prefix = commonPrefix(old, 0, oldHeadEnd, new, 0, caretAfter)
-                return TextEdit(prefix, oldHeadEnd - prefix, new.substring(prefix, caretAfter))
+                // Trim a shared tail inside the changed region (autocorrect "teh " -> "the ").
+                var tail = 0
+                while (tail < oldHeadEnd - prefix && tail < caretAfter - prefix &&
+                    old[oldHeadEnd - 1 - tail] == new[caretAfter - 1 - tail]
+                ) tail++
+                return TextEdit(prefix, oldHeadEnd - tail - prefix, new.substring(prefix, caretAfter - tail))
             }
         }
         val prefix = commonPrefix(old, 0, old.length, new, 0, new.length)

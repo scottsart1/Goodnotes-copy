@@ -3,7 +3,9 @@ package com.inkwell.notes.whiteboard.ui
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.drag
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -70,13 +72,16 @@ fun ExportAreaOverlay(busy: Boolean, onExport: (BoardBox, ExportAction) -> Unit,
             Modifier
                 .fillMaxSize()
                 .pointerInput(Unit) {
-                    detectDragGestures(
-                        onDragStart = { p -> start = p; end = p },
-                        onDrag = { change, amount ->
+                    awaitEachGesture {
+                        val down = awaitFirstDown()
+                        down.consume()
+                        start = down.position
+                        end = down.position
+                        drag(down.id) { change ->
                             change.consume()
-                            end = (end ?: change.position) + amount
-                        },
-                    )
+                            end = change.position
+                        }
+                    }
                 },
         ) {
             val scrim = c.ink.copy(alpha = 0.28f)
