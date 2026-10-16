@@ -1,0 +1,82 @@
+package com.inkwell.notes.export.sync
+
+import android.content.Context
+import android.util.Log
+import androidx.work.BackoffPolicy
+import androidx.work.Constraints
+import androidx.work.CoroutineWorker
+import androidx.work.ExistingWorkPolicy
+import androidx.work.NetworkType
+import androidx.work.OneTimeWorkRequestBuilder
+import androidx.work.WorkManager
+import androidx.work.WorkerParameters
+import com.inkwell.notes.app.AppGraph
+import com.inkwell.notes.export.SyncManagerImpl
+import java.util.concurrent.TimeUnit
+
+/**
+ * Background pass over the sync queue. The same worker runs under three unique names that only
+ * differ in their network constraint, so folder copies never wait for a network, vault uploads
+ * wait for any connection, and large audio waits for an unmetered one when the user asked for that.
+ */
+class SyncWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
+    override suspend fun doWork(): Result {
+        val manager = AppGraph.get(applicationContext).sync as? SyncManagerImpl ?: return Result.success()
+        return try {
+            val report = manager.runQueue()
+            if (report.retryLater && runAttemptCount < MAX_RUN_ATTEMPTS) Result.retry() else Result.success()
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Log.w("InkwellSync", "Sync run failed: ${e.javaClass.simpleName}")
+            if (runAttemptCount < MAX_RUN_ATTEMPTS) Result.retry() else Result.success()
+        }
+    }
+
+    private companion object {
+        const val MAX_RUN_ATTEMPTS = 12
+    }
+}
+
+/** Which background runs are needed for the items waiting in the queue. */
+data class SyncNeeds(val local: Boolean = false, val network: Boolean = false, val unmetered: Boolean = false) {
+    val any: Boolean get() = local || network || unmetered
+}
+
+/** Enqueues [SyncWorker] runs with WorkManager. Never throws. */
+internal class SyncScheduler(private val context: Context) {
+    fun schedule(needs: SyncNeeds) {
+        if (needs.local) enqueue(WORK_LOCAL, null, 0)
+        if (needs.network) enqueue(WORK_MAIN, NetworkType.CONNECTED, 0)
+        if (needs.unmetered) enqueue(WORK_AUDIO, NetworkType.UNMETERED, 0)
+    }
+
+    /** One run after [delayMs] (e.g. when a vault lockout ends). */
+    fun scheduleAfter(delayMs: Long) {
+        enqueue(WORK_LATER, NetworkType.CONNECTED, delayMs.coerceAtLeast(1_000), ExistingWorkPolicy.REPLACE)
+    }
+
+    private fun enqueue(name: String, network: NetworkType?, delayMs: Long, policy: ExistingWorkPolicy = ExistingWorkPolicy.KEEP) {
+        try {
+            val constraints = Constraints.Builder().apply { if (network != null) setRequiredNetworkType(network) }.build()
+            val request = OneTimeWorkRequestBuilder<SyncWorker>()
+                .setConstraints(constraints)
+                .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, BACKOFF_SECONDS, TimeUnit.SECONDS)
+                .apply { if (delayMs > 0) setInitialDelay(delayMs, TimeUnit.MILLISECONDS) }
+                .addTag(TAG)
+                .build()
+            WorkManager.getInstance(context).enqueueUniqueWork(name, policy, request)
+        } catch (e: Exception) {
+            Log.w("InkwellSync", "Couldn't schedule sync: ${e.javaClass.simpleName}")
+        }
+    }
+
+    companion object {
+        const val WORK_MAIN = "inkwell-sync"
+        const val WORK_AUDIO = "inkwell-sync-audio"
+        const val WORK_LOCAL = "inkwell-sync-local"
+        const val WORK_LATER = "inkwell-sync-later"
+        const val TAG = "inkwell-sync"
+        const val BACKOFF_SECONDS = 30L
+    }
+}
