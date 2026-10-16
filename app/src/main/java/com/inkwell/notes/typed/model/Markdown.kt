@@ -58,7 +58,9 @@ data class StyledText(val text: String, val spans: List<TextSpan>)
  */
 object MarkdownBlocks {
     private val heading = Regex("^(#{1,6})\\s+(.*)$")
-    private val check = Regex("^(\\s*)[-*+]\\s+\\[([ xX])]\\s+(.*)$")
+    private val check = Regex("^(\\s*)[-*+]\\s+\\[([ xX])](?:\\s+(.*))?$")
+    /** An optional closing "##" sequence: only when separated from the text by whitespace. */
+    private val closingHashes = Regex("\\s+#+\\s*$")
     private val bullet = Regex("^(\\s*)[-*+]\\s+(.*)$")
     private val number = Regex("^(\\s*)\\d{1,4}[.)]\\s+(.*)$")
     private val quote = Regex("^>\\s?(.*)$")
@@ -114,7 +116,9 @@ object MarkdownBlocks {
             when {
                 h != null -> {
                     flushPara()
-                    val st = parseInline(h.groupValues[2].trim().trimEnd('#').trim())
+                    // "## Learning C#" keeps its '#'; only "## Title ##" drops the closing marks.
+                    val raw = h.groupValues[2].trim()
+                    val st = parseInline(if (raw.all { it == '#' }) "" else raw.replace(closingHashes, "").trim())
                     out += TypedBlock(newId(), BlockType.HEADING, st.text, st.spans, level = h.groupValues[1].length.coerceAtMost(3))
                 }
                 c != null -> {

@@ -42,14 +42,17 @@ object BlockOps {
             BlockType.BULLET, BlockType.NUMBERED, BlockType.CHECKLIST, BlockType.CODE -> b.type
             else -> BlockType.PARAGRAPH
         }
-        val head = b.copy(text = headText, spans = headSpans)
+        // Enter at the very start of a ticked item inserts an empty item above it: the tick
+        // belongs to the text, which moves into the tail.
+        val tickMoves = b.type == BlockType.CHECKLIST && pos == 0 && tailText.isNotEmpty()
+        val head = b.copy(text = headText, spans = headSpans, checked = b.checked && !tickMoves)
         val tail = TypedBlock(
             id = newId,
             type = tailType,
             text = tailText,
             spans = tailSpans,
             level = if (tailType == b.type) b.level else 0,
-            checked = false,
+            checked = tickMoves && b.checked,
             language = if (tailType == BlockType.CODE) b.language else null,
         )
         val out = blocks.toMutableList()

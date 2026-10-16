@@ -144,7 +144,9 @@ class PaneActions(
             }
             else -> canvas.updateText(ItemRef(req.pageId, req.itemId, ItemType.TEXT), text, config)
         }
-        if (!req.sticky && config != controller.tools.state.text) controller.updateTools(controller.tools.updateText { config })
+        // Only a format the user chose in the overlay becomes the text tool's default; fixing a
+        // typo in an old 24pt red box must not turn every new box 24pt red.
+        if (!req.sticky && config != req.config && config != controller.tools.state.text) controller.updateTools(controller.tools.updateText { config })
     }
 
     /** "Add text" from the long-press menu: a new box where the user pressed. */
@@ -357,9 +359,13 @@ class PaneActions(
             messages.show(str(R.string.editor_keep_one_page))
             return
         }
-        controller.discardPending(ids)
         controller.launchOp(R.string.editor_delete_failed) {
-            ids.forEach { graph.library.deletePage(it) }
+            // Forget each page's unsaved ink right before its own delete: if a later delete
+            // fails, the surviving pages keep their pending edits.
+            ids.forEach {
+                controller.discardPending(listOf(it))
+                graph.library.deletePage(it)
+            }
             messages.show(controller.appContext.resources.getQuantityString(R.plurals.editor_pages_deleted, ids.size, ids.size))
         }
     }
