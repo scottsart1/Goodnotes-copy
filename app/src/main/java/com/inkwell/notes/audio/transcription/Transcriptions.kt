@@ -45,13 +45,17 @@ internal object Transcriptions {
         )
     }
 
-    /** Cancels a queued or running transcription and clears its status. */
+    /**
+     * Cancels a queued or running transcription. The status goes back to what the row has:
+     * an earlier transcript (a cancelled re-transcription keeps it) or nothing.
+     */
     suspend fun cancel(graph: AppGraph, recordingId: String) {
         WorkManager.getInstance(graph.context).cancelUniqueWork(uniqueName(recordingId))
+        val keepsTranscript = runCatching { graph.db.transcripts().forRecording(recordingId).isNotEmpty() }.getOrDefault(false)
         graph.db.recordings().setTranscriptStatusIf(
             recordingId,
             listOf(TranscriptStatus.QUEUED.name, TranscriptStatus.RUNNING.name),
-            TranscriptStatus.NONE.name,
+            (if (keepsTranscript) TranscriptStatus.DONE else TranscriptStatus.NONE).name,
         )
     }
 

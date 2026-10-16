@@ -130,34 +130,34 @@ internal class RecordingEngine(private val graph: AppGraph) {
     // ------------------------------------------------------------------ command handling
 
     private suspend fun handle(c: Command) {
-        when (c) {
-            is Command.Start -> try {
-                start(c.docId, c.title)
-            } finally {
-                pendingStarts.decrementAndGet()
-                notifyIfIdle()
+        try {
+            when (c) {
+                is Command.Start -> try {
+                    start(c.docId, c.title)
+                } finally {
+                    pendingStarts.decrementAndGet()
+                }
+                is Command.Refused -> if (session == null) state.value = RecordingState.Error(c.message)
+                Command.Pause -> session?.let { pause(it) }
+                Command.Resume -> session?.let { resume(it) }
+                is Command.Stop -> {
+                    val s = session
+                    if (s != null && (c.target == null || c.target === s)) finish(s, c.error)
+                }
+                is Command.SegmentDone -> if (c.session === session && !c.session.finishing) persistSegment(c.session, c.index, c.file)
+                is Command.Failed -> if (c.session === session) finish(c.session, context.getString(failureMessage(c.failure)))
+                is Command.Recover -> try {
+                    recoverAll()
+                } finally {
+                    c.done.complete(Unit)
+                }
             }
-            is Command.Refused -> {
-                if (session == null) state.value = RecordingState.Error(c.message)
-                notifyIfIdle()
-            }
-            Command.Pause -> session?.let { pause(it) }
-            Command.Resume -> session?.let { resume(it) }
-            is Command.Stop -> {
-                val s = session
-                if (s != null && (c.target == null || c.target === s)) finish(s, c.error)
-                notifyIfIdle()
-            }
-            is Command.SegmentDone -> if (c.session === session && !c.session.finishing) persistSegment(c.session, c.index, c.file)
-            is Command.Failed -> if (c.session === session) {
-                finish(c.session, context.getString(failureMessage(c.failure)))
-                notifyIfIdle()
-            }
-            is Command.Recover -> try {
-                recoverAll()
-            } finally {
-                c.done.complete(Unit)
-            }
+        } finally {
+            // Every command can leave the engine idle: a stop or failure, but also a segment save
+            // that found the document deleted, a resume that lost the microphone, or a stale
+            // notification action with nothing recording. The service must learn about all of
+            // them, or it stays in the foreground with a "Recording" notification for nothing.
+            notifyIfIdle()
         }
     }
 
@@ -482,9 +482,8 @@ internal class RecordingEngine(private val graph: AppGraph) {
                 waveformPath = waveFile.absolutePath,
             )
         }
-        if (updated != null) {
-            runCatching { graph.sync.onRecordingFinished(e.documentId, e.id) }
-        }
+        // Same hooks as a normal stop: back it up and, when the user asked for it, transcribe it.
+        if (updated != null) afterFinished(e.documentId, e.id)
     }
 
     // ------------------------------------------------------------------ wake lock

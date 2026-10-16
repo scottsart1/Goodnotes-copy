@@ -173,11 +173,10 @@ private fun BoxWithConstraintsScope.DockedControl(
             haptics.performHapticFeedback(HapticFeedbackType.SegmentTick)
             graph.appScope.launch { runCatching { graph.settings.update { it.copy(recording = it.recording.copy(dockSide = target.side)) } } }
         }
-        if (target.mode != previous.mode) {
-            haptics.performHapticFeedback(HapticFeedbackType.SegmentTick)
-            val collapsed = target.collapsed
-            graph.appScope.launch { runCatching { graph.settings.update { it.copy(recording = it.recording.copy(startCollapsed = collapsed)) } } }
-        }
+        // Collapsing or expanding is remembered for this recording only (DockMemory). The
+        // "Start collapsed" setting is the user's choice for new recordings and is never
+        // rewritten here: stopping from the expanded capsule would otherwise reset it every time.
+        if (target.mode != previous.mode) haptics.performHapticFeedback(HapticFeedbackType.SegmentTick)
         scope.launch {
             // Continue from where the finger left the control.
             if (dragX != 0f) {
