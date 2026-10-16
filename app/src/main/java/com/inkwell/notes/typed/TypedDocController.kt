@@ -19,12 +19,10 @@ import com.inkwell.notes.typed.model.BlockOps
 import com.inkwell.notes.typed.model.History
 import com.inkwell.notes.typed.model.InlineStyle
 import com.inkwell.notes.typed.model.MarkdownBlocks
-import com.inkwell.notes.typed.model.MarkdownShortcuts
 import com.inkwell.notes.typed.model.Marks
 import com.inkwell.notes.typed.model.SpanOps
 import com.inkwell.notes.typed.model.TableOps
-import com.inkwell.notes.typed.model.TextDiff
-import com.inkwell.notes.typed.model.TextEdit
+import com.inkwell.notes.typed.model.Typing
 import com.inkwell.notes.whiteboard.kit.DocAssets
 import com.inkwell.notes.whiteboard.kit.UiMessage
 import kotlinx.coroutines.CancellationException
@@ -294,112 +292,30 @@ class TypedDocController(val graph: AppGraph, val docId: String) {
             f.value = value
             return
         }
-        val edit = TextDiff.compute(block.text, value.text, value.selection.end)
-        if (edit.inserted.contains('\n') && block.type != BlockType.CODE) {
-            handleNewlines(idx, block, edit, value)
+        val r = Typing.apply(blocks, idx, value.text, value.selection.end, pendingMarks)
+        if (!r.structural) {
+            record("type:$blockId")
+            blocks = r.blocks
+            f.value = value
+            changed()
             return
         }
-        if (block.type == BlockType.CODE && edit.inserted == "\n" && edit.deletedLength == 0 &&
-            edit.start == block.text.length && block.text.endsWith("\n")
-        ) {
-            // Enter on an empty last line leaves the code block.
-            val trimmed = block.copy(text = block.text.dropLast(1))
-            val para = BlockOps.paragraph()
-            commit(BlockOps.insertAfter(blocks.replaceAt(idx, trimmed), idx, listOf(para)))
-            setField(trimmed.id, trimmed.text, TextRange(trimmed.text.length))
-            requestFocus(para.id, TextRange(0))
-            return
-        }
-        val spans = if (BlockOps.supportsSpans(block.type)) {
-            SpanOps.replace(block.spans, block.text.length, edit.start, edit.deletedLength, edit.inserted.length, pendingMarks.takeIf { edit.inserted.isNotEmpty() })
-        } else emptyList()
-        var updated = block.copy(text = value.text, spans = spans)
-        var newValue = value
-        if (block.type == BlockType.PARAGRAPH && edit.inserted == " " && edit.deletedLength == 0) {
-            val match = MarkdownShortcuts.detect(value.text, value.selection.end)
-            if (match != null) {
-                if (match.type == BlockType.DIVIDER) {
-                    val rest = value.text.substring(match.prefixLength)
-                    val divider = TypedBlock(block.id, BlockType.DIVIDER)
-                    val para = BlockOps.paragraph(text = rest).copy(spans = SpanOps.dropPrefix(spans, value.text.length, match.prefixLength))
-                    commit(BlockOps.insertAfter(blocks.replaceAt(idx, divider), idx, listOf(para)), historyKey = null)
-                    fields.remove(block.id)
-                    requestFocus(para.id, TextRange(0))
-                    return
-                }
-                val text = value.text.substring(match.prefixLength)
-                updated = TypedBlock(
-                    id = block.id,
-                    type = match.type,
-                    text = text,
-                    spans = if (match.type == BlockType.CODE) emptyList() else SpanOps.dropPrefix(spans, value.text.length, match.prefixLength),
-                    level = if (match.type == BlockType.HEADING) match.level else 0,
-                    checked = match.checked,
-                    language = match.language,
-                )
-                newValue = TextFieldValue(text, TextRange((value.selection.end - match.prefixLength).coerceIn(0, text.length)))
-                record(null)
-                blocks = blocks.replaceAt(idx, updated)
-                fields[block.id]?.value = newValue
-                pendingMarks = null
-                changed()
-                return
-            }
-        }
-        record("type:$blockId")
-        blocks = blocks.replaceAt(idx, updated)
-        f.value = newValue
-        changed()
-    }
-
-    private fun handleNewlines(idx: Int, block: TypedBlock, edit: TextEdit, value: TextFieldValue) {
-        // Enter on an empty list item: outdent, or leave the list.
-        if (edit.inserted == "\n" && block.text.isEmpty() && (BlockOps.isList(block.type) || block.type == BlockType.QUOTE)) {
-            val replacement = if (BlockOps.isList(block.type) && block.level > 0) block.copy(level = block.level - 1)
-            else block.copy(type = BlockType.PARAGRAPH, level = 0, checked = false)
-            commit(blocks.replaceAt(idx, replacement))
-            setField(block.id, "", TextRange(0))
-            requestFocus(block.id, TextRange(0))
-            return
-        }
-        val supports = BlockOps.supportsSpans(block.type)
-        var text = value.text
-        var spans = if (supports) SpanOps.replace(block.spans, block.text.length, edit.start, edit.deletedLength, edit.inserted.length, pendingMarks) else emptyList()
-        var list = blocks
-        var cursorIdx = idx
-        var current = block.copy(text = text, spans = spans)
-        list = list.replaceAt(cursorIdx, current)
-        // Positions of inserted newlines, in the coordinates of the current (last) block.
-        var consumed = 0
-        val insertEnd = edit.start + edit.inserted.length
-        var searchFrom = edit.start
-        var lastBlockStart = 0
-        while (true) {
-            val nl = value.text.indexOf('\n', searchFrom)
-            if (nl < 0 || nl >= insertEnd) break
-            val local = nl - consumed
-            text = current.text
-            spans = current.spans
-            val without = text.removeRange(local, local + 1)
-            val withoutSpans = if (supports) SpanOps.replace(spans, text.length, local, 1, 0) else emptyList()
-            list = list.replaceAt(cursorIdx, current.copy(text = without, spans = withoutSpans))
-            val r = BlockOps.split(list, cursorIdx, local)
-            list = r.blocks
-            cursorIdx = r.focusIndex
-            current = list[cursorIdx]
-            consumed = nl + 1
-            lastBlockStart = nl + 1
-            searchFrom = nl + 1
-        }
-        commit(list)
+        record(null)
+        blocks = r.blocks
         pendingMarks = null
-        // Sync fields of every block touched.
-        for (i in idx..cursorIdx) {
-            val b = list[i]
-            setField(b.id, b.text, TextRange(b.text.length))
+        val ids = r.blocks.mapTo(HashSet()) { it.id }
+        fields.keys.retainAll(ids)
+        // Re-sync every field whose text changed (split head/tail, converted block).
+        for (i in minOf(idx, r.focusIndex)..maxOf(idx, r.focusIndex)) {
+            val b = r.blocks.getOrNull(i) ?: continue
+            fields[b.id]?.let { holder -> if (holder.value.text != b.text) holder.value = TextFieldValue(b.text, TextRange(b.text.length)) }
         }
-        val caret = (value.selection.end - lastBlockStart).coerceIn(0, current.text.length)
-        requestFocus(current.id, TextRange(caret))
+        changed()
+        val target = r.blocks.getOrNull(r.focusIndex) ?: return
+        if (BlockOps.isTextual(target.type)) {
+            // Also for the same block: a type change rebuilds its field, which drops focus.
+            requestFocus(target.id, TextRange(r.caret))
+        }
     }
 
     /** Hardware/IME backspace with the caret at offset 0. Returns true when handled. */
