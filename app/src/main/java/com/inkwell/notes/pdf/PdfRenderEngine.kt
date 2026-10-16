@@ -104,16 +104,23 @@ internal class PdfRenderEngine(
         return hit.takeIf { RenderSizing.matches(it.width, it.height, target) }
     }
 
-    /** Page sizes in points, read once per open document. */
-    suspend fun pageSizes(docId: String): List<Pair<Float, Float>> = withContext(dispatcher) {
-        val pdf = openPdf(docId) ?: return@withContext emptyList()
-        pdf.sizes ?: try {
-            readSizes(pdf.renderer).also { pdf.sizes = it }
-        } catch (e: Exception) {
-            Log.w(TAG, "Reading page sizes failed (${e.javaClass.simpleName})")
-            closeDoc(docId)
-            emptyList()
+    /**
+     * Page sizes in points, read once per open document. They are read through a separate
+     * batched [probe] so a long document never stalls on-screen renders.
+     */
+    suspend fun pageSizes(docId: String): List<Pair<Float, Float>> {
+        val (known, stamp) = withContext(dispatcher) {
+            val pdf = openPdf(docId)
+            pdf?.sizes to pdf?.stamp
         }
+        if (known != null) return known
+        if (stamp == null) return emptyList()
+        val probed = probe(sourceFile(docId)) as? Probe.Ok ?: return emptyList()
+        withContext(dispatcher) {
+            // Remember them unless the file was replaced meanwhile.
+            open[docId]?.takeIf { it.stamp == stamp }?.sizes = probed.sizes
+        }
+        return probed.sizes
     }
 
     suspend fun pageCount(docId: String): Int = withContext(dispatcher) { openPdf(docId)?.pageCount ?: 0 }
@@ -238,11 +245,6 @@ internal class PdfRenderEngine(
             null
         }
     }
-
-    private fun readSizes(renderer: PdfRenderer): List<Pair<Float, Float>> =
-        List(renderer.pageCount) { i ->
-            renderer.openPage(i).use { page -> page.width.toFloat() to page.height.toFloat() }
-        }
 
     /** Must run on [dispatcher]. */
     private fun draw(docId: String, pdf: OpenPdf, index: Int, target: PixelSize): Bitmap? {
