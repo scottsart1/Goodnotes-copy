@@ -244,6 +244,18 @@ class DiarizedTranscriptionTest {
         assertEquals(1, h.server.requestCount)
     }
 
+    @Test fun echoedReferenceAudioNeverReachesTheErrorMessage() = runBlocking {
+        val clip = "data:audio/wav;base64," + Base64.getEncoder().encodeToString(testWav(3_000)).take(120)
+        repeat(2) { h.enqueueJson("""{"error":{"message":"Invalid value for known_speaker_references[0]: '$clip'"}}""", code = 400) }
+        try {
+            h.engine.transcribeDiarized("rec", audio(), 60_000, 0, listOf(ref("S1", 3_000)), null)
+            fail("expected AiException")
+        } catch (e: AiException) {
+            assertTrue(e.message!!, e.message!!.contains("data:audio/wav;base64,••••"))
+            assertFalse(e.message!!.contains(clip.substringAfter("base64,").take(16)))
+        }
+    }
+
     // ------------------------------------------------------------------ errors and availability
 
     @Test fun authFailureIsNotRetriedAndNeverShowsTheKey() = runBlocking {

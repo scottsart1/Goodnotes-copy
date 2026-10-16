@@ -20,8 +20,6 @@ class ReferenceSet(val references: List<SpeakerReference>, private val targets: 
         return targets[l] ?: targets.entries.firstOrNull { it.key.equals(l, ignoreCase = true) }?.value
     }
 
-    val names: Set<String> get() = targets.keys
-
     companion object {
         val EMPTY = ReferenceSet(emptyList(), emptyMap())
     }

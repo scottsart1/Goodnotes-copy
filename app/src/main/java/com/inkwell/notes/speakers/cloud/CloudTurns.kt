@@ -39,8 +39,9 @@ object CloudTurns {
         segments.filter { it.speakerLabel == label }.sumOf { (it.endMs - it.startMs).coerceAtLeast(0) }
 
     /**
-     * Where [label] spoke longest, at most [CLIP_MAX_MS] around the middle of that turn; null
-     * when no turn reaches [CLIP_MIN_MS] (a shorter clip would be refused, or mostly silence).
+     * Where [label] spoke longest, at most [CLIP_MAX_MS] around the middle of that turn (usually
+     * 4-10 s; a voice that only spoke briefly still gets its longest stretch down to the
+     * provider's minimum). Null when no turn reaches [CLIP_MIN_MS]: a shorter clip is refused.
      */
     fun clipWindow(turns: List<SpeakerTurn>, label: String): Pair<Long, Long>? {
         val best = longest(turns, label) ?: return null
