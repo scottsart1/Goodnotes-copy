@@ -15,6 +15,7 @@ import com.inkwell.notes.ai.engine.UsageSink
 import com.inkwell.notes.ai.engine.providerSettings
 import com.inkwell.notes.ai.engine.updateProvider
 import com.inkwell.notes.ai.net.Endpoints
+import com.inkwell.notes.ai.provider.OpenAiModels
 import com.inkwell.notes.ai.provider.ProviderRegistry
 import com.inkwell.notes.app.AppGraph
 import com.inkwell.notes.core.model.AiCapability
@@ -26,9 +27,11 @@ import com.inkwell.notes.core.model.AiRequest
 import com.inkwell.notes.core.model.AiResult
 import com.inkwell.notes.core.model.AiTask
 import com.inkwell.notes.core.model.ModelRef
+import com.inkwell.notes.core.model.SpeakerEngine
 import com.inkwell.notes.core.model.Transcript
 import com.inkwell.notes.core.settings.SecretStore
 import com.inkwell.notes.core.storage.db.AiUsageEntity
+import com.inkwell.notes.speakers.SpeakerReference
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.launch
@@ -89,6 +92,8 @@ class AiServiceImpl(private val graph: AppGraph) : AiService {
         // Warm the model cache off the main thread so pickers open instantly.
         graph.appScope.launch(Dispatchers.IO) {
             runCatching { AiProviderId.entries.forEach { engine.listed(it) } }
+            // Lets canDiarize() see a reached monthly limit without querying the database.
+            runCatching { engine.monthSpendUsd() }
         }
     }
 
@@ -135,6 +140,19 @@ class AiServiceImpl(private val graph: AppGraph) : AiService {
 
     override suspend fun transcribe(recordingId: String, segments: List<File>, segmentDurationsMs: List<Long>, language: String?): Transcript? =
         engine.transcribe(recordingId, segments, segmentDurationsMs, language)
+
+    /** OpenAI configured, its stored key not rejected, this month's limit not known to be reached. */
+    override fun canDiarize(): Boolean =
+        runCatching { engine.canDiarize() && invalidReason(AiProviderId.OPENAI) == null }.getOrDefault(false)
+
+    override suspend fun transcribeDiarized(
+        recordingId: String,
+        file: File,
+        durationMs: Long,
+        offsetMs: Long,
+        references: List<SpeakerReference>,
+        language: String?,
+    ): Transcript? = engine.transcribeDiarized(recordingId, file, durationMs, offsetMs, references, language)
 
     override suspend fun embed(texts: List<String>): List<FloatArray>? = engine.embed(texts)
 
@@ -189,6 +207,23 @@ class AiServiceImpl(private val graph: AppGraph) : AiService {
     fun invalidReason(provider: AiProviderId): String? = stateStore.get("invalid.${provider.name}")
 
     private fun setInvalid(provider: AiProviderId, message: String?) = stateStore.put("invalid.${provider.name}", message)
+
+    // ---------------------------------------------------------------- transcription cost helpers
+
+    /** The model speaker-labelled transcription uses (OpenAI gpt-4o-transcribe-diarize). */
+    val diarizeModel: ModelRef get() = ModelRef(AiProviderId.OPENAI, OpenAiModels.DIARIZE_MODEL)
+
+    /** Estimated USD per audio minute for a speech-to-text model, or null when unknown. */
+    fun usdPerAudioMinute(ref: ModelRef): Double? = runCatching { engine.models.spec(ref).usdPerAudioMinute }.getOrNull()
+
+    /**
+     * The model a transcription queued now would use: [diarizeModel] when speakers are set to
+     * be labelled by OpenAI and that is available, otherwise the TRANSCRIPTION route. For the
+     * consent prompt and its cost estimate.
+     */
+    fun transcriptionJobModel(): ModelRef? =
+        if (graph.settings.current.speakers.engine == SpeakerEngine.OPENAI && canDiarize()) diarizeModel
+        else engine.modelFor(AiTask.TRANSCRIPTION)
 
     fun priceOverride(ref: ModelRef): PriceOverride? = engine.models.priceOverride(ref)
 

@@ -57,6 +57,7 @@ import com.inkwell.notes.ai.engine.CostFormat
 import com.inkwell.notes.ai.engine.PriceOverride
 import com.inkwell.notes.ai.engine.providerSettings
 import com.inkwell.notes.ai.engine.updateProvider
+import com.inkwell.notes.ai.provider.OpenAiModels
 import com.inkwell.notes.app.AppGraph
 import com.inkwell.notes.core.model.AiCapability
 import com.inkwell.notes.core.model.AiModelInfo
@@ -463,8 +464,10 @@ private fun RoutingCard(vm: AiSettingsViewModel, prefs: AiPrefs) {
     val c = Inkwell.colors
     SectionCard("Model routing", subtitle = "Send each kind of task to a different model. Only models with the needed capability are listed.") {
         for (task in AiTask.entries) {
-            val options: List<AiModelInfo?> = listOf<AiModelInfo?>(null) + vm.capableModels(task.required)
             val route = prefs.routing[task]
+            // The diarize model is chosen through speaker settings, not as the plain transcription route.
+            val options: List<AiModelInfo?> = listOf<AiModelInfo?>(null) + vm.capableModels(task.required)
+                .filterNot { task == AiTask.TRANSCRIPTION && it.ref != route && OpenAiModels.isDiarize(it.ref.modelId) }
             val resolved = vm.ai?.modelFor(task)
             val requirement = when (task) {
                 AiTask.TRANSCRIPTION, AiTask.EMBEDDINGS -> " · needs an OpenAI key"

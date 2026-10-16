@@ -3,9 +3,11 @@ package com.inkwell.notes.audio.transcription
 import android.content.Context
 import android.util.Log
 import androidx.work.CoroutineWorker
+import androidx.work.Data
 import androidx.work.WorkerParameters
 import androidx.work.workDataOf
 import com.inkwell.notes.R
+import com.inkwell.notes.ai.provider.DiarizeReferences
 import com.inkwell.notes.app.AppGraph
 import com.inkwell.notes.audio.logic.TranscriptAssembly
 import com.inkwell.notes.audio.logic.TranscriptCheckpoint
@@ -13,9 +15,14 @@ import com.inkwell.notes.audio.recorder.AudioFiles
 import com.inkwell.notes.core.model.AiException
 import com.inkwell.notes.core.model.AiTask
 import com.inkwell.notes.core.model.RecordingStatus
+import com.inkwell.notes.core.model.SpeakerEngine
 import com.inkwell.notes.core.model.TranscriptStatus
 import com.inkwell.notes.core.storage.FileStore
 import com.inkwell.notes.core.storage.db.TranscriptSegmentEntity
+import com.inkwell.notes.speakers.cloud.CloudLabelMapper
+import com.inkwell.notes.speakers.cloud.CloudReferenceSource
+import com.inkwell.notes.speakers.cloud.CloudSpeakerState
+import com.inkwell.notes.speakers.cloud.CloudTurns
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
@@ -29,6 +36,12 @@ import java.io.IOException
  * the audio), so a retry after a network failure or a stopped job resumes instead of
  * uploading audio again. On success the transcript replaces any previous one, is indexed
  * for search and handed to sync.
+ *
+ * When speakers are set to be labelled by OpenAI, each segment goes to
+ * gpt-4o-transcribe-diarize instead, with short reference clips of voices already heard in
+ * this recording and of known people, so a voice keeps one label ("S1") across segments; the
+ * speakers found are handed to the speaker service. Otherwise the speaker service labels the
+ * stored transcript itself (on-device identification).
  */
 class TranscriptionWorker(appContext: Context, params: WorkerParameters) : CoroutineWorker(appContext, params) {
 
@@ -43,7 +56,9 @@ class TranscriptionWorker(appContext: Context, params: WorkerParameters) : Corou
             // Still being recorded (or awaiting recovery): try again later.
             return Result.retry()
         }
-        if (!graph.ai.isAvailable(AiTask.TRANSCRIPTION)) {
+        val engine = graph.settings.current.speakers.engine
+        val canDiarize = engine == SpeakerEngine.OPENAI && runCatching { graph.ai.canDiarize() }.getOrDefault(false)
+        if (!canDiarize && !graph.ai.isAvailable(AiTask.TRANSCRIPTION)) {
             recordings.setTranscriptStatus(recordingId, TranscriptStatus.FAILED.name)
             return Result.failure(failureData(R.string.audio_transcribe_unavailable))
         }
@@ -58,26 +73,48 @@ class TranscriptionWorker(appContext: Context, params: WorkerParameters) : Corou
         recordings.setTranscriptStatus(recordingId, TranscriptStatus.RUNNING.name)
         val checkpointFile = File(graph.files.audioDir(docId, recordingId), AudioFiles.TRANSCRIPT_CHECKPOINT)
         val paths = files.map { it.absolutePath }
-        var checkpoint = withContext(Dispatchers.IO) { readCheckpoint(checkpointFile) }
-            ?.takeIf { it.matches(paths) } ?: TranscriptCheckpoint(paths)
+        val saved = withContext(Dispatchers.IO) { readCheckpoint(checkpointFile) }?.takeIf { it.first.matches(paths) }
+        val plan = SpeakerJobPlan.plan(engine, canDiarize, saved?.first?.done ?: 0, saved?.second?.diarized == true)
+        var checkpoint = saved?.first?.takeIf { plan.resume } ?: TranscriptCheckpoint(paths)
+        var speakers = saved?.second?.takeIf { plan.resume && !plan.stripLabels } ?: CloudSpeakerState()
+        if (plan.stripLabels) checkpoint = JobCheckpoint.withoutSpeakers(checkpoint)
+        speakers = speakers.copy(diarized = plan.cloud)
+        var note: String? = if (plan.cloudUnavailable) applicationContext.getString(R.string.speakers_cloud_unavailable) else null
+        val references = if (plan.cloud) cloudReferences(graph, docId, recordingId) else null
 
         try {
             setProgress(workDataOf(Transcriptions.KEY_DONE to checkpoint.done, Transcriptions.KEY_TOTAL to files.size))
             for (i in checkpoint.done until files.size) {
                 val file = files[i]
                 val duration = durations.getOrNull(i) ?: 0L
-                val pieces = if (!file.isFile || file.length() == 0L) {
-                    emptyList()
-                } else {
-                    val t = graph.ai.transcribe(recordingId, listOf(file), listOf(duration), checkpoint.language)
-                        ?: throw AiException(applicationContext.getString(R.string.audio_transcribe_unavailable))
-                    if (checkpoint.source == null) checkpoint = checkpoint.copy(source = t.source)
-                    if (checkpoint.language == null) checkpoint = checkpoint.copy(language = t.language)
-                    TranscriptAssembly.shift(t.segments, TranscriptAssembly.offsetOf(durations, i), duration)
+                val offset = TranscriptAssembly.offsetOf(durations, i)
+                val pieces = when {
+                    !file.isFile || file.length() == 0L -> emptyList()
+                    references != null -> {
+                        val refs = references.referencesFor(speakers.voices)
+                        val t = graph.ai.transcribeDiarized(recordingId, file, duration, offset, refs.references, checkpoint.language)
+                            ?: throw AiException(applicationContext.getString(R.string.audio_transcribe_unavailable))
+                        if (checkpoint.source == null) checkpoint = checkpoint.copy(source = t.source)
+                        if (checkpoint.language == null) checkpoint = checkpoint.copy(language = t.language)
+                        // Already on the recording timeline; labels are local to this file until mapped.
+                        val blocks = t.segments.filter { it.text.isNotBlank() }.map { it.copy(text = it.text.trim(), speakerLabel = null) }
+                        val assigned = CloudLabelMapper.assign(speakers.voices, refs, blocks, ::unnamed)
+                        speakers = speakers.copy(voices = assigned.voices)
+                        assigned.segments
+                    }
+                    else -> {
+                        val t = graph.ai.transcribe(recordingId, listOf(file), listOf(duration), checkpoint.language)
+                            ?: throw AiException(applicationContext.getString(R.string.audio_transcribe_unavailable))
+                        if (checkpoint.source == null) checkpoint = checkpoint.copy(source = t.source)
+                        if (checkpoint.language == null) checkpoint = checkpoint.copy(language = t.language)
+                        TranscriptAssembly.shift(t.segments, offset, duration)
+                    }
                 }
                 checkpoint = checkpoint.copy(done = i + 1, segments = checkpoint.segments + pieces)
+                if (plan.cloud) speakers = speakers.copy(voices = CloudTurns.refresh(speakers.voices, checkpoint.segments))
                 val snapshot = checkpoint
-                withContext(Dispatchers.IO) { writeCheckpoint(checkpointFile, snapshot) }
+                val speakerSnapshot = speakers
+                withContext(Dispatchers.IO) { writeCheckpoint(checkpointFile, snapshot, speakerSnapshot) }
                 setProgress(workDataOf(Transcriptions.KEY_DONE to i + 1, Transcriptions.KEY_TOTAL to files.size))
             }
 
@@ -85,15 +122,30 @@ class TranscriptionWorker(appContext: Context, params: WorkerParameters) : Corou
             val segments = checkpoint.segments.sortedBy { it.startMs }
             graph.db.transcripts().replace(
                 recordingId,
-                segments.map { TranscriptSegmentEntity(recordingId = recordingId, startMs = it.startMs, endMs = it.endMs, text = it.text, speaker = it.speaker, source = source) },
+                segments.map {
+                    TranscriptSegmentEntity(
+                        recordingId = recordingId, startMs = it.startMs, endMs = it.endMs, text = it.text,
+                        speaker = it.speaker, source = source, speakerLabel = it.speakerLabel,
+                    )
+                },
             )
             recordings.setTranscriptStatus(recordingId, TranscriptStatus.DONE.name)
-            runCatching { graph.search.replaceTranscript(docId, recordingId, segments, source) }
-                .onFailure { Log.w(TAG, "Indexing the transcript failed", it) }
-            runCatching { graph.sync.onTranscriptReady(docId, recordingId) }
-                .onFailure { Log.w(TAG, "Sync hook failed", it) }
+            if (plan.cloud) {
+                val total = durations.sumOf { it.coerceAtLeast(0) }.takeIf { it > 0 } ?: rec.durationMs
+                val result = CloudTurns.result(recordingId, segments, speakers.voices, total)
+                if (!hook("Saving speakers") { graph.speakers.saveDiarization(docId, result) }) {
+                    note = applicationContext.getString(R.string.speakers_cloud_not_saved)
+                }
+            } else {
+                hook("Speaker labelling") { graph.speakers.onTranscriptReady(docId, recordingId) }
+            }
+            // The speaker service may have renamed blocks (recognised people): index what is stored.
+            val stored = hookValue { graph.db.transcripts().forRecording(recordingId).map { it.toModel() } }
+                ?.takeIf { it.isNotEmpty() } ?: segments
+            hook("Indexing the transcript") { graph.search.replaceTranscript(docId, recordingId, stored, source) }
+            hook("Sync hook") { graph.sync.onTranscriptReady(docId, recordingId) }
             withContext(Dispatchers.IO) { checkpointFile.delete() }
-            return Result.success()
+            return Result.success(note?.let { workDataOf(Transcriptions.KEY_SPEAKER_NOTE to it) } ?: Data.EMPTY)
         } catch (e: CancellationException) {
             withContext(NonCancellable) {
                 // Stopped by the system: it will run again. Cancelled by the user: the UI already cleared it.
@@ -112,6 +164,37 @@ class TranscriptionWorker(appContext: Context, params: WorkerParameters) : Corou
         }
     }
 
+    /**
+     * References for one job: known people from the speaker service (loaded once) and clips of
+     * this recording (kept in memory only, never written or logged).
+     */
+    private fun cloudReferences(graph: AppGraph, docId: String, recordingId: String) = CloudReferenceSource(
+        loadPeople = { graph.speakers.referencesFor(docId, recordingId, DiarizeReferences.MAX_REFERENCES) },
+        cutClip = { start, end -> graph.speakerAudio.clip(recordingId, start, end) },
+        accept = { DiarizeReferences.fitClip(it) != null },
+    )
+
+    private fun unnamed(index: Int): String = applicationContext.getString(R.string.speakers_cloud_unnamed, index)
+
+    /** Runs a follow-up step that must not fail the transcript; false when it failed. */
+    private suspend fun hook(what: String, block: suspend () -> Unit): Boolean = try {
+        block()
+        true
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        Log.w(TAG, "$what failed: ${e.javaClass.simpleName}")
+        false
+    }
+
+    private suspend fun <T> hookValue(block: suspend () -> T): T? = try {
+        block()
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        null
+    }
+
     private suspend fun retryOrFail(graph: AppGraph, recordingId: String, retryable: Boolean, message: String?): Result {
         if (retryable && runAttemptCount < MAX_ATTEMPTS) {
             graph.db.recordings().setTranscriptStatus(recordingId, TranscriptStatus.QUEUED.name)
@@ -124,12 +207,12 @@ class TranscriptionWorker(appContext: Context, params: WorkerParameters) : Corou
 
     private fun failureData(res: Int) = workDataOf(Transcriptions.KEY_ERROR to applicationContext.getString(res))
 
-    private fun readCheckpoint(file: File): TranscriptCheckpoint? =
-        if (!file.isFile) null else runCatching { TranscriptCheckpoint.decode(file.readText()) }.getOrNull()
+    private fun readCheckpoint(file: File): Pair<TranscriptCheckpoint, CloudSpeakerState>? =
+        if (!file.isFile) null else runCatching { JobCheckpoint.decode(file.readText()) }.getOrNull()
 
-    private fun writeCheckpoint(file: File, c: TranscriptCheckpoint) {
+    private fun writeCheckpoint(file: File, c: TranscriptCheckpoint, speakers: CloudSpeakerState) {
         runCatching {
-            FileStore.writeAtomically(file, keepBackup = false) { it.write(TranscriptCheckpoint.encode(c).toByteArray()) }
+            FileStore.writeAtomically(file, keepBackup = false) { it.write(JobCheckpoint.encode(c, speakers).toByteArray()) }
         }.onFailure { Log.w(TAG, "Could not save transcription progress", it) }
     }
 
