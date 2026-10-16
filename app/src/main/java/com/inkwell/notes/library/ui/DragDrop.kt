@@ -232,10 +232,13 @@ private const val PRESS_DELAY_MS = 80L
 internal fun DragGhost(state: DragDropState, rootOffset: Offset) {
     val p = state.payload ?: return
     val c = Inkwell.colors
-    val pos = state.pointer - rootOffset
     Box(
         Modifier
-            .offset { IntOffset((pos.x + 14f).roundToInt(), (pos.y + 14f).roundToInt()) }
+            // Read the pointer in the layout phase only, so following the pen does not recompose.
+            .offset {
+                val pos = state.pointer - rootOffset
+                IntOffset((pos.x + 14f).roundToInt(), (pos.y + 14f).roundToInt())
+            }
             .widthIn(max = 260.dp)
             .clip(R12)
             .background(c.surface)

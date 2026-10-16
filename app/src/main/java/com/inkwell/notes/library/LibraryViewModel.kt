@@ -175,6 +175,9 @@ class LibraryViewModel(private val graph: AppGraph, initialFolderId: String?) : 
 
     private suspend fun loadDecor(docs: List<DocumentMeta>, version: Int): Map<String, CardDecor> {
         val out = HashMap<String, CardDecor>(docs.size)
+        // Covers missing (new imports, restored backups) are requested a few at a time so a
+        // large library does not flood the thumbnail worker; later passes pick up the rest.
+        var requests = 0
         for (d in docs) {
             val cached = recordingCache[d.id]
             val has = if (cached != null && cached.version == version) cached.has else {
@@ -191,7 +194,8 @@ class LibraryViewModel(private val graph: AppGraph, initialFolderId: String?) : 
             val path = d.thumbnailPath
             val file = path?.let { File(it) }
             val exists = file != null && file.isFile
-            if (!exists && d.pageCount > 0 && thumbnailRequested.add(d.id)) {
+            if (!exists && d.pageCount > 0 && requests < MAX_THUMBNAIL_REQUESTS && thumbnailRequested.add(d.id)) {
+                requests++
                 try {
                     graph.thumbnails.refresh(d.id)
                 } catch (t: Throwable) {
@@ -623,6 +627,7 @@ class LibraryViewModel(private val graph: AppGraph, initialFolderId: String?) : 
         private const val QUERY_DEBOUNCE_MS = 150L
         private const val STORAGE_DEBOUNCE_MS = 1_500L
         private const val DEFAULT_FOLDER_NAME = "New folder"
+        private const val MAX_THUMBNAIL_REQUESTS = 24
 
         fun locationOf(folderId: String?, c: LibraryCollection?): LibraryLocation = when {
             c != null -> LibraryLocation.Collection(c)
