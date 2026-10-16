@@ -109,7 +109,14 @@ internal class DocumentAssembler(
         // Build the new PDF first, so a failure here never creates a library entry.
         val pdf = if (compaction.keep.isEmpty()) null else buildSubset(compaction.keep)
         try {
-            val created = library.createDocument(kind, folderId, originalName = title)
+            val created = try {
+                library.createDocument(kind, folderId, originalName = title)
+            } catch (c: CancellationException) {
+                throw c
+            } catch (e: Exception) {
+                Log.w(TAG, "Creating the document failed (${e.javaClass.simpleName})")
+                throw PdfErrors.forWrite(context, e)
+            }
             try {
                 populate(created.id, sources, compaction.remapped, pdf)
             } catch (c: CancellationException) {

@@ -3,7 +3,6 @@ package com.inkwell.notes.pdf
 import android.content.Context
 import androidx.annotation.StringRes
 import com.inkwell.notes.R
-import java.io.IOException
 
 /** Why a PDF operation failed; each maps to a message the user can act on. */
 enum class PdfError(@StringRes val messageRes: Int) {
@@ -60,6 +59,4 @@ internal object PdfErrors {
         t is OutOfMemoryError -> create(context, PdfError.TOO_LARGE, t)
         else -> create(context, PdfError.SAVE_FAILED, t)
     }
-
-    fun isIo(t: Throwable): Boolean = t is IOException
 }

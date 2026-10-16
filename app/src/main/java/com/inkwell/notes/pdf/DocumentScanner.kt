@@ -137,6 +137,10 @@ suspend fun PdfService.importScanResult(pdfUri: Uri?, imageUris: List<Uri>, fold
     return doc
 }
 
+/** [importScanResult] on the process graph's PDF service. */
+suspend fun importScanResult(pdfUri: Uri?, imageUris: List<Uri>, folderId: String? = null): DocumentMeta =
+    AppGraph.get().pdf.importScanResult(pdfUri, imageUris, folderId)
+
 private fun nothingScanned(): PdfException {
     val context = try {
         AppGraph.get().context

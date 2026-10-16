@@ -125,7 +125,14 @@ class PdfServiceImpl(private val graph: AppGraph) : PdfService {
      */
     private suspend fun importPreparedFile(file: File, folderId: String?, title: String?): DocumentMeta {
         val sizes = importer.prepare(file)
-        val doc = library.createDocument(DocKind.PDF, folderId, originalName = title)
+        val doc = try {
+            library.createDocument(DocKind.PDF, folderId, originalName = title)
+        } catch (c: CancellationException) {
+            throw c
+        } catch (e: Exception) {
+            Log.w(TAG, "Creating the document failed (${e.javaClass.simpleName})")
+            throw PdfErrors.forWrite(context, e)
+        }
         try {
             engine.replaceSource(doc.id, file)
             library.addPdfPages(doc.id, sizes)
@@ -170,10 +177,13 @@ class PdfServiceImpl(private val graph: AppGraph) : PdfService {
                     // A notebook without a PDF yet: the inserted file becomes its source PDF.
                     incoming
                 }
-                engine.replaceSource(docId, replacement)
-                text.invalidate(docId)
-                val plan = PdfPageMapping.insertPlan(existingCount, newSizes.size, atIndex, library.getPages(docId).size)
-                library.addPdfPages(docId, newSizes, firstPdfIndex = plan.firstPdfIndex, atIndex = plan.atPageIndex)
+                // Once the file is swapped, the pages must follow: no cancellation in between.
+                withContext(NonCancellable) {
+                    engine.replaceSource(docId, replacement)
+                    text.invalidate(docId)
+                    val plan = PdfPageMapping.insertPlan(existingCount, newSizes.size, atIndex, library.getPages(docId).size)
+                    library.addPdfPages(docId, newSizes, firstPdfIndex = plan.firstPdfIndex, atIndex = plan.atPageIndex)
+                }
             }
         } catch (e: PdfException) {
             throw e

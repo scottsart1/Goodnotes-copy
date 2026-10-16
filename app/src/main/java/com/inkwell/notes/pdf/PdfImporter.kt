@@ -36,7 +36,7 @@ internal class PdfImporter(
         } catch (e: Exception) {
             Log.w(TAG, "Display name query failed (${e.javaClass.simpleName})")
             null
-        } ?: uri.lastPathSegment?.substringAfterLast('/')
+        } ?: uri.lastPathSegment?.substringAfterLast('/')?.takeIf { it.contains('.') } // a file name, not an id
     }
 
     private suspend fun declaredSize(uri: Uri): Long? = withContext(Dispatchers.IO) {

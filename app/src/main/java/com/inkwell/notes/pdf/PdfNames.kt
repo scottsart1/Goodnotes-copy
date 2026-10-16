@@ -63,10 +63,7 @@ internal object PdfNames {
     }
 
     /** True for files written by the ML Kit document scanner into this app's cache. */
-    fun isScannerOutput(uriString: String): Boolean {
-        val s = uriString.lowercase()
-        return s.contains("mlkit_docscan") || s.contains("mlkit-docscan") || s.contains("document_scanner")
-    }
+    fun isScannerOutput(uriString: String): Boolean = uriString.contains("mlkit_docscan", ignoreCase = true)
 
     /**
      * Human page-range label from 0-based indices: [2,3,4] → "pages 3-5", [2] → "page 3",

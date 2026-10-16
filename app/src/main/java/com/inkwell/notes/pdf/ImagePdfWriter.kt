@@ -93,7 +93,8 @@ internal class ImagePdfWriter(private val context: Context, private val pdfBox: 
                 decoder.setTargetSize(target.width, target.height)
             }
             decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
-            decoder.setTargetColorSpace(ColorSpace.get(ColorSpace.Named.SRGB))
+            // PDF pages are plain DeviceRGB; wide-gamut and HDR sources are mapped to sRGB.
+            runCatching { decoder.setTargetColorSpace(ColorSpace.get(ColorSpace.Named.SRGB)) }
         }
         Decoded(opaque8888(raw), mime)
     } catch (e: IOException) {

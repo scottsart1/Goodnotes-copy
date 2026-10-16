@@ -20,7 +20,13 @@ import java.io.IOException
  * Documents spill to temp files in [tempDir] beyond [MAIN_MEMORY_BYTES], so large PDFs do not
  * exhaust the heap.
  */
-internal class PdfBoxOps(private val context: Context, private val tempDir: () -> File) {
+internal class PdfBoxOps(
+    private val initialise: () -> Unit,
+    private val tempDir: () -> File,
+) {
+    /** Uses the app's assets for pdfbox fonts and glyph lists. */
+    constructor(context: Context, tempDir: () -> File) : this({ PDFBoxResourceLoader.init(context.applicationContext) }, tempDir)
+
     @Volatile private var initialised = false
 
     /** PDFBoxResourceLoader must be initialised once before fonts or text are touched. */
@@ -28,7 +34,7 @@ internal class PdfBoxOps(private val context: Context, private val tempDir: () -
         if (initialised) return
         synchronized(this) {
             if (!initialised) {
-                PDFBoxResourceLoader.init(context.applicationContext)
+                initialise()
                 initialised = true
             }
         }
