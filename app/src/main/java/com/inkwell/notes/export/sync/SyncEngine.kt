@@ -377,6 +377,12 @@ class SyncEngine(
         val id = VaultNames.docId(doc.id)
         val known = ctx.knownVaultDocs ?: client.listDocIds().toHashSet().also { ctx.knownVaultDocs = it }
         if (id in known) return id
+        // The vault lists at most VAULT_LIST_CAP documents; beyond that, absence from the list
+        // proves nothing, and re-creating the doc metadata-only would wipe its stored notes.
+        if (known.size >= VAULT_LIST_CAP && client.hasDoc(id)) {
+            known += id
+            return id
+        }
         val markdown = if (OutputTarget.VAULT in ctx.prefs.notes) ctx.markdown(doc.id) else null
         client.putDoc(id, SyncPayloads.docUpsert(doc, source.folderPath(doc.folderId), markdown))
         known += id
@@ -388,7 +394,7 @@ class SyncEngine(
     /** The document's directory, following a rename or move since the last copy. */
     private suspend fun documentDir(root: FolderNode, doc: DocumentMeta, ctx: RunContext): Placement {
         ctx.placements[doc.id]?.let { return it }
-        val segments = FolderNaming.documentDir(source.folderNames(doc.folderId), doc.title)
+        val segments = FolderNaming.documentDir(source.folderNames(doc.folderId), doc.title, doc.id)
         val previous = state.folderLocation(doc.id)
         var oldDir: FolderNode? = null
         if (previous != null && previous != segments) {
@@ -486,6 +492,8 @@ class SyncEngine(
     private enum class Outcome { Done, Skipped, NotReady }
 
     companion object {
+        /** Maximum rows the vault returns from GET api/docs (see web/notes-vault/src/api.ts). */
+        internal const val VAULT_LIST_CAP = 2000
         private const val TAG = "InkwellSync"
         const val MAX_ATTEMPTS = 8
         /** After the vault refused the password, no login is attempted for this long (the vault's lockout window). */

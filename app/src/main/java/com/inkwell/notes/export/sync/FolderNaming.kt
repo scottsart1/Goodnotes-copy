@@ -37,9 +37,21 @@ object FolderNaming {
         return s
     }
 
-    /** Folder chain (outermost first) + document title below [ROOT]. */
-    fun documentDir(folderNames: List<String>, docTitle: String): List<String> =
-        listOf(ROOT) + folderNames.map { segment(it, fallback = "Folder") } + segment(docTitle)
+    /**
+     * Folder chain (outermost first) + document title below [ROOT]. Library titles are unique, but
+     * two titles can sanitise to the same segment ("Q&A: Lecture" and "Q&A_ Lecture"); when
+     * sanitising changed the title and [docId] is known, a short id suffix keeps the directories
+     * apart so one document's copies never overwrite another's.
+     */
+    fun documentDir(folderNames: List<String>, docTitle: String, docId: String? = null): List<String> =
+        listOf(ROOT) + folderNames.map { segment(it, fallback = "Folder") } + documentSegment(docTitle, docId)
+
+    internal fun documentSegment(docTitle: String, docId: String?): String {
+        val plain = segment(docTitle)
+        val shortId = docId?.filter { it.isLetterOrDigit() }?.take(6).orEmpty()
+        if (shortId.isEmpty() || plain == docTitle) return plain
+        return segment(docTitle, maxLength = MAX_SEGMENT - shortId.length - 3) + " ($shortId)"
+    }
 
     fun notesFiles(format: NotesExportFormat): List<String> = when (format) {
         NotesExportFormat.PDF -> listOf(NOTES_PDF)

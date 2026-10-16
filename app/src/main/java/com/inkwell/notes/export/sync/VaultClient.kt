@@ -70,6 +70,15 @@ class VaultClient(
         build = { token -> Request.Builder().url(endpoint.api("docs")).get().header("Accept", "application/json").bearer(token).build() },
     ) { r -> decode(r, VaultDocList.serializer()).docs.mapTo(HashSet()) { it.id } }
 
+    /**
+     * `GET api/docs/{docId}`: whether the vault already has the document. A JSON `not_found` 404
+     * means "missing"; any other 404 (a plain page) still means the URL is not a vault.
+     */
+    suspend fun hasDoc(docId: String): Boolean = authorized(
+        build = { token -> Request.Builder().url(endpoint.api("docs", docId)).get().header("Accept", "application/json").bearer(token).build() },
+        missingIsAnswer = true,
+    ) { r -> r.code != 404 }
+
     /** `PUT api/docs/{docId}` with a [VaultDocUpsert]. */
     suspend fun putDoc(docId: String, doc: VaultDocUpsert) {
         val json = VaultJson.encodeToString(VaultDocUpsert.serializer(), doc)
@@ -104,7 +113,12 @@ class VaultClient(
     }
 
     /** Runs [build] with a valid token; a 401 clears the cached session and logs in once more. */
-    private suspend fun <T> authorized(build: (String) -> Request, what: String? = null, handle: (Response) -> T): T {
+    private suspend fun <T> authorized(
+        build: (String) -> Request,
+        what: String? = null,
+        missingIsAnswer: Boolean = false,
+        handle: (Response) -> T,
+    ): T {
         var session = cachedOrLogin()
         var response = execute(build(session.token))
         if (response.code == 401) {
@@ -121,7 +135,18 @@ class VaultClient(
                 throw VaultException.Unauthorized()
             }
         }
-        return response.use { r -> if (r.isSuccessful) handle(r) else throw errorFor(r, what) }
+        return response.use { r ->
+            when {
+                r.isSuccessful -> handle(r)
+                missingIsAnswer && r.code == 404 && isJsonNotFound(r) -> handle(r)
+                else -> throw errorFor(r, what)
+            }
+        }
+    }
+
+    private fun isJsonNotFound(r: Response): Boolean {
+        val body = runCatching { r.peekBody(4096).string() }.getOrDefault("")
+        return runCatching { VaultJson.decodeFromString(VaultErrorBody.serializer(), body) }.getOrNull()?.error == "not_found"
     }
 
     private suspend fun cachedOrLogin(): VaultSession {

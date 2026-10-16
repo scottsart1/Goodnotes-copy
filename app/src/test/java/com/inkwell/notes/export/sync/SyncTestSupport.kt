@@ -292,6 +292,9 @@ class FakeVault(
         return when {
             rest == "/api/ping" && r.method == "GET" -> json(200, """{"ok":true,"name":"Your Pit Box · Notes"}""")
             rest == "/api/docs" && r.method == "GET" -> json(200, """{"docs":[${docIds.joinToString(",") { """{"id":"$it","title":"t","kind":"NOTEBOOK"}""" }}]}""")
+            rest.startsWith("/api/docs/") && r.method == "GET" && rest.removePrefix("/api/docs/").none { it == '/' } ->
+                if (rest.removePrefix("/api/docs/") in docIds) json(200, """{"id":"${rest.removePrefix("/api/docs/")}","title":"t","kind":"NOTEBOOK"}""")
+                else json(404, """{"error":"not_found"}""")
             rest.startsWith("/api/docs/") && r.method == "PUT" -> {
                 val parts = rest.removePrefix("/api/docs/").split("/")
                 docIds += parts[0]
