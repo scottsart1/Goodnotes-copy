@@ -248,7 +248,7 @@ const CLIENT_JS = String.raw`
       headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
       body: JSON.stringify({ password: password })
     }).then(function (res) {
-      if (res.ok) { pw.value = ''; showApp(); search.focus(); return; }
+      if (res.ok) { pw.value = ''; showApp(); if (!narrow()) search.focus(); return; }
       return res.json().catch(function () { return {}; }).then(function (data) {
         var msg = 'Something went wrong. Try again.';
         if (res.status === 401) msg = 'That password is not right.';

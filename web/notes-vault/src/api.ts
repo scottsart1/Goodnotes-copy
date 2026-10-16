@@ -298,9 +298,11 @@ async function putFile(request: Request, env: Env, docId: string, name: string):
     // Stream straight into R2; FixedLengthStream gives R2 the known length it needs and
     // fails the upload if the body is shorter or longer than declared.
     const { readable, writable } = new FixedLengthStream(length);
-    try {
-      await Promise.all([request.body.pipeTo(writable), env.FILES.put(key, readable, { httpMetadata })]);
-    } catch {
+    const [piped, stored] = await Promise.allSettled([
+      request.body.pipeTo(writable),
+      env.FILES.put(key, readable, { httpMetadata }),
+    ]);
+    if (piped.status === "rejected" || stored.status === "rejected") {
       throw badRequest("body length does not match Content-Length");
     }
   }
@@ -332,9 +334,8 @@ export function parseRange(header: string | null, size: number): Range | "unsati
     end = size - 1;
   } else {
     start = Number(m[1]);
-    end = m[2] === "" ? size - 1 : Number(m[2]);
-    if (end < start) return null;
-    end = Math.min(end, size - 1);
+    if (m[2] !== "" && Number(m[2]) < start) return null;
+    end = m[2] === "" ? size - 1 : Math.min(Number(m[2]), size - 1);
   }
   if (size === 0 || start >= size) return "unsatisfiable";
   return { offset: start, length: end - start + 1 };
