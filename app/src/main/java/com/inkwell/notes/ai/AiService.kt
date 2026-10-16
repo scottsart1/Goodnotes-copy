@@ -1,10 +1,8 @@
 package com.inkwell.notes.ai
 
 import android.graphics.Bitmap
-import com.inkwell.notes.app.AppGraph
 import com.inkwell.notes.core.model.AiCapability
 import com.inkwell.notes.core.model.AiEvent
-import com.inkwell.notes.core.model.AiException
 import com.inkwell.notes.core.model.AiModelInfo
 import com.inkwell.notes.core.model.AiProviderId
 import com.inkwell.notes.core.model.AiRequest
@@ -13,14 +11,13 @@ import com.inkwell.notes.core.model.AiTask
 import com.inkwell.notes.core.model.ModelRef
 import com.inkwell.notes.core.model.Transcript
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.emptyFlow
 import java.io.File
 
 /**
  * Bring-your-own-key AI. Every provider (OpenAI, Anthropic, DeepSeek, Moonshot/Kimi) has its
  * own adapter for endpoints, auth headers, request format and capabilities. The core
  * note-taking experience never depends on this: callers check [isAvailable] first and
- * degrade gracefully.
+ * degrade gracefully. Implemented by [AiServiceImpl] (AiServiceImpl.kt).
  */
 interface AiService {
     /** True when AI is enabled and some configured model can serve [task]. */
@@ -60,22 +57,4 @@ interface AiService {
 
     /** Vision OCR on a page image. Must mark unreadable text as [illegible] instead of guessing. */
     suspend fun visionTranscribe(image: Bitmap, hint: String? = null): AiResult?
-}
-
-/** SCAFFOLD STUB — replaced by the AI implementation. */
-class AiServiceImpl(private val graph: AppGraph) : AiService {
-    override fun isAvailable(task: AiTask): Boolean = false
-    override fun modelFor(task: AiTask): ModelRef? = null
-    override suspend fun models(provider: AiProviderId, refresh: Boolean): List<AiModelInfo> = emptyList()
-    override suspend fun modelsWith(capability: AiCapability): List<AiModelInfo> = emptyList()
-    override fun modelInfo(ref: ModelRef): AiModelInfo? = null
-    override suspend fun validateKey(provider: AiProviderId, apiKey: String, baseUrl: String?): Result<String> =
-        Result.failure(AiException("Not implemented"))
-    override fun stream(request: AiRequest): Flow<AiEvent> = emptyFlow()
-    override suspend fun complete(request: AiRequest): AiResult = throw AiException("AI is not configured")
-    override fun estimateTokens(request: AiRequest): Int = 0
-    override fun estimateCostUsd(request: AiRequest, expectedOutputTokens: Int): Double? = null
-    override suspend fun transcribe(recordingId: String, segments: List<File>, segmentDurationsMs: List<Long>, language: String?): Transcript? = null
-    override suspend fun embed(texts: List<String>): List<FloatArray>? = null
-    override suspend fun visionTranscribe(image: Bitmap, hint: String?): AiResult? = null
 }

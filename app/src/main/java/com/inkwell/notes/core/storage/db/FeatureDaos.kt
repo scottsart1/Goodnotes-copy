@@ -149,6 +149,9 @@ interface ChatDao {
 
     @Query("DELETE FROM chat_messages WHERE threadId = :threadId")
     suspend fun deleteThread(threadId: String)
+
+    @Query("DELETE FROM chat_messages WHERE id = :id")
+    suspend fun deleteMessage(id: String)
 }
 
 @Dao

@@ -1,8 +1,6 @@
 package com.inkwell.notes.ai.ui
 
 import android.graphics.Bitmap
-import androidx.compose.foundation.layout.Box
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 
@@ -24,9 +22,9 @@ data class AiPanelContext(
 )
 
 /**
- * Contextual AI chat panel shown beside the notebook. Never edits notes itself: output is
- * only inserted through [onInsert] when the user taps "Insert into page".
- * SCAFFOLD STUB — replaced by the AI implementation.
+ * Contextual AI chat panel shown beside the notebook (420dp on tablets, full width on phones).
+ * Never edits notes itself: output is only inserted through [onInsert] when the user taps
+ * "Insert into page". Source chips call [onOpenSource] with a 0-based page index.
  */
 @Composable
 fun AiPanel(
@@ -36,17 +34,20 @@ fun AiPanel(
     onClose: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Box(modifier) { Text("AI assistant") }
+    AiPanelImpl(context, onInsert, onOpenSource, onClose, modifier)
 }
 
-/** Providers, keys, validation, models, routing. SCAFFOLD STUB. */
+/**
+ * Providers, keys, validation, models, routing, limits and privacy. Scrolls itself when given a
+ * bounded height; lays out flat inside a host that already scrolls.
+ */
 @Composable
 fun AiSettingsContent(modifier: Modifier = Modifier) {
-    Box(modifier) { Text("AI providers") }
+    AiSettingsImpl(modifier)
 }
 
-/** Token usage and estimated cost by provider/model, limits and warnings. SCAFFOLD STUB. */
+/** Token usage and estimated cost by provider/model, limits and warnings, recent requests. */
 @Composable
 fun AiUsageContent(modifier: Modifier = Modifier) {
-    Box(modifier) { Text("AI usage") }
+    AiUsageImpl(modifier)
 }
