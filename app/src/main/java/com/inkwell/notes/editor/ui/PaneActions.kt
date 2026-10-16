@@ -113,10 +113,9 @@ class PaneActions(
             SelectionAction.AskAi -> askAi(null, false)
             SelectionAction.SaveElement -> ui.dialog = PaneDialog.SaveElement
             SelectionAction.PlayFromHere -> FragmentOps.firstAudioAnchor(sel.content)?.let(controller::playFrom)
-            SelectionAction.SendToOtherPane -> {
-                val content = canvas.copySelection() ?: sel.content
-                split?.onSendToOther?.invoke(content, controller.docId)
-            }
+            // copySelection normalises the fragment and freezes connector ends at their live
+            // positions; the raw selection content would paste arrows with stale endpoints.
+            SelectionAction.SendToOtherPane -> canvas.copySelection()?.let { split?.onSendToOther?.invoke(it, controller.docId) }
             SelectionAction.Crop -> ui.dialog = PaneDialog.Crop
         }
     }
