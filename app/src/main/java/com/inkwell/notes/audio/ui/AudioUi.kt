@@ -10,7 +10,9 @@ import com.inkwell.notes.audio.ui.panel.RecordingsPanelImpl
  * draws at the docked edge). Shows a compact capsule while recording that can be dragged
  * or flung into the left/right edge, collapsing to a slim sliver with a recording dot and a
  * larger invisible touch target; tap/swipe brings it back. Collapsing never affects recording.
- * Renders nothing while idle, and never intercepts touches outside the control itself.
+ * While idle it renders nothing except, after a recording of [docId] finished here, a small
+ * dismissible card in the bottom corner offering to name new voices (opens the naming sheet).
+ * It never intercepts touches outside the control or that card.
  */
 @Composable
 fun RecordingDock(docId: String, modifier: Modifier = Modifier) {

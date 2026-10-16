@@ -54,8 +54,9 @@ import kotlin.math.roundToInt
 private data class ActiveKey(val recordingId: String, val docId: String, val paused: Boolean)
 
 /**
- * Overlay for the editor. It has no pointer handling of its own: only the capsule or the
- * sliver consume touches, so ink, scrolling and every other control underneath keep working.
+ * Overlay for the editor. It has no pointer handling of its own: only the capsule, the sliver
+ * or the small "name the new voices" card consume touches, so ink, scrolling and every other
+ * control underneath keep working.
  */
 @Composable
 internal fun RecordingDockImpl(docId: String, modifier: Modifier = Modifier) {
@@ -81,6 +82,8 @@ internal fun RecordingDockImpl(docId: String, modifier: Modifier = Modifier) {
         }
         val e = error
         if (e != null && DockRegistry.isPrimary(token)) DockErrorToast(e)
+        // After a recording of this document: offer to name its new voices (one dock per document).
+        if (DockRegistry.shows(token, docId, docId)) DockNamingPrompt(graph, docId, recording)
     }
 }
 

@@ -2,7 +2,7 @@ package com.inkwell.notes.audio.ui.panel
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
@@ -38,6 +38,9 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -50,6 +53,10 @@ import com.inkwell.notes.audio.logic.TranscriptAction
 import com.inkwell.notes.audio.logic.TranscriptFilter
 import com.inkwell.notes.audio.transcription.TranscriptPhase
 import com.inkwell.notes.core.model.Recording
+import com.inkwell.notes.core.model.TranscriptSegment
+import com.inkwell.notes.speakers.ui.SpeakerLabel
+import com.inkwell.notes.speakers.ui.voiceDescription
+import com.inkwell.notes.speakers.ui.logic.SpeakerTranscript
 import com.inkwell.notes.ui.theme.Dimens
 import com.inkwell.notes.ui.theme.Inkwell
 
@@ -64,17 +71,25 @@ internal fun actionLabelRes(a: TranscriptAction): Int = when (a) {
     TranscriptAction.COMPARE -> R.string.audio_ai_compare
 }
 
-/** Transcript part of the recording detail: transcribe / progress / AI actions / search / segments. */
+/**
+ * Transcript part of the recording detail: transcribe / progress / AI actions / search / blocks.
+ * Blocks show who is speaking once per stretch of speech; with [speakersEnabled] a long press
+ * changes a block's speaker ([onChangeSpeaker]).
+ */
 internal fun LazyListScope.transcriptItems(
     vm: RecordingsViewModel,
     rec: Recording,
     phase: TranscriptPhase,
     availability: AiAvailability,
     hasTranscript: Boolean,
-    matches: List<TranscriptFilter.Match>,
+    rows: List<SpeakerTranscript.Row>,
     query: String,
     activeIndex: Int,
     onSegment: (index: Int) -> Unit,
+    speakersEnabled: Boolean = false,
+    filtered: Boolean = false,
+    hasSpeakerNames: Boolean = false,
+    onChangeSpeaker: (TranscriptSegment) -> Unit = {},
 ) {
     item(key = "transcript-title") {
         Text(
@@ -101,10 +116,11 @@ internal fun LazyListScope.transcriptItems(
     if (!hasTranscript) return
 
     if (availability.summarize) {
-        item(key = "ai-actions") { AiActions(vm) }
+        // "By person" needs speaker names in the transcript.
+        item(key = "ai-actions") { AiActions(vm, byPerson = hasSpeakerNames) }
     }
-    item(key = "search") { TranscriptSearch(query, matches.size, onQuery = { vm.query.value = it }) }
-    if (matches.isEmpty() && query.isNotBlank()) {
+    item(key = "search") { TranscriptSearch(query, rows.size, onQuery = { vm.query.value = it }) }
+    if (rows.isEmpty() && (query.isNotBlank() || filtered)) {
         item(key = "no-matches") {
             Text(
                 stringResource(R.string.audio_transcript_no_matches),
@@ -114,8 +130,13 @@ internal fun LazyListScope.transcriptItems(
             )
         }
     }
-    items(matches, key = { "seg-${it.index}" }) { m ->
-        SegmentRow(m, active = m.index == activeIndex, onClick = { onSegment(m.index) })
+    items(rows, key = { "seg-${it.match.index}" }) { r ->
+        SegmentRow(
+            r,
+            active = r.match.index == activeIndex,
+            onClick = { onSegment(r.match.index) },
+            onLongClick = if (speakersEnabled) ({ onChangeSpeaker(r.match.segment) }) else null,
+        )
     }
     if (phase == TranscriptPhase.Done || phase is TranscriptPhase.Failed || phase == TranscriptPhase.Interrupted) {
         if (availability.transcribe) {
@@ -154,6 +175,9 @@ private fun TranscribeCard(vm: RecordingsViewModel, rec: Recording, availability
                 style = MaterialTheme.typography.bodySmall,
                 color = c.inkMuted,
             )
+            if (availability.cloudSpeakers) {
+                Text(stringResource(R.string.spk_cloud_speakers_note), style = MaterialTheme.typography.bodySmall, color = c.inkMuted)
+            }
             Spacer(Modifier.height(4.dp))
             AudioPrimaryButton(
                 stringResource(if (failure != null) R.string.audio_transcribe_retry else if (emptyResult) R.string.audio_transcribe_again else R.string.audio_transcribe),
@@ -198,7 +222,7 @@ private fun ProgressCard(phase: TranscriptPhase, onCancel: () -> Unit) {
 }
 
 @Composable
-private fun AiActions(vm: RecordingsViewModel) {
+private fun AiActions(vm: RecordingsViewModel, byPerson: Boolean) {
     val c = Inkwell.colors
     Column(Modifier.fillMaxWidth().padding(bottom = 8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -208,6 +232,7 @@ private fun AiActions(vm: RecordingsViewModel) {
         }
         FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             for (a in TranscriptAction.entries) {
+                if (a == TranscriptAction.BY_SPEAKER && !byPerson) continue
                 AudioChip(
                     label = stringResource(actionLabelRes(a)),
                     selected = a == TranscriptAction.EXPLAIN && vm.pickingPassage,
@@ -253,27 +278,47 @@ private fun TranscriptSearch(query: String, count: Int, onQuery: (String) -> Uni
     }
 }
 
+/**
+ * One transcript block. The speaker's dot and name head each stretch of one voice; TalkBack
+ * hears the name with every block. Long press (when speakers are on) changes the speaker.
+ */
 @Composable
-private fun SegmentRow(m: TranscriptFilter.Match, active: Boolean, onClick: () -> Unit) {
+private fun SegmentRow(r: SpeakerTranscript.Row, active: Boolean, onClick: () -> Unit, onLongClick: (() -> Unit)?) {
     val c = Inkwell.colors
+    val m = r.match
     val time = AudioText.clock(m.segment.startMs)
     val label = stringResource(R.string.audio_segment_cd, time)
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .heightIn(min = 44.dp)
-            .clip(R8)
-            .background(if (active) c.accentContainer else c.surface)
-            .clickable(role = Role.Button, onClickLabel = label, onClick = onClick)
-            .padding(horizontal = 8.dp, vertical = 8.dp),
-    ) {
-        Text(
-            time,
-            style = MaterialTheme.typography.labelMedium.copy(fontFeatureSettings = "tnum"),
-            color = c.accent,
-            modifier = Modifier.width(56.dp).padding(top = 2.dp),
-        )
-        Text(highlighted(m, c.accent.copy(alpha = 0.22f), c.ink), style = MaterialTheme.typography.bodyMedium, color = c.ink)
+    val voice = r.voice
+    val spoken = voice?.let { stringResource(R.string.spk_block_cd, voiceDescription(it), time, m.segment.text) }
+    val changeLabel = stringResource(R.string.spk_change_speaker)
+    Column(Modifier.fillMaxWidth().padding(top = if (r.startsGroup) 10.dp else 0.dp)) {
+        if (r.startsGroup && voice != null) {
+            SpeakerLabel(voice, Modifier.padding(start = 8.dp, bottom = 2.dp).clearAndSetSemantics { })
+        }
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .heightIn(min = 44.dp)
+                .clip(R8)
+                .background(if (active) c.accentContainer else c.surface)
+                .combinedClickable(
+                    role = Role.Button,
+                    onClickLabel = label,
+                    onLongClickLabel = if (onLongClick != null) changeLabel else null,
+                    onLongClick = onLongClick,
+                    onClick = onClick,
+                )
+                .then(if (spoken != null) Modifier.semantics { contentDescription = spoken } else Modifier)
+                .padding(horizontal = 8.dp, vertical = 8.dp),
+        ) {
+            Text(
+                time,
+                style = MaterialTheme.typography.labelMedium.copy(fontFeatureSettings = "tnum"),
+                color = c.accent,
+                modifier = Modifier.width(56.dp).padding(top = 2.dp),
+            )
+            Text(highlighted(m, c.accent.copy(alpha = 0.22f), c.ink), style = MaterialTheme.typography.bodyMedium, color = c.ink)
+        }
     }
 }
 
