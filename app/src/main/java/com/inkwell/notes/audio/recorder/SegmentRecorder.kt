@@ -29,7 +29,7 @@ internal class SegmentRecorder(
 ) {
     data class Config(val sampleRate: Int, val bitrate: Int, val segmentMs: Long)
 
-    enum class Failure { MIC_LOST, SERVER_DIED }
+    enum class Failure { MIC_LOST, SERVER_DIED, MIC_TAKEN, STORAGE_FULL }
 
     interface Listener {
         /** Segment [index] was finalised into [file]; recording goes on in the next one. */

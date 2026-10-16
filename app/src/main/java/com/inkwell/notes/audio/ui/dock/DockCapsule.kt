@@ -61,6 +61,8 @@ internal val CapsuleShape = RoundedCornerShape(16.dp)
 internal fun DockCapsule(
     side: DockSide,
     paused: Boolean,
+    /** The recording belongs to another notebook: notes written here are not linked to it. */
+    otherDocument: Boolean,
     time: () -> String,
     level: () -> Float,
     onPauseResume: () -> Unit,
@@ -78,7 +80,14 @@ internal fun DockCapsule(
     }
     val blink = rememberBlink(paused && !armed)
     val timeText = time()
-    val stateDescription = stringResource(if (paused) R.string.audio_dock_paused_cd else R.string.audio_dock_recording_cd, timeText)
+    val stateDescription = stringResource(
+        when {
+            otherDocument -> R.string.audio_dock_other_doc_cd
+            paused -> R.string.audio_dock_paused_cd
+            else -> R.string.audio_dock_recording_cd
+        },
+        timeText,
+    )
 
     Column(
         modifier

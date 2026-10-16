@@ -57,7 +57,8 @@ internal object Transcriptions {
 
     fun observe(context: Context, recordingId: String): Flow<WorkInfo?> =
         WorkManager.getInstance(context).getWorkInfosForUniqueWorkFlow(uniqueName(recordingId))
-            .map { infos -> infos.lastOrNull() }
+            // After a REPLACE the cancelled job can still be listed next to the new one.
+            .map { infos -> infos.firstOrNull { !it.state.isFinished } ?: infos.lastOrNull() }
 
     /** Progress (done, total) reported by a running job, or null. */
     fun progressOf(info: WorkInfo?): Pair<Int, Int>? {

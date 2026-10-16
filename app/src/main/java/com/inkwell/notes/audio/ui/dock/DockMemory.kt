@@ -15,6 +15,8 @@ internal object DockMemory {
         private set
     /** Identity of the last error the user dismissed or saw time out. */
     var dismissedError: Any? = null
+    /** Notification permission was already requested in this process. */
+    var askedForNotifications: Boolean = false
 
     /** Returns the remembered mode for [id], or null for a recording the dock hasn't seen. */
     fun modeFor(id: String): DockMode? = if (id == recordingId) mode else null

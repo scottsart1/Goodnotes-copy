@@ -6,7 +6,9 @@ import com.inkwell.notes.audio.logic.PausableClock
 import com.inkwell.notes.audio.logic.SegmentLedger
 import com.inkwell.notes.audio.logic.WaveformAccumulator
 import com.inkwell.notes.core.storage.db.RecordingEntity
+import android.media.AudioManager
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.MutableStateFlow
 import java.io.File
 
 /**
@@ -38,6 +40,13 @@ internal class RecordingSession(
     /** Recorder-thread only. */
     var recorder: SegmentRecorder? = null
     var pollJob: Job? = null
+    var recordingCallback: AudioManager.AudioRecordingCallback? = null
+    var polls: Long = 0
+
+    /** elapsedRealtime when the system started silencing our capture (another app took the mic); 0 = not silenced. */
+    @Volatile var silencedSince: Long = 0L
+    /** A failure was already reported; don't report it again from the poll loop. */
+    @Volatile var failureReported: Boolean = false
 
     val waveformFile: File get() = AudioFiles.waveformFile(dir)
 
@@ -52,6 +61,8 @@ internal class RecordingSession(
     fun markResumed() = synchronized(lock) {
         clock.resume()
         paused = false
+        // Silencing reported while paused says nothing about the resumed capture.
+        silencedSince = 0L
     }
 
     fun stopClock() = synchronized(lock) { clock.pause() }
@@ -78,16 +89,24 @@ internal class RecordingSession(
 
     fun waveformBytes(): ByteArray = synchronized(lock) { envelope.snapshot() }
 
-    fun state(): RecordingState.Active = synchronized(lock) {
-        RecordingState.Active(
-            docId = docId,
-            recordingId = recordingId,
-            startedAt = startedAt,
-            elapsedMs = ledger.timelineMs(clock.elapsedMs()),
-            paused = paused,
-            level = if (paused) 0f else level,
-        )
+    fun state(): RecordingState.Active = synchronized(lock) { snapshot() }
+
+    /**
+     * Publishes the current state to [target]. Snapshot and assignment happen under the
+     * session lock, so a level poll can never overwrite a newer pause/resume with stale data.
+     */
+    fun publish(target: MutableStateFlow<RecordingState>) = synchronized(lock) {
+        if (!finishing) target.value = snapshot()
     }
+
+    private fun snapshot() = RecordingState.Active(
+        docId = docId,
+        recordingId = recordingId,
+        startedAt = startedAt,
+        elapsedMs = ledger.timelineMs(clock.elapsedMs()),
+        paused = paused,
+        level = if (paused) 0f else level,
+    )
 
     companion object {
         /** The row with [segments] as its audio. */

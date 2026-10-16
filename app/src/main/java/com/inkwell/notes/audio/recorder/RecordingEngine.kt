@@ -1,6 +1,8 @@
 package com.inkwell.notes.audio.recorder
 
 import android.content.Context
+import android.media.AudioManager
+import android.media.AudioRecordingConfiguration
 import android.os.Handler
 import android.os.HandlerThread
 import android.os.PowerManager
@@ -166,6 +168,8 @@ internal class RecordingEngine(private val graph: AppGraph) {
     private fun failureMessage(f: SegmentRecorder.Failure): Int = when (f) {
         SegmentRecorder.Failure.MIC_LOST -> R.string.audio_error_mic_lost
         SegmentRecorder.Failure.SERVER_DIED -> R.string.audio_error_server_died
+        SegmentRecorder.Failure.MIC_TAKEN -> R.string.audio_error_mic_taken
+        SegmentRecorder.Failure.STORAGE_FULL -> R.string.audio_error_storage
     }
 
     private suspend fun start(docId: String, title: String?) {
@@ -182,6 +186,10 @@ internal class RecordingEngine(private val graph: AppGraph) {
         val doc = runCatching { graph.library.getDocument(docId) }.getOrNull()
         if (doc == null) {
             state.value = RecordingState.Error(context.getString(R.string.audio_error_doc_missing))
+            return
+        }
+        if (runCatching { graph.files.root.usableSpace }.getOrDefault(Long.MAX_VALUE) < MIN_FREE_TO_START) {
+            state.value = RecordingState.Error(context.getString(R.string.audio_error_storage))
             return
         }
         val now = System.currentTimeMillis()
@@ -217,6 +225,7 @@ internal class RecordingEngine(private val graph: AppGraph) {
                 rec.start(0)
                 s.recorder = rec
                 s.begin()
+                watchSilencing(s)
             }
         }
         if (started.isFailure) {
@@ -229,7 +238,7 @@ internal class RecordingEngine(private val graph: AppGraph) {
         session = s
         RecordingRuntime.session = s
         acquireWakeLock()
-        state.value = s.state()
+        s.publish(state)
         s.pollJob = graph.appScope.launch(recorderDispatcher) { poll(s) }
     }
 
@@ -255,8 +264,51 @@ internal class RecordingEngine(private val graph: AppGraph) {
             if (rec.isRunning && s.currentSegmentMs() > s.config.segmentMs * FORCE_ROLL_FACTOR) {
                 rec.forceRoll()
             }
-            if (!s.finishing && session === s) state.value = s.state()
+            checkHealth(s)
+            if (session === s) s.publish(state)
         }
+    }
+
+    /** Stops with an error when storage runs low or another app has taken the microphone. */
+    private fun checkHealth(s: RecordingSession) {
+        if (s.failureReported) return
+        s.polls++
+        if (s.polls % STORAGE_CHECK_POLLS == 0L) {
+            val free = runCatching { s.dir.usableSpace }.getOrDefault(Long.MAX_VALUE)
+            if (free < MIN_FREE_WHILE_RECORDING) {
+                s.failureReported = true
+                commands.trySend(Command.Failed(s, SegmentRecorder.Failure.STORAGE_FULL))
+                return
+            }
+        }
+        val since = s.silencedSince
+        if (since > 0 && SystemClock.elapsedRealtime() - since >= SILENCED_LIMIT_MS) {
+            s.failureReported = true
+            commands.trySend(Command.Failed(s, SegmentRecorder.Failure.MIC_TAKEN))
+        }
+    }
+
+    /**
+     * Since Android 10 a recorder whose microphone is taken by a higher-priority app (a call,
+     * the assistant) is silenced instead of failing. Recorder thread.
+     */
+    private fun watchSilencing(s: RecordingSession) {
+        val am = context.getSystemService(AudioManager::class.java) ?: return
+        val callback = object : AudioManager.AudioRecordingCallback() {
+            override fun onRecordingConfigChanged(configs: MutableList<AudioRecordingConfiguration>) {
+                if (s.finishing) return
+                val silenced = configs.any { it.isClientSilenced }
+                s.silencedSince = if (silenced) (s.silencedSince.takeIf { it > 0 } ?: SystemClock.elapsedRealtime()) else 0L
+            }
+        }
+        runCatching { am.registerAudioRecordingCallback(callback, Handler(thread.looper)) }
+            .onSuccess { s.recordingCallback = callback }
+    }
+
+    private fun unwatchSilencing(s: RecordingSession) {
+        val cb = s.recordingCallback ?: return
+        s.recordingCallback = null
+        runCatching { context.getSystemService(AudioManager::class.java)?.unregisterAudioRecordingCallback(cb) }
     }
 
     private suspend fun pause(s: RecordingSession) {
@@ -267,7 +319,7 @@ internal class RecordingEngine(private val graph: AppGraph) {
             return
         }
         s.markPaused()
-        state.value = s.state()
+        s.publish(state)
         releaseWakeLock()
         runCatching { graph.db.recordings().mutate(s.recordingId) { it.copy(status = RecordingStatus.PAUSED) } }
         runCatching { AudioFiles.writeWaveform(s.waveformFile, s.waveformBytes()) }
@@ -283,7 +335,7 @@ internal class RecordingEngine(private val graph: AppGraph) {
         }
         s.markResumed()
         acquireWakeLock()
-        state.value = s.state()
+        s.publish(state)
         runCatching { graph.db.recordings().mutate(s.recordingId) { it.copy(status = RecordingStatus.RECORDING) } }
     }
 
@@ -315,6 +367,7 @@ internal class RecordingEngine(private val graph: AppGraph) {
         runCatching { s.pollJob?.cancelAndJoin() }
         val stopped = runCatching {
             withContext(recorderDispatcher) {
+                unwatchSilencing(s)
                 val r = s.recorder
                 s.recorder = null
                 r?.stop()
@@ -451,6 +504,14 @@ internal class RecordingEngine(private val graph: AppGraph) {
         private const val MAX_SEGMENT_SECONDS = 1800
         /** A segment this many times longer than intended is closed by restarting the recorder. */
         private const val FORCE_ROLL_FACTOR = 2.5
+        /** Free space needed to start (about two hours of 96 kbps audio, plus room for autosave). */
+        private const val MIN_FREE_TO_START = 96L * 1024 * 1024
+        /** Below this, recording stops so ink autosave always has room. */
+        private const val MIN_FREE_WHILE_RECORDING = 32L * 1024 * 1024
+        /** Check free space every 100 polls (5 s). */
+        private const val STORAGE_CHECK_POLLS = 100L
+        /** Silenced this long by another app's capture = microphone taken. */
+        private const val SILENCED_LIMIT_MS = 2_000L
         /** Re-acquired on every resume; bounds the damage if a release is ever missed. */
         private const val WAKE_LOCK_TIMEOUT_MS = 6L * 60 * 60 * 1000
     }

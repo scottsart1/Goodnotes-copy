@@ -15,6 +15,8 @@
     <string name="audio_error_background">Recording can only start while Inkwell is open.</string>
     <string name="audio_error_mic_lost">Recording stopped because the microphone became unavailable. Everything up to that point was saved.</string>
     <string name="audio_error_server_died">Recording stopped because the system audio service restarted. Everything up to that point was saved.</string>
+    <string name="audio_error_mic_taken">Recording stopped because another app started using the microphone. Everything up to that point was saved.</string>
+    <string name="audio_error_storage">Recording stopped: the device is almost out of storage. Everything up to that point was saved.</string>
     <string name="audio_error_doc_missing">This notebook no longer exists, so recording stopped.</string>
     <string name="audio_error_save">Recording stopped, but it couldn\'t be saved completely.</string>
 
@@ -28,6 +30,7 @@
     <string name="audio_dock_expand">Show recording controls</string>
     <string name="audio_dock_recording_cd">Recording, %1$s</string>
     <string name="audio_dock_paused_cd">Recording paused, %1$s</string>
+    <string name="audio_dock_other_doc_cd">Recording in another notebook, %1$s</string>
     <string name="audio_dock_level_cd">Input level</string>
     <string name="audio_dismiss">Dismiss</string>
 

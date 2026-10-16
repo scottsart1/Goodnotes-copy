@@ -63,17 +63,24 @@ internal fun RecordingDockImpl(docId: String, modifier: Modifier = Modifier) {
     val active by remember { derivedStateOf { (recording.value as? RecordingState.Active)?.let { ActiveKey(it.recordingId, it.docId, it.paused) } } }
     val error by remember { derivedStateOf { recording.value as? RecordingState.Error } }
 
+    RequestRecordingNotificationPermission(recordingActive = active != null)
+
     BoxWithConstraints(modifier.fillMaxSize()) {
         val a = active
         if (a != null) {
-            key(a.recordingId) { DockedControl(graph, a, recording) }
+            key(a.recordingId) { DockedControl(graph, a, recording, otherDocument = a.docId != docId) }
         }
         error?.let { e -> DockErrorToast(e) }
     }
 }
 
 @Composable
-private fun BoxWithConstraintsScope.DockedControl(graph: AppGraph, active: ActiveKey, recording: State<RecordingState>) {
+private fun BoxWithConstraintsScope.DockedControl(
+    graph: AppGraph,
+    active: ActiveKey,
+    recording: State<RecordingState>,
+    otherDocument: Boolean,
+) {
     val density = LocalDensity.current
     val haptics = LocalHapticFeedback.current
     val scope = rememberCoroutineScope()
@@ -182,6 +189,12 @@ private fun BoxWithConstraintsScope.DockedControl(graph: AppGraph, active: Activ
         }
     }
 
+    // Dock side changed in Settings while recording: move over.
+    val preferredSide = settings.recording.dockSide
+    LaunchedEffect(preferredSide) {
+        if (preferredSide != placement.side && !dragging) settle(placement.copy(side = preferredSide))
+    }
+
     val state = remember { derivedStateOf { recording.value as? RecordingState.Active } }
     val timeText by remember { derivedStateOf { AudioText.clock(state.value?.elapsedMs ?: 0L) } }
 
@@ -190,6 +203,7 @@ private fun BoxWithConstraintsScope.DockedControl(graph: AppGraph, active: Activ
         DockCapsule(
             side = placement.side,
             paused = active.paused,
+            otherDocument = otherDocument,
             time = { timeText },
             level = { state.value?.level ?: 0f },
             onPauseResume = { if (active.paused) graph.recording.resume() else graph.recording.pause() },
