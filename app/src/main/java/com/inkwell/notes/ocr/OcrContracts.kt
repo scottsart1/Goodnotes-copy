@@ -1,7 +1,6 @@
 package com.inkwell.notes.ocr
 
 import android.graphics.Bitmap
-import com.inkwell.notes.app.AppGraph
 import com.inkwell.notes.core.model.DocumentMeta
 import com.inkwell.notes.core.model.RecognitionResult
 import com.inkwell.notes.core.model.RecognizedBlock
@@ -9,7 +8,6 @@ import com.inkwell.notes.core.model.SearchHit
 import com.inkwell.notes.core.model.Stroke
 import com.inkwell.notes.core.model.TextSource
 import com.inkwell.notes.core.model.TranscriptSegment
-import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 
 enum class ModelStatus { NOT_DOWNLOADED, DOWNLOADING, READY, UNAVAILABLE }
@@ -69,33 +67,4 @@ interface IndexingScheduler {
     fun documentMetaChanged(docId: String)
     /** Re-index everything (settings action). */
     fun reindexAll()
-}
-
-/** SCAFFOLD STUB — replaced by the OCR implementation. */
-class RecognitionServiceImpl(private val graph: AppGraph) : RecognitionService {
-    override suspend fun recognizeStrokes(strokes: List<Stroke>, languageTag: String?): RecognitionResult? = null
-    override suspend fun recognizeBitmap(bitmap: Bitmap, pageWidthPt: Float?, pageHeightPt: Float?): RecognitionResult =
-        RecognitionResult("", emptyList(), null, "none")
-    override suspend fun recognizeWithAi(bitmap: Bitmap, hint: String?): RecognitionResult? = null
-    override fun handwritingModelStatus(languageTag: String): StateFlow<ModelStatus> = MutableStateFlow(ModelStatus.UNAVAILABLE)
-    override suspend fun downloadHandwritingModel(languageTag: String): Boolean = false
-}
-
-/** SCAFFOLD STUB — replaced by the search implementation. */
-class SearchIndexImpl(private val graph: AppGraph) : SearchIndex {
-    override suspend fun search(query: String, limit: Int, semantic: Boolean): List<SearchHit> = emptyList()
-    override suspend fun indexDocumentMeta(doc: DocumentMeta) {}
-    override suspend fun replacePageText(docId: String, pageId: String, source: TextSource, blocks: List<RecognizedBlock>, engine: String) {}
-    override suspend fun replaceTranscript(docId: String, recordingId: String, segments: List<TranscriptSegment>, engine: String) {}
-    override suspend fun removeDocument(docId: String) {}
-    override suspend fun documentText(docId: String): List<IndexedPassage> = emptyList()
-    override suspend fun retrieve(docId: String?, query: String, maxChars: Int): List<IndexedPassage> = emptyList()
-}
-
-/** SCAFFOLD STUB — replaced by the OCR implementation. */
-class IndexingSchedulerImpl(private val graph: AppGraph) : IndexingScheduler {
-    override fun pageChanged(docId: String, pageId: String) {}
-    override fun documentImported(docId: String) {}
-    override fun documentMetaChanged(docId: String) {}
-    override fun reindexAll() {}
 }
