@@ -696,7 +696,7 @@ class AiEngine(
      * Transcribes one file with speaker labels (gpt-4o-transcribe-diarize, diarized_json).
      * Segments carry the provider's speaker label, are shifted by [offsetMs] and clamped to
      * [durationMs]. [references] are filtered to what the API accepts; when the API still
-     * refuses them (400) the file is transcribed once more without them, so voices are labelled
+     * refuses the request (400, 413, 422) it is sent once more without them, so voices are labelled
      * as new rather than the transcript failing. Null when unavailable; throws [AiException].
      */
     suspend fun transcribeDiarized(
@@ -731,7 +731,7 @@ class AiEngine(
         val body = try {
             executeForBodyOrFail(p, adapter.diarizedTranscriptionRequest(base, key, file, model, language, refs), key, model)
         } catch (e: FailureException) {
-            if (refs.isEmpty() || e.failure.kind != AiFailure.Kind.BAD_REQUEST) throw e.failure.toException()
+            if (refs.isEmpty() || e.failure.httpStatus !in REFERENCE_REFUSED_STATUSES) throw e.failure.toException()
             try {
                 executeForBodyOrFail(p, adapter.diarizedTranscriptionRequest(base, key, file, model, language, emptyList()), key, model)
             } catch (e2: FailureException) {
@@ -802,6 +802,8 @@ class AiEngine(
         const val MAX_RETRY_AFTER_MS = 30_000L
         const val MAX_ERROR_BODY = 64L * 1024
         const val MAX_AUDIO_UPLOAD_BYTES = 25L * 1024 * 1024
+        /** Responses after which a speaker-labelled request is sent again without its reference clips. */
+        private val REFERENCE_REFUSED_STATUSES = setOf(400, 413, 422)
         const val EMBED_BATCH = 64
         const val MAX_EMBED_CHARS = 24_000
         const val REFUSAL_MESSAGE = "The model declined this request."
