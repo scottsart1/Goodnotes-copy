@@ -255,6 +255,7 @@ private fun DetailContent(
     }
     val lanesDescription = lanesDescription(speakers, shares)
     val unnamed = SpeakerTranscript.unnamedCount(speakers)
+    val hasSpeakerNames = remember(transcript) { transcript.any { !it.speaker.isNullOrBlank() } }
     val showBanner = active == null && needsNaming && unnamed > 0 && speakerState.enabled && speakerPrefs.askToName
 
     Column(Modifier.fillMaxSize()) {
@@ -336,6 +337,7 @@ private fun DetailContent(
                             },
                             speakersEnabled = speakerState.enabled,
                             filtered = speakerFilter != null,
+                            hasSpeakerNames = hasSpeakerNames,
                             onChangeSpeaker = { vm.changeSpeaker(rec, it) },
                         )
                     }

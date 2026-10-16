@@ -7,7 +7,11 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.res.stringResource
+import com.inkwell.notes.R
 import com.inkwell.notes.app.SettingsSection
+import com.inkwell.notes.settings.SettingsCatalog
+import com.inkwell.notes.settings.ui.ActionRow
 import com.inkwell.notes.core.model.AiTask
 import com.inkwell.notes.core.model.AppSettings
 import com.inkwell.notes.core.model.DockSide
@@ -102,6 +106,21 @@ internal fun RecordingSection(s: AppSettings, actions: SettingsActions, openSect
             )
         }
 
+        val speakers = SettingsCatalog.speakers
+        if (speakers != null) {
+            SettingsGroup("Speakers") {
+                ActionRow(
+                    title = speakers.title,
+                    subtitle = SettingsCatalog.SPEAKERS_SUMMARY,
+                    actionLabel = "Open",
+                    onAction = { openSection(speakers) },
+                )
+            }
+        }
+
         Note("Changes apply to the next recording. A recording in progress keeps its settings.")
+
+        // Until "Voices & speakers" has its own entry in the section list, it lives here.
+        if (speakers == null) SpeakersContent(s, actions, openSection, title = stringResource(R.string.spk_settings_title))
     }
 }

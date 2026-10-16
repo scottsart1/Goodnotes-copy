@@ -88,6 +88,7 @@ internal fun LazyListScope.transcriptItems(
     onSegment: (index: Int) -> Unit,
     speakersEnabled: Boolean = false,
     filtered: Boolean = false,
+    hasSpeakerNames: Boolean = false,
     onChangeSpeaker: (TranscriptSegment) -> Unit = {},
 ) {
     item(key = "transcript-title") {
@@ -115,7 +116,8 @@ internal fun LazyListScope.transcriptItems(
     if (!hasTranscript) return
 
     if (availability.summarize) {
-        item(key = "ai-actions") { AiActions(vm) }
+        // "By person" needs speaker names in the transcript.
+        item(key = "ai-actions") { AiActions(vm, byPerson = hasSpeakerNames) }
     }
     item(key = "search") { TranscriptSearch(query, rows.size, onQuery = { vm.query.value = it }) }
     if (rows.isEmpty() && (query.isNotBlank() || filtered)) {
@@ -220,7 +222,7 @@ private fun ProgressCard(phase: TranscriptPhase, onCancel: () -> Unit) {
 }
 
 @Composable
-private fun AiActions(vm: RecordingsViewModel) {
+private fun AiActions(vm: RecordingsViewModel, byPerson: Boolean) {
     val c = Inkwell.colors
     Column(Modifier.fillMaxWidth().padding(bottom = 8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -230,6 +232,7 @@ private fun AiActions(vm: RecordingsViewModel) {
         }
         FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             for (a in TranscriptAction.entries) {
+                if (a == TranscriptAction.BY_SPEAKER && !byPerson) continue
                 AudioChip(
                     label = stringResource(actionLabelRes(a)),
                     selected = a == TranscriptAction.EXPLAIN && vm.pickingPassage,
