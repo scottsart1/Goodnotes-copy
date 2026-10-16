@@ -73,7 +73,7 @@ object MarkdownWriter {
             out.append('|')
             for (i in 0 until cols) {
                 val cell = cells.getOrNull(i).orEmpty().replace("\r", "").replace('\n', ' ').trim()
-                out.append(' ').append(escapeInline(cell).replace("|", "\\|")).append(" |")
+                out.append(' ').append(escapeInline(cell)).append(" |")
             }
             out.append('\n')
         }
