@@ -25,6 +25,8 @@ object FtsQuery {
             }
         }
         for (ch in query) {
+            // Soft hyphens are invisible and never stored (see IndexText): neither term nor separator.
+            if (ch == '­') continue
             if (isTermChar(ch)) sb.append(asciiLower(ch)) else flush()
             if (out.size >= MAX_TOKENS) break
         }
@@ -51,6 +53,31 @@ object FtsQuery {
     /** Convenience: [build] of [tokens] of [query]. */
     fun forQuery(query: String): String? = build(tokens(query))
 
+    /**
+     * Every MATCH expression to run for [tokens], results to be united. The simple tokenizer
+     * folds case for ASCII only, so "école" never matches an indexed "École": when a term holds
+     * a cased non-ASCII letter, the expression is repeated with those letters lower-cased, with
+     * the leading one capitalised and with all of them upper-cased (the spellings that occur in
+     * practice). ASCII-only queries produce the single expression of [build].
+     */
+    fun variants(tokens: List<String>): List<String> {
+        val base = build(tokens) ?: return emptyList()
+        if (tokens.none { t -> t.any { it.code >= 128 && it.lowercaseChar() != it.uppercaseChar() } }) return listOf(base)
+        val out = LinkedHashSet<String>()
+        out += base
+        val lower = tokens.map { t -> mapNonAscii(t) { it.lowercaseChar() } }
+        build(lower)?.let { out += it }
+        build(lower.map { t -> if (t.isNotEmpty() && t[0].code >= 128) t[0].titlecaseChar() + t.substring(1) else t })?.let { out += it }
+        build(tokens.map { t -> mapNonAscii(t) { it.uppercaseChar() } })?.let { out += it }
+        return out.toList()
+    }
+
+    /** [variants] of the [tokens] of [query]. */
+    fun expressions(query: String): List<String> = variants(tokens(query))
+
+    private inline fun mapNonAscii(t: String, f: (Char) -> Char): String =
+        if (t.none { it.code >= 128 }) t else buildString(t.length) { for (c in t) append(if (c.code >= 128) f(c) else c) }
+
     /** Doubles embedded quotes, the only character that is special inside an FTS phrase. */
     fun escape(term: String): String = term.replace("\"", "\"\"")
 
@@ -64,14 +91,19 @@ object FtsQuery {
 
     /**
      * A character that belongs to a search term. Mirrors the simple tokenizer for ASCII; for
-     * other characters only letters, digits and combining marks count, so typographic quotes,
-     * dashes or ellipses typed in a query never become part of a term.
+     * other characters only letters, digits, combining marks and in-word format characters
+     * (zero-width joiners of Persian and Indic scripts) count, so typographic quotes, dashes or
+     * ellipses typed in a query never become part of a term. Indexed text is normalised the
+     * same way by [IndexText], so index and query split words at the same places.
      */
     fun isTermChar(c: Char): Boolean = when {
         c in 'a'..'z' || c in 'A'..'Z' || c in '0'..'9' -> true
         c.code < 128 -> false
-        else -> Character.isLetterOrDigit(c) || Character.getType(c) == Character.NON_SPACING_MARK.toInt() ||
-            Character.getType(c) == Character.COMBINING_SPACING_MARK.toInt()
+        c == '­' -> false
+        else -> Character.isLetterOrDigit(c) || when (Character.getType(c)) {
+            Character.NON_SPACING_MARK.toInt(), Character.COMBINING_SPACING_MARK.toInt(), Character.FORMAT.toInt() -> true
+            else -> false
+        }
     }
 
     private fun asciiLower(c: Char): Char = if (c in 'A'..'Z') (c + 32) else c

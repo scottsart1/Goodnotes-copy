@@ -4,6 +4,7 @@ import android.util.Log
 import com.inkwell.notes.app.AppGraph
 import com.inkwell.notes.core.model.AiTask
 import com.inkwell.notes.core.storage.db.EmbeddingEntity
+import com.inkwell.notes.ocr.text.IndexText
 import com.inkwell.notes.ocr.text.Vectors
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -35,7 +36,7 @@ internal class SemanticIndex(private val graph: AppGraph) {
     }
 
     /** Embeds [text]; throws when the provider fails. Null when no model is configured. */
-    suspend fun embed(text: String): FloatArray? = graph.ai.embed(listOf(text.take(MAX_EMBED_CHARS)))?.firstOrNull()
+    suspend fun embed(text: String): FloatArray? = graph.ai.embed(listOf(IndexText.truncate(text, MAX_EMBED_CHARS)))?.firstOrNull()
 
     /**
      * The [k] stored passages most similar to [query] (row id to cosine), at least [minSimilarity],
@@ -91,7 +92,7 @@ internal class SemanticIndex(private val graph: AppGraph) {
                 coroutineContext.ensureActive()
                 val rows = withContext(Dispatchers.IO) { graph.db.textIndex().withoutEmbedding(model, BATCH) }
                 if (rows.isEmpty()) break
-                val vectors = graph.ai.embed(rows.map { it.text.take(MAX_EMBED_CHARS) }) ?: break
+                val vectors = graph.ai.embed(rows.map { IndexText.truncate(it.text, MAX_EMBED_CHARS) }) ?: break
                 if (vectors.size != rows.size) break
                 withContext(Dispatchers.IO) {
                     graph.db.embeddings().insertAll(

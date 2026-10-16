@@ -7,6 +7,7 @@ import com.inkwell.notes.core.model.TranscriptSegment
 import com.inkwell.notes.core.storage.db.AppDatabase
 import com.inkwell.notes.core.storage.db.TextIndexEntity
 import com.inkwell.notes.ocr.text.Bounds
+import com.inkwell.notes.ocr.text.IndexText
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -122,10 +123,15 @@ internal class IndexWriter(private val db: AppDatabase, private val clock: () ->
         /** Longest text stored in one row; longer passages are split by the producers. */
         const val MAX_ROW_CHARS = 20_000
 
+        /**
+         * Text as stored: NULs removed, typographic punctuation and no-break spaces normalised
+         * so the FTS tokenizer splits words where the query does (see [IndexText]), trimmed
+         * and capped. Null when nothing is left.
+         */
         fun clean(text: String): String? {
-            val t = text.replace('\u0000', ' ').trim()
+            val t = IndexText.normalize(text).trim()
             if (t.isEmpty()) return null
-            return if (t.length > MAX_ROW_CHARS) t.substring(0, MAX_ROW_CHARS) else t
+            return IndexText.truncate(t, MAX_ROW_CHARS)
         }
     }
 }
