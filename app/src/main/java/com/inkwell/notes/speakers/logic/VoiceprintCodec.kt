@@ -101,20 +101,31 @@ object VoiceprintCodec {
     }
 }
 
-/** A person's reference clip: 16 kHz mono WAV and how much speech it holds. */
-class ReferenceClip(val speechMs: Long, val wav: ByteArray) {
-    override fun equals(other: Any?): Boolean = other is ReferenceClip && other.speechMs == speechMs && other.wav.contentEquals(wav)
-    override fun hashCode(): Int = speechMs.hashCode() * 31 + wav.contentHashCode()
+/** A person's reference clip: 16 kHz mono WAV, how much speech it holds and where it came from. */
+class ReferenceClip(
+    val speechMs: Long,
+    val wav: ByteArray,
+    /** e.g. "rec:<recordingId>:S2" or "enroll:<time>", so a wrongly named voice's clip can be removed. */
+    val tag: String = "",
+) {
+    override fun equals(other: Any?): Boolean =
+        other is ReferenceClip && other.speechMs == speechMs && other.tag == tag && other.wav.contentEquals(wav)
+
+    override fun hashCode(): Int = (speechMs.hashCode() * 31 + tag.hashCode()) * 31 + wav.contentHashCode()
 }
 
-/** "IKRF" magic, u8 version (1), i64 speech ms, i32 length, WAV bytes; little-endian. Pure. */
+/** "IKRF" magic, u8 version (1), i64 speech ms, u16 length + UTF-8 tag, i32 length, WAV bytes; little-endian. Pure. */
 object ReferenceClipCodec {
     const val VERSION = 1
     private val MAGIC = byteArrayOf('I'.code.toByte(), 'K'.code.toByte(), 'R'.code.toByte(), 'F'.code.toByte())
 
     fun encode(clip: ReferenceClip): ByteArray {
-        val bb = ByteBuffer.allocate(4 + 1 + 8 + 4 + clip.wav.size).order(ByteOrder.LITTLE_ENDIAN)
-        bb.put(MAGIC).put(VERSION.toByte()).putLong(clip.speechMs).putInt(clip.wav.size).put(clip.wav)
+        val tag = clip.tag.toByteArray(Charsets.UTF_8)
+        require(tag.size <= 0xFFFF)
+        val bb = ByteBuffer.allocate(4 + 1 + 8 + 2 + tag.size + 4 + clip.wav.size).order(ByteOrder.LITTLE_ENDIAN)
+        bb.put(MAGIC).put(VERSION.toByte()).putLong(clip.speechMs)
+        bb.putShort(tag.size.toShort()).put(tag)
+        bb.putInt(clip.wav.size).put(clip.wav)
         return bb.array()
     }
 
@@ -125,8 +136,10 @@ object ReferenceClipCodec {
             null
         } else {
             val speech = bb.getLong()
+            val tagLen = bb.getShort().toInt() and 0xFFFF
+            val tag = String(ByteArray(tagLen).also { bb.get(it) }, Charsets.UTF_8)
             val n = bb.getInt()
-            if (n < 0 || n != bb.remaining()) null else ReferenceClip(speech, ByteArray(n).also { bb.get(it) })
+            if (n < 0 || n != bb.remaining()) null else ReferenceClip(speech, ByteArray(n).also { bb.get(it) }, tag)
         }
     } catch (_: BufferUnderflowException) {
         null

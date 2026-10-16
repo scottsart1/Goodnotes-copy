@@ -76,6 +76,29 @@ class SpeakerRulesTest {
     }
 
     @Test
+    fun streamedHashIsCheckedBeforePromotion() {
+        val bytes = ByteArray(8_000) { (it * 7).toByte() }
+        val spec = specFor(bytes)
+        val dir = tmp.newFolder()
+        val target = ModelFiles.target(dir, spec)
+        // Resumed download: hash the first half from disk, then the streamed rest.
+        val part = ModelFiles.part(dir, spec).apply { writeBytes(bytes.copyOf(3_000)) }
+        val md = MessageDigest.getInstance("SHA-256")
+        ModelFiles.digestPrefix(part, 3_000, md)
+        part.appendBytes(bytes.copyOfRange(3_000, 8_000))
+        md.update(bytes, 3_000, 5_000)
+        assertEquals(ModelFiles.Outcome.Ok, ModelFiles.finish(part, target, spec, 8_000, ModelFiles.hex(md.digest())))
+        assertTrue(target.isFile && !part.exists())
+
+        val bad = ModelFiles.part(dir, spec).apply { writeBytes(bytes) }
+        assertEquals(ModelFiles.Outcome.HashMismatch, ModelFiles.finish(bad, target, spec, 8_000, "0".repeat(64)))
+        assertFalse(bad.exists())
+        val short = ModelFiles.part(dir, spec).apply { writeBytes(bytes.copyOf(10)) }
+        assertTrue(ModelFiles.finish(short, target, spec, 10, spec.sha256) is ModelFiles.Outcome.SizeMismatch)
+        assertFalse(short.exists())
+    }
+
+    @Test
     fun resumeOffsets() {
         val spec = specFor(ByteArray(1_000))
         assertEquals(0L, ModelFiles.resumeFrom(0, spec))

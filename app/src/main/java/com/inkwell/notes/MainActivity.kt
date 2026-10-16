@@ -62,6 +62,13 @@ class MainActivity : AppCompatActivity() {
 
     private fun handleIntent(intent: Intent?) {
         intent ?: return
+        if (intent.action == ACTION_OPEN_DOCUMENT) {
+            // From our own notifications ("voices to name"). The activity is exported, so the id
+            // is validated; opening still waits behind the app lock like any navigation.
+            val docId = intent.getStringExtra(EXTRA_DOC_ID)?.takeIf { isValidDocId(it) } ?: return
+            pendingNavigation.post { it.openDocumentById(docId) }
+            return
+        }
         val graph = AppGraph.get(this)
         val uris: List<Uri> = when (intent.action) {
             Intent.ACTION_VIEW -> listOfNotNull(intent.data)
@@ -90,4 +97,13 @@ class MainActivity : AppCompatActivity() {
     @Suppress("DEPRECATION")
     private fun Intent.parcelableArrayListExtra(name: String): List<Uri> =
         (if (Build.VERSION.SDK_INT >= 33) getParcelableArrayListExtra(name, Uri::class.java) else getParcelableArrayListExtra(name)) ?: emptyList()
+
+    companion object {
+        /** Opens the document whose id is in [EXTRA_DOC_ID]. */
+        const val ACTION_OPEN_DOCUMENT = "com.inkwell.notes.OPEN_DOCUMENT"
+        const val EXTRA_DOC_ID = "docId"
+
+        private fun isValidDocId(id: String): Boolean =
+            id.length in 1..128 && id.all { it in 'a'..'z' || it in 'A'..'Z' || it in '0'..'9' || it == '-' || it == '_' }
+    }
 }

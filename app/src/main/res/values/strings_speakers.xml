@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- "Name these voices" notification -->
+    <string name="speaker_engine_channel_name">Voices to name</string>
+    <string name="speaker_engine_channel_description">After a recording, asks for the names of voices Inkwell has not met yet</string>
+    <plurals name="speaker_engine_notif_counted">
+        <item quantity="one">%1$d voice in %2$s – tap to name it</item>
+        <item quantity="other">%1$d voices in %2$s – tap to name them</item>
+    </plurals>
+    <string name="speaker_engine_notif_generic">New voices to name</string>
+
+    <!-- Identification errors (shown with the recording) -->
+    <string name="speaker_engine_error_off">Telling voices apart on this tablet is turned off.</string>
+    <string name="speaker_engine_error_no_audio">This recording has no audio to analyse.</string>
+    <string name="speaker_engine_error_unsupported">Telling voices apart isn\'t available on this device.</string>
+    <string name="speaker_engine_error_failed">Couldn\'t tell the voices apart. Try again.</string>
+
+    <!-- Model download errors -->
+    <string name="speaker_engine_model_error_network">Couldn\'t download the voice models. Check the connection and try again.</string>
+    <string name="speaker_engine_model_error_verify">The downloaded voice models were damaged. Try again.</string>
+    <string name="speaker_engine_model_error_storage">Not enough free space for the voice models (33 MB).</string>
+    <string name="speaker_engine_model_error_server">The model server refused the download (HTTP %1$d).</string>
+</resources>

@@ -100,6 +100,42 @@ object ModelFiles {
         return Outcome.Ok
     }
 
+    /**
+     * Finishes a download whose size and SHA-256 were measured while streaming: moves it into
+     * place when both match [spec], else deletes the partial file.
+     */
+    fun finish(part: File, target: File, spec: ModelSpec, streamedBytes: Long, streamedSha256: String): Outcome {
+        val outcome = when {
+            streamedBytes != spec.sizeBytes || part.length() != spec.sizeBytes -> Outcome.SizeMismatch(part.length())
+            !streamedSha256.equals(spec.sha256, ignoreCase = true) -> Outcome.HashMismatch
+            else -> Outcome.Ok
+        }
+        if (outcome != Outcome.Ok) {
+            part.delete()
+            return outcome
+        }
+        if (target.exists() && !target.delete()) return Outcome.Unreadable("cannot replace ${target.name}")
+        if (!part.renameTo(target)) {
+            part.delete()
+            return Outcome.Unreadable("rename failed")
+        }
+        return Outcome.Ok
+    }
+
+    /** SHA-256 of the first [length] bytes of [file] fed into [md] (to resume a streamed hash). */
+    fun digestPrefix(file: File, length: Long, md: MessageDigest) {
+        FileInputStream(file).use { input ->
+            val buf = ByteArray(64 * 1024)
+            var left = length
+            while (left > 0) {
+                val n = input.read(buf, 0, minOf(buf.size.toLong(), left).toInt())
+                if (n < 0) throw IOException("File shorter than expected")
+                md.update(buf, 0, n)
+                left -= n
+            }
+        }
+    }
+
     fun sha256(file: File): String {
         val md = MessageDigest.getInstance("SHA-256")
         FileInputStream(file).use { input ->

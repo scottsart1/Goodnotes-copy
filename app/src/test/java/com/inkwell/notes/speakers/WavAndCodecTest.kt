@@ -144,7 +144,7 @@ class WavAndCodecTest {
 
     @Test
     fun referenceClipCodecRoundTrips() {
-        val clip = ReferenceClip(7_500, WavWriter.encode(FloatArray(100) { it / 100f }))
+        val clip = ReferenceClip(7_500, WavWriter.encode(FloatArray(100) { it / 100f }), "rec:r1:S2")
         assertEquals(clip, ReferenceClipCodec.decode(ReferenceClipCodec.encode(clip)))
         val bytes = ReferenceClipCodec.encode(clip)
         assertNull(ReferenceClipCodec.decode(bytes.copyOf(bytes.size - 3)))
