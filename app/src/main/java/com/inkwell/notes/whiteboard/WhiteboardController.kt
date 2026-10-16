@@ -81,6 +81,7 @@ class WhiteboardController(val graph: AppGraph, val docId: String) : InkCanvasLi
         onChanged = { _, content -> onContent(content, delayMs = MINIMAP_DELAY_MS) },
     )
     val ops = BoardOperations(this)
+    val audio = BoardAudio(this)
 
     var loadState by mutableStateOf<LoadState>(LoadState.Loading); private set
     var doc by mutableStateOf<DocumentMeta?>(null); private set
@@ -141,6 +142,7 @@ class WhiteboardController(val graph: AppGraph, val docId: String) : InkCanvasLi
             lastSavedView = CanvasViewState(0, d.lastZoom, d.lastScrollX, d.lastScrollY)
             loadState = LoadState.Ready
             maybeBind()
+            audio.observe()
             // Stamps "opened" (for Recent) without marking the board modified.
             graph.appScope.launch { runCatching { graph.library.updateViewState(docId, 0, d.lastZoom, d.lastScrollX, d.lastScrollY) } }
             scope.launch {
@@ -179,8 +181,10 @@ class WhiteboardController(val graph: AppGraph, val docId: String) : InkCanvasLi
         view.listener = this
         view.setToolState(tools)
         view.setInputPrefs(graph.settings.current.input)
-        view.setAudioClock(null)
+        // Items written while this board records get an anchor on the recording's timeline.
+        view.setAudioClock(graph.recording.clock)
         maybeBind()
+        audio.applyHighlight()
     }
 
     private fun maybeBind() {
@@ -207,6 +211,7 @@ class WhiteboardController(val graph: AppGraph, val docId: String) : InkCanvasLi
         flush()
         persistToolsNow()
         boardSaver.removeErrorListener(saveErrorListener)
+        audio.dispose()
         releaseCanvas()
         graph.appScope.launch {
             boardSaver.saver.flush()
@@ -411,6 +416,8 @@ class WhiteboardController(val graph: AppGraph, val docId: String) : InkCanvasLi
     override fun onImagePlacementRequested(pageIndex: Int, pageX: Float, pageY: Float) {
         requestImage(PointF(pageX, pageY))
     }
+
+    override fun onItemTapped(ref: ItemRef) = audio.onItemTapped(ref)
 
     companion object {
         private const val TAG = "Whiteboard"

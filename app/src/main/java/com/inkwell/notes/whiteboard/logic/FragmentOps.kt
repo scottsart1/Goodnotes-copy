@@ -63,6 +63,27 @@ object FragmentOps {
 
     fun assetIds(f: PageContent): Set<String> = f.images.mapTo(LinkedHashSet()) { it.assetId }
 
+    /**
+     * Drops every audio anchor. Anchors point at a recording of the document they were written
+     * in, so content moving to another document must not keep them ("play from here" and
+     * "show notes written here" would follow a recording that is not there).
+     */
+    fun withoutAudio(f: PageContent): PageContent {
+        if (f.strokes.none { it.audio != null } && f.shapes.none { it.audio != null } &&
+            f.texts.none { it.audio != null } && f.images.none { it.audio != null }
+        ) return f
+        return f.copy(
+            strokes = f.strokes.map { if (it.audio == null) it else it.copy(audio = null) },
+            shapes = f.shapes.map { if (it.audio == null) it else it.copy(audio = null) },
+            texts = f.texts.map { if (it.audio == null) it else it.copy(audio = null) },
+            images = f.images.map { if (it.audio == null) it else it.copy(audio = null) },
+        )
+    }
+
+    /** [f] ready for [targetDocId] when it came from [sourceDocId]: anchors only survive within one document. */
+    fun forDocument(f: PageContent, sourceDocId: String?, targetDocId: String): PageContent =
+        if (sourceDocId == targetDocId) f else withoutAudio(f)
+
     /** Gives every item (and group) a new id, keeping connector attachments within the fragment. */
     fun withFreshIds(f: PageContent, newId: () -> String = { UUID.randomUUID().toString() }): PageContent {
         val ids = HashMap<String, String>()
