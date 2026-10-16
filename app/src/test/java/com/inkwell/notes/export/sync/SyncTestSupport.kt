@@ -287,8 +287,8 @@ class FakeVault(
                 .setHeader("Set-Cookie", "nv_session=$token; HttpOnly; Secure")
         }
         val auth = r.getHeader("Authorization")
-        val token = auth?.removePrefix("Bearer ")
-        if (auth == null || token !in validTokens) return json(401, """{"error":"unauthorized"}""")
+        val token = auth?.removePrefix("Bearer ").orEmpty()
+        if (auth == null || !validTokens.contains(token)) return json(401, """{"error":"unauthorized"}""")
         return when {
             rest == "/api/ping" && r.method == "GET" -> json(200, """{"ok":true,"name":"Your Pit Box · Notes"}""")
             rest == "/api/docs" && r.method == "GET" -> json(200, """{"docs":[${docIds.joinToString(",") { """{"id":"$it","title":"t","kind":"NOTEBOOK"}""" }}]}""")

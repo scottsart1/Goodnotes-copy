@@ -20,6 +20,7 @@ import com.inkwell.notes.export.sync.SyncEngine
 import com.inkwell.notes.export.sync.SyncKind
 import com.inkwell.notes.export.sync.SyncRunReport
 import com.inkwell.notes.export.sync.SyncScheduler
+import com.inkwell.notes.export.sync.SyncScope
 import com.inkwell.notes.export.sync.VaultClient
 import com.inkwell.notes.export.sync.VaultConnectionTest
 import com.inkwell.notes.export.sync.VaultException
@@ -229,8 +230,8 @@ class SyncManagerImpl(private val graph: AppGraph) : SyncManager {
     }
 
     /** One background pass (called by the worker). */
-    internal suspend fun runQueue(): SyncRunReport {
-        val report = engine.run()
+    internal suspend fun runQueue(scope: SyncScope): SyncRunReport {
+        val report = engine.run(scope)
         afterRun(report)
         return report
     }

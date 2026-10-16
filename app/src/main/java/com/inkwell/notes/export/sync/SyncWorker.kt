@@ -10,20 +10,22 @@ import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
+import androidx.work.workDataOf
 import com.inkwell.notes.app.AppGraph
 import com.inkwell.notes.export.SyncManagerImpl
 import java.util.concurrent.TimeUnit
 
 /**
- * Background pass over the sync queue. The same worker runs under three unique names that only
- * differ in their network constraint, so folder copies never wait for a network, vault uploads
+ * Background pass over the sync queue. The same worker runs under three unique names with their
+ * own network constraint and [SyncScope], so folder copies never wait for a network, vault uploads
  * wait for any connection, and large audio waits for an unmetered one when the user asked for that.
  */
 class SyncWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
     override suspend fun doWork(): Result {
         val manager = AppGraph.get(applicationContext).sync as? SyncManagerImpl ?: return Result.success()
+        val scope = inputData.getString(KEY_SCOPE)?.let { runCatching { SyncScope.valueOf(it) }.getOrNull() } ?: SyncScope.ALL
         return try {
-            val report = manager.runQueue()
+            val report = manager.runQueue(scope)
             if (report.retryLater && runAttemptCount < MAX_RUN_ATTEMPTS) Result.retry() else Result.success()
         } catch (e: kotlinx.coroutines.CancellationException) {
             throw e
@@ -33,8 +35,9 @@ class SyncWorker(context: Context, params: WorkerParameters) : CoroutineWorker(c
         }
     }
 
-    private companion object {
-        const val MAX_RUN_ATTEMPTS = 12
+    companion object {
+        const val KEY_SCOPE = "scope"
+        private const val MAX_RUN_ATTEMPTS = 12
     }
 }
 
@@ -46,21 +49,22 @@ data class SyncNeeds(val local: Boolean = false, val network: Boolean = false, v
 /** Enqueues [SyncWorker] runs with WorkManager. Never throws. */
 internal class SyncScheduler(private val context: Context) {
     fun schedule(needs: SyncNeeds) {
-        if (needs.local) enqueue(WORK_LOCAL, null, 0)
-        if (needs.network) enqueue(WORK_MAIN, NetworkType.CONNECTED, 0)
-        if (needs.unmetered) enqueue(WORK_AUDIO, NetworkType.UNMETERED, 0)
+        if (needs.local) enqueue(WORK_LOCAL, SyncScope.FOLDER, null, 0)
+        if (needs.network) enqueue(WORK_MAIN, SyncScope.ALL, NetworkType.CONNECTED, 0)
+        if (needs.unmetered) enqueue(WORK_AUDIO, SyncScope.VAULT_AUDIO, NetworkType.UNMETERED, 0)
     }
 
     /** One run after [delayMs] (e.g. when a vault lockout ends). */
     fun scheduleAfter(delayMs: Long) {
-        enqueue(WORK_LATER, NetworkType.CONNECTED, delayMs.coerceAtLeast(1_000), ExistingWorkPolicy.REPLACE)
+        enqueue(WORK_LATER, SyncScope.ALL, NetworkType.CONNECTED, delayMs.coerceAtLeast(1_000), ExistingWorkPolicy.REPLACE)
     }
 
-    private fun enqueue(name: String, network: NetworkType?, delayMs: Long, policy: ExistingWorkPolicy = ExistingWorkPolicy.KEEP) {
+    private fun enqueue(name: String, scope: SyncScope, network: NetworkType?, delayMs: Long, policy: ExistingWorkPolicy = ExistingWorkPolicy.KEEP) {
         try {
             val constraints = Constraints.Builder().apply { if (network != null) setRequiredNetworkType(network) }.build()
             val request = OneTimeWorkRequestBuilder<SyncWorker>()
                 .setConstraints(constraints)
+                .setInputData(workDataOf(SyncWorker.KEY_SCOPE to scope.name))
                 .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, BACKOFF_SECONDS, TimeUnit.SECONDS)
                 .apply { if (delayMs > 0) setInitialDelay(delayMs, TimeUnit.MILLISECONDS) }
                 .addTag(TAG)

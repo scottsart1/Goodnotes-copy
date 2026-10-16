@@ -126,24 +126,24 @@ class SyncEngine(
 
     // ------------------------------------------------------------------ running
 
-    /** Processes every item that can go now. Waits if another run is in progress. */
-    suspend fun run(): SyncRunReport = runLock.withLock {
+    /** Processes every item in [scope] that can go now. Waits if another run is in progress. */
+    suspend fun run(scope: SyncScope = SyncScope.ALL): SyncRunReport = runLock.withLock {
         _running.value = true
         try {
-            withContext(io) { runLocked() }
+            withContext(io) { runLocked(scope) }
         } finally {
             _running.value = false
         }
     }
 
-    private suspend fun runLocked(): SyncRunReport {
+    private suspend fun runLocked(scope: SyncScope): SyncRunReport {
         val ctx = RunContext(prefs())
         val attempted = HashSet<Long>()
         try {
             while (true) {
                 dirty = false
                 val items = queue().pending(QUERY_LIMIT)
-                    .filter { it.rowId !in attempted }
+                    .filter { it.rowId !in attempted && scope.accepts(it) }
                     .sortedWith(compareBy<SyncQueueEntity>({ kindOrder(it.kind) }, { it.documentId }, { it.enqueuedAt }, { it.rowId }))
                 if (items.isEmpty() && !dirty) break
                 for (item in items) {
@@ -163,7 +163,8 @@ class SyncEngine(
         if (ctx.succeeded > 0) state.lastSuccessAt = ctx.lastSuccessAt
         val error = ctx.error
         if (error != null) state.lastError = error
-        else if (ctx.succeeded > 0 || ctx.failed == 0) state.lastError = null
+        // A partial run (folder only, audio only) can't vouch for the other destination.
+        else if (scope == SyncScope.ALL && (ctx.succeeded > 0 || ctx.failed == 0)) state.lastError = null
         return SyncRunReport(
             succeeded = ctx.succeeded,
             failed = ctx.failed,

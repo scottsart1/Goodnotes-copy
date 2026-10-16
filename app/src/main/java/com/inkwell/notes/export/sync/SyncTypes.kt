@@ -11,6 +11,22 @@ import java.io.File
 /** What a queue item copies. Stored by name in `sync_queue.kind`. */
 enum class SyncKind { NOTES, TRANSCRIPT, AUDIO }
 
+/** Which queue items one run handles (each background run has its own network constraint). */
+enum class SyncScope {
+    /** Everything that can go now ("Sync now" and the connected background run). */
+    ALL,
+    /** Folder copies only: needs no network. */
+    FOLDER,
+    /** Audio for the vault only: waits for an unmetered network. */
+    VAULT_AUDIO;
+
+    fun accepts(item: com.inkwell.notes.core.storage.db.SyncQueueEntity): Boolean = when (this) {
+        ALL -> true
+        FOLDER -> item.target == OutputTarget.FOLDER.name
+        VAULT_AUDIO -> item.target == OutputTarget.VAULT.name && item.kind == SyncKind.AUDIO.name
+    }
+}
+
 /** Row status values of `sync_queue.status`. */
 object SyncItemStatus {
     const val PENDING = "PENDING"

@@ -461,6 +461,34 @@ class SyncEngineTest {
     }
 
     @Test
+    fun `scoped runs only take their own items and keep other errors`() = runBlocking {
+        vault.docIds += d.id
+        val prefs = vaultPrefs.copy(
+            notes = setOf(OutputTarget.FOLDER, OutputTarget.VAULT), audio = setOf(OutputTarget.VAULT),
+            folderUri = folderPrefs.folderUri, audioOnUnmeteredOnly = true,
+        )
+        val h = harness(prefs)
+        h.source.recordings["rec-1"] = recording()
+        h.engine.enqueue(d.id, SyncKind.NOTES, prefs.notes)
+        h.engine.enqueue(d.id, SyncKind.AUDIO, prefs.audio, "rec-1")
+        h.state.lastError = "The vault password is wrong."
+
+        h.engine.run(SyncScope.FOLDER)
+        assertTrue(File(docDir(), "notes.pdf").isFile)
+        assertTrue(vault.requests.isEmpty())
+        assertEquals("a folder-only run can't clear a vault problem", "The vault password is wrong.", h.state.lastError)
+
+        h.engine.run(SyncScope.VAULT_AUDIO)
+        assertEquals(listOf("POST /api/session", "GET /api/docs", "PUT /api/docs/${d.id}/files/rec_rec-1.m4a"), vault.calls())
+        assertEquals(1, h.dao.pendingRows().size)
+        assertEquals("VAULT", h.dao.pendingRows().single().target)
+
+        h.engine.run(SyncScope.ALL)
+        assertTrue(h.dao.pendingRows().isEmpty())
+        assertNull(h.state.lastError)
+    }
+
+    @Test
     fun `background needs follow targets and the Wi-Fi rule`() {
         fun row(kind: SyncKind, target: OutputTarget) = com.inkwell.notes.core.storage.db.SyncQueueEntity(
             documentId = "d", kind = kind.name, target = target.name, refId = null, enqueuedAt = 0, attempts = 0, lastError = null, status = "PENDING",
