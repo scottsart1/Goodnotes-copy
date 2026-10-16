@@ -79,10 +79,19 @@ object ExportMath {
      * Output pixels per board point: [factor] times the on-screen density ([pxPerPoint]),
      * at least [minScale], and small enough that neither side exceeds [maxSide] pixels.
      */
-    fun outputScale(region: Box, pxPerPoint: Float, factor: Float = 2f, maxSide: Float = 6000f, minScale: Float = 1f): Float {
+    fun outputScale(
+        region: Box,
+        pxPerPoint: Float,
+        factor: Float = 2f,
+        maxSide: Float = 6000f,
+        minScale: Float = 1f,
+        maxPixels: Float = 12_000_000f,
+    ): Float {
         var s = maxOf(pxPerPoint * factor, minScale)
-        val longest = maxOf(region.width, region.height, 1f)
-        if (longest * s > maxSide) s = maxSide / longest
+        val w = maxOf(region.width, 1f)
+        val h = maxOf(region.height, 1f)
+        if (maxOf(w, h) * s > maxSide) s = maxSide / maxOf(w, h)
+        if (w * h * s * s > maxPixels) s = kotlin.math.sqrt(maxPixels / (w * h))
         return s
     }
 }
