@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Export dialog -->
+    <string name="export_title">Export</string>
+    <string name="export_close">Close</string>
+    <string name="export_format_label">Format</string>
+    <string name="export_format_pdf">PDF</string>
+    <string name="export_format_png">PNG</string>
+    <string name="export_format_jpeg">JPEG</string>
+    <string name="export_format_text">Text</string>
+    <string name="export_format_markdown">Markdown</string>
+    <string name="export_format_docx">Word</string>
+    <string name="export_format_inkwell">Inkwell</string>
+    <string name="export_format_pdf_desc">Pages with handwriting, annotations and the original PDF</string>
+    <string name="export_format_png_desc">One lossless image per page; several pages arrive as a zip</string>
+    <string name="export_format_jpeg_desc">Smaller images for messages and email</string>
+    <string name="export_format_text_desc">Typed text, recognised handwriting, PDF text and transcripts</string>
+    <string name="export_format_markdown_desc">Text with headings, lists, tables and transcripts</string>
+    <string name="export_format_docx_desc">Editable Word document with a picture of each handwritten page</string>
+    <string name="export_format_inkwell_desc">Fully editable package to move this note to another device or keep a copy</string>
+    <string name="export_pages_label">Pages</string>
+    <string name="export_pages_all">All</string>
+    <string name="export_pages_selected">Selected (%1$d)</string>
+    <string name="export_pages_custom">Custom</string>
+    <string name="export_pages_hint">e.g. 1-3, 5</string>
+    <plurals name="export_pages_summary">
+        <item quantity="one">%1$d page of %2$d</item>
+        <item quantity="other">%1$d pages of %2$d</item>
+    </plurals>
+    <string name="export_range_empty">Enter the pages to export</string>
+    <string name="export_range_syntax">“%1$s” isn’t a page number or range</string>
+    <string name="export_range_out">“%1$s” is outside pages 1–%2$d</string>
+    <string name="export_range_reversed">“%1$s” runs backwards</string>
+    <string name="export_section_options">Options</string>
+    <string name="export_pdf_annotations">Annotations</string>
+    <string name="export_pdf_flattened">Flattened</string>
+    <string name="export_pdf_editable">Editable</string>
+    <string name="export_pdf_flattened_hint">Ink and text become part of the pages and look the same everywhere.</string>
+    <string name="export_pdf_editable_hint">Strokes and text boxes stay PDF annotations that other apps can move or delete.</string>
+    <string name="export_include_background">Paper and original PDF pages</string>
+    <string name="export_searchable">Searchable handwriting</string>
+    <string name="export_searchable_hint">Adds recognised handwriting as invisible, selectable text</string>
+    <string name="export_outline">Outline and bookmarks</string>
+    <string name="export_image_quality">Image quality</string>
+    <string name="export_quality_high">High</string>
+    <string name="export_quality_balanced">Balanced</string>
+    <string name="export_quality_small">Small</string>
+    <string name="export_resolution">Resolution</string>
+    <string name="export_dpi">%1$d dpi</string>
+    <string name="export_jpeg_quality">JPEG quality</string>
+    <string name="export_jpeg_quality_value">%1$d%%</string>
+    <string name="export_include_audio">Include audio recordings</string>
+    <string name="export_include_audio_hint">Transcripts are always included</string>
+    <string name="export_include_transcripts">Include transcripts</string>
+    <string name="export_share">Share</string>
+    <string name="export_save">Save to…</string>
+    <string name="export_working">Exporting…</string>
+    <string name="export_working_pages">Exporting page %1$d of %2$d…</string>
+    <string name="export_saved">Saved</string>
+    <string name="export_share_chooser">Share %1$s</string>
+    <string name="export_typed_pages">Typed documents are exported in full.</string>
+    <string name="export_board_pages">The whole board is exported as one page.</string>
+
+    <!-- Errors shown to the user -->
+    <string name="export_err_not_found">This document no longer exists.</string>
+    <string name="export_err_no_pages">There are no pages to export.</string>
+    <string name="export_err_no_space">There isn’t enough free storage to finish. Free up some space and try again.</string>
+    <string name="export_err_write">The file couldn’t be written. Check the destination and try again.</string>
+    <string name="export_err_generic">Export didn’t finish. Please try again.</string>
+    <string name="export_err_memory">This page is too large to export at this resolution. Choose a lower resolution.</string>
+    <string name="export_err_no_share">No app on this device can receive this file.</string>
+    <string name="export_err_no_audio">This recording has no audio left to export.</string>
+    <string name="export_err_pkg_invalid">This file isn’t an Inkwell package.</string>
+    <string name="export_err_pkg_corrupt">The package is damaged and couldn’t be imported.</string>
+    <string name="export_err_pkg_newer">This package was made by a newer version of Inkwell. Update the app to import it.</string>
+    <string name="export_err_pkg_unreadable">The file couldn’t be opened.</string>
+    <string name="export_err_backup_target">A backup file couldn’t be created there. Choose another folder.</string>
+    <string name="export_err_backup_invalid">This file isn’t an Inkwell backup.</string>
+    <string name="export_err_folder">That folder can’t be written to. Choose it again.</string>
+
+    <!-- Labels inside exported files -->
+    <string name="export_label_page">Page %1$d</string>
+    <string name="export_label_transcript">Transcript — %1$s</string>
+    <string name="export_label_recording">Recording</string>
+    <string name="export_label_untitled">Untitled</string>
+</resources>
