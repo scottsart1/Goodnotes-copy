@@ -34,6 +34,8 @@ class LocalTopicExtractor(
             if (picked.size >= limit) break
             // Skip a term already covered by a better phrase ("policy" after "monetary policy").
             if (picked.any { p -> containsWords(p.key, c.key) || containsWords(c.key, p.key) }) continue
+            // Prefer a comparably strong phrase over one of its words ("central bank" over "central").
+            if (c.words == 1 && ranked.any { p -> p.words > 1 && containsWords(p.key, c.key) && p.score >= c.score * 0.6 }) continue
             picked += c
         }
         return picked.map { it.display }
@@ -48,8 +50,8 @@ class LocalTopicExtractor(
         val stats = HashMap<String, Stat>()
         var meaningful = 0
         var order = 0
-        for (segment in content.segments) {
-            for (clause in clauses(segment.text)) {
+        for ((text, kind) in weightedParts(content)) {
+            for (clause in clauses(text)) {
                 val tokens = tokenize(clause)
                 meaningful += tokens.count { it.meaningful }
                 for (i in tokens.indices) {
@@ -58,15 +60,15 @@ class LocalTopicExtractor(
                         val gram = tokens.subList(i, i + n)
                         if (!isCandidate(gram)) continue
                         val key = gram.joinToString(" ") { it.stem }
-                        val stat = stats.getOrPut(key) { Stat(n, order++) }
-                        stat.add(gram, segment.kind, startsClause = i == 0)
+                        val stat = stats.getOrPut(key) { Stat(n, order++, lengthFactor(gram)) }
+                        stat.add(gram, kind, startsClause = i == 0)
                     }
                 }
             }
         }
         val ranked = stats.entries
             .filter { (_, s) -> s.count >= 2 || (s.inHeading && s.outsideHeading) }
-            .map { (key, s) -> Candidate(key, s.display(), s.words, s.count, s.score * LENGTH_FACTOR[s.words]) }
+            .map { (key, s) -> Candidate(key, s.display(), s.words, s.count, s.score * s.factor) }
             .sortedWith(
                 compareByDescending<Candidate> { it.score }
                     .thenByDescending { it.words }
@@ -80,7 +82,7 @@ class LocalTopicExtractor(
         val acronym: Boolean get() = isAcronym(surface)
     }
 
-    private class Stat(val words: Int, val firstSeen: Int) {
+    private class Stat(val words: Int, val firstSeen: Int, val factor: Double) {
         var count = 0
         var score = 0.0
         var inHeading = false
@@ -108,6 +110,25 @@ class LocalTopicExtractor(
         }
     }
 
+    /** A lead counts only for its first sentence; whatever follows in the same segment is body text. */
+    private fun weightedParts(content: NamingContent): List<Pair<String, SegmentKind>> = content.segments.flatMap { seg ->
+        if (seg.kind != SegmentKind.LEAD) return@flatMap listOf(seg.text to seg.kind)
+        val end = SENTENCE_END.find(seg.text)?.range?.first ?: return@flatMap listOf(seg.text to seg.kind)
+        listOf(seg.text.substring(0, end) to SegmentKind.LEAD, seg.text.substring(end) to SegmentKind.BODY)
+    }
+
+    /**
+     * Longer repeated phrases are more specific than their words. A list-like "X and Y" is
+     * rewarded less than a concept such as "Bank of England" or "Bond Market Volatility".
+     */
+    private fun lengthFactor(gram: List<Token>): Double = when {
+        gram.size == 1 -> 1.0
+        gram.size == 2 -> 1.75
+        gram[1].meaningful -> 2.1
+        gram[1].stem == "and" || gram[1].stem == "&" -> 1.4
+        else -> 1.9
+    }
+
     private fun isCandidate(gram: List<Token>): Boolean = when (gram.size) {
         1 -> gram[0].meaningful
         2 -> gram[0].meaningful && gram[1].meaningful
@@ -129,10 +150,10 @@ class LocalTopicExtractor(
 
     companion object {
         private val WORD = Regex("[\\p{L}\\p{N}]+(?:['\\-][\\p{L}\\p{N}]+)*")
+        private val SENTENCE_END = Regex("[.!?\\n]")
         private val CLAUSE_BREAK = Regex("[\\r\\n.!?;:,()\\[\\]{}\"“”•·|/\\\\]+|\\s[-–—]+\\s|\\t")
-        private val LENGTH_FACTOR = doubleArrayOf(0.0, 1.0, 1.75, 2.1)
         private const val CAPITAL_BOOST = 1.3
-        private const val ACRONYM_BOOST = 1.4
+        private const val ACRONYM_BOOST = 1.25
         private val TITLE_MINOR = setOf("of", "and", "for", "in", "on", "the", "to", "a", "an")
 
         /** Groups simple English plurals ("yields" with "yield") without changing what is displayed. */
