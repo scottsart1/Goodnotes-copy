@@ -115,7 +115,9 @@ class AutoNamingServiceImpl(private val graph: AppGraph) : AutoNamingService {
         return library.applyAutoName(docId, topic)
     }
 
-    override suspend fun renameNow(docId: String): String? {
+    override suspend fun renameNow(docId: String): String? = userRequest("rename") { renameNowInternal(docId) }
+
+    private suspend fun renameNowInternal(docId: String): String? {
         val doc = graph.library.getDocument(docId) ?: return null
         val prefs = graph.settings.current.naming
         // Keeps a background run from starting on it meanwhile. If one is already analysing it,
@@ -133,11 +135,21 @@ class AutoNamingServiceImpl(private val graph: AppGraph) : AutoNamingService {
         }
     }
 
-    override suspend fun suggestTopic(docId: String): String? {
-        val doc = graph.library.getDocument(docId) ?: return null
+    override suspend fun suggestTopic(docId: String): String? = userRequest("suggestion") {
+        val doc = graph.library.getDocument(docId) ?: return@userRequest null
         val prefs = graph.settings.current.naming
         val outcome = inference.infer(collector.collect(doc), aiNamer(docId, prefs), aiFailures = 0, userRequested = true)
-        return (outcome as? TopicOutcome.Found)?.topic
+        (outcome as? TopicOutcome.Found)?.topic
+    }
+
+    /** User-facing calls never throw into the UI: a failure reads as "no name found". */
+    private suspend fun userRequest(what: String, block: suspend () -> String?): String? = try {
+        block()
+    } catch (c: CancellationException) {
+        throw c
+    } catch (e: Exception) {
+        Log.w(TAG, "Naming $what failed: ${e.javaClass.simpleName}")
+        null
     }
 
     /** Books a one-off check for the next naming deadline if it falls before the next hourly run. */
