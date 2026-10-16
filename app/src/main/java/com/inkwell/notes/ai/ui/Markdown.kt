@@ -236,8 +236,10 @@ object Markdown {
                             buf.append(inner)
                             i = text.indexOf(')', end + 2) + 1
                         }
-                        inner != null && !inner.contains('\n') && Citations.parseInner(inner) != null -> {
-                            flush(); out += Span("[$inner]", citation = inner.trim()); i = end + 1
+                        inner != null && !inner.contains('\n') && Citations.parseInner(inner)?.firstOrNull() != null -> {
+                            // The normalised label ("p.3", not "p. 3" or "pp. 3-4") is what source chips are keyed by.
+                            val label = Citations.parseInner(inner)!!.first().label
+                            flush(); out += Span("[$inner]", citation = label); i = end + 1
                         }
                         else -> { buf.append(c); i++ }
                     }

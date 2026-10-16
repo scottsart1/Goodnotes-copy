@@ -112,9 +112,10 @@ abstract class OpenAiCompatibleAdapter : ProviderAdapter {
                     val text = parts.filterIsInstance<AiPart.Text>().joinToString("\n") { it.text }
                     val images = parts.filterIsInstance<AiPart.Image>()
                     val roleName = if (m.role == AiRole.ASSISTANT) "assistant" else "user"
-                    val prefix = if (roleName == "user" && prepend != null) "$prepend\n\n" else ""
-                    if (roleName == "user") prepend = null
                     if (text.isEmpty() && images.isEmpty()) continue
+                    val prefix = if (roleName == "user" && prepend != null) "$prepend\n\n" else ""
+                    // Only a turn that is actually sent consumes the folded system prompt.
+                    if (roleName == "user") prepend = null
                     addJsonObject {
                         put("role", roleName)
                         if (images.isEmpty()) {
