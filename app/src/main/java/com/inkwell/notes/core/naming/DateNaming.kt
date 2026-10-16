@@ -36,6 +36,9 @@ object DateNaming {
     /** The topic part of a date-named title, or null if the title does not follow the convention. */
     fun topicOf(title: String): String? = PREFIX.matchEntire(title)?.groupValues?.get(2)
 
+    /** The "YYYYMMDD" part of a date-named title, or null if the title does not follow the convention. */
+    fun prefixOf(title: String): String? = PREFIX.matchEntire(title)?.groupValues?.get(1)
+
     /**
      * Normalises an inferred topic: strips quotes/punctuation and illegal file characters,
      * Title Cases it, limits it to [MAX_TOPIC_WORDS] words. Returns null when nothing

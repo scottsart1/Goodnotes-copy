@@ -40,7 +40,16 @@ class FileStore(context: Context) {
 
     companion object {
         private val UNSAFE = Regex("[^A-Za-z0-9._-]")
-        fun safe(name: String): String = name.replace(UNSAFE, "_").ifEmpty { "_" }
+
+        /**
+         * A single path component that can never leave its parent directory: unsafe characters
+         * become '_', and a name made only of dots ("." is the directory itself, ".." its parent)
+         * is replaced by underscores. Deleting or writing "document .." must never touch filesDir.
+         */
+        fun safe(name: String): String {
+            val s = name.replace(UNSAFE, "_")
+            return if (s.isEmpty() || s.all { it == '.' }) "_".repeat(maxOf(1, s.length)) else s
+        }
 
         /**
          * Crash-safe write: data goes to a temp file, is fsynced, the previous version

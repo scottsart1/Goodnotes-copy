@@ -48,10 +48,22 @@ object TitleRules {
     /**
      * The auto-name for [topic]: creation-date prefix + cleaned topic, unique among the other
      * documents. Null when the topic is empty or too generic to use.
+     *
+     * When [currentTitle] already carries a "YYYYMMDD_" prefix, that prefix is kept verbatim: the
+     * date a document shows must never change, and recomputing it from [createdAt] in the device's
+     * *current* time zone would move a note written late in the evening to the next day after a
+     * trip or a time-zone change.
      */
-    fun auto(createdAt: Long, topic: String, otherTitles: Collection<String>, zone: ZoneId = ZoneId.systemDefault()): String? {
+    fun auto(
+        createdAt: Long,
+        topic: String,
+        otherTitles: Collection<String>,
+        zone: ZoneId = ZoneId.systemDefault(),
+        currentTitle: String? = null,
+    ): String? {
         val clean = DateNaming.cleanTopic(topic) ?: return null
-        return DateNaming.unique(DateNaming.titleFor(createdAt, clean, zone), otherTitles)
+        val prefix = currentTitle?.let { DateNaming.prefixOf(it) } ?: DateNaming.datePrefix(createdAt, zone)
+        return DateNaming.unique("${prefix}_$clean", otherTitles)
     }
 
     /** "<title> copy", numbered when taken. */

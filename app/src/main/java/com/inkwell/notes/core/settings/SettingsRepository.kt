@@ -9,10 +9,11 @@ import androidx.datastore.core.Serializer
 import androidx.datastore.core.handlers.ReplaceFileCorruptionHandler
 import com.inkwell.notes.core.model.AppSettings
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
 import java.io.File
@@ -31,17 +32,25 @@ class SettingsRepository(context: Context, scope: CoroutineScope) {
         produceFile = { File(context.filesDir, "datastore/settings.json") },
     )
 
-    /** Current settings. The first value is read synchronously at startup so screens never see defaults flash. */
-    val settings: StateFlow<AppSettings> = store.data.stateIn(
-        scope,
-        SharingStarted.Eagerly,
-        runBlocking { runCatching { store.data.first() }.getOrDefault(AppSettings()) },
-    )
+    /**
+     * Mirror of the store. The first value is read synchronously at startup so screens never see
+     * defaults flash; afterwards it follows the store and is also set directly by [update], so a
+     * caller reading [current] right after `update()` returns always sees its own change (the
+     * store's flow reaches collectors asynchronously).
+     */
+    private val state = MutableStateFlow(runBlocking { runCatching { store.data.first() }.getOrDefault(AppSettings()) })
+
+    init {
+        scope.launch { store.data.collect { state.value = it } }
+    }
+
+    /** Current settings. */
+    val settings: StateFlow<AppSettings> = state.asStateFlow()
 
     val current: AppSettings get() = settings.value
 
     suspend fun update(transform: (AppSettings) -> AppSettings) {
-        store.updateData(transform)
+        state.value = store.updateData(transform)
     }
 
     companion object {

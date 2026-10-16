@@ -284,7 +284,8 @@ class LibraryRepositoryImpl internal constructor(
             if (onlyWhileWaiting && (cur.autoNameStatus !in AutoNamingRules.AUTOMATIC || cur.trashedAt != null)) {
                 return@withTransaction null
             }
-            val title = TitleRules.auto(cur.createdAt, topic, db.documents().titlesExcept(id))
+            // The date prefix the document already shows is kept (see TitleRules.auto): never recomputed.
+            val title = TitleRules.auto(cur.createdAt, topic, db.documents().titlesExcept(id), currentTitle = cur.title)
                 ?: return@withTransaction cur.title to false // empty or generic topic: keep the current name
             db.documents().update(
                 cur.copy(title = title, topic = DateNaming.cleanTopic(topic), autoNameStatus = AutoNameStatus.DONE),
