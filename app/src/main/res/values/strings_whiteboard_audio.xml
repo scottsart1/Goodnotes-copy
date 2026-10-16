@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Whiteboard: recording, playback and transcripts -->
+    <string name="wb_audio_record">Record audio</string>
+    <string name="wb_audio_recording_cd">Recording, %1$s. Open recording controls</string>
+    <string name="wb_audio_paused_cd">Recording paused, %1$s. Open recording controls</string>
+    <string name="wb_audio_recordings">Recordings</string>
+    <string name="wb_audio_paused">Paused</string>
+
+    <string name="wb_audio_controls_title">Recording</string>
+    <string name="wb_audio_controls_hint">Recording continues while you move around the board or leave the app. Everything you write is linked to this moment of the recording.</string>
+    <string name="wb_audio_pause">Pause</string>
+    <string name="wb_audio_resume">Resume</string>
+    <string name="wb_audio_stop">Stop recording</string>
+    <string name="wb_audio_cancel">Cancel</string>
+
+    <string name="wb_audio_elsewhere_title">Already recording</string>
+    <string name="wb_audio_elsewhere_body_named">“%1$s” is recording. Stop that recording and start one on this board?</string>
+    <string name="wb_audio_elsewhere_body">Another document is recording. Stop that recording and start one on this board?</string>
+    <string name="wb_audio_elsewhere_action">Stop and record here</string>
+
+    <string name="wb_audio_start_failed">Recording couldn\'t start.</string>
+    <string name="wb_audio_message">%1$s</string>
+
+    <string name="wb_audio_no_notes_at_time">No notes were written on the board at that moment.</string>
+    <string name="wb_audio_show_nearest">Show nearest</string>
+    <string name="wb_audio_no_notes_in_recording">Nothing on this board was written during this recording.</string>
+    <string name="wb_audio_written_at">Written at %1$s in a recording</string>
+    <string name="wb_audio_play_from_here">Play from here</string>
+    <string name="wb_audio_playing_from">Playing from %1$s</string>
+    <string name="wb_audio_play_failed">This recording couldn\'t be played.</string>
+    <string name="wb_audio_recording_missing">That recording is no longer available.</string>
+    <string name="wb_audio_nothing_to_paste">Nothing to paste.</string>
+</resources>

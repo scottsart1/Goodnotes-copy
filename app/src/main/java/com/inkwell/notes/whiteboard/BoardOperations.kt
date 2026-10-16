@@ -1,5 +1,8 @@
 package com.inkwell.notes.whiteboard
 
+import android.content.ClipDescription
+import android.content.ClipboardManager
+import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.PointF
@@ -28,6 +31,8 @@ import com.inkwell.notes.whiteboard.logic.Box
 import com.inkwell.notes.whiteboard.logic.CropMath
 import com.inkwell.notes.whiteboard.logic.ExportMath
 import com.inkwell.notes.whiteboard.logic.FragmentOps
+import com.inkwell.notes.whiteboard.logic.PasteSource
+import com.inkwell.notes.whiteboard.logic.RecordLogic
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.firstOrNull
@@ -51,12 +56,37 @@ import kotlin.math.sqrt
 object BoardClipboard {
     @Volatile var content: PageContent? = null; private set
     @Volatile var sourceDocId: String? = null; private set
+    /** When [content] was copied (wall clock, the system clipboard's time base). */
+    @Volatile var copiedAt: Long? = null; private set
 
     fun set(docId: String, fragment: PageContent?) {
         if (fragment == null || fragment.isEmpty) return
         content = fragment
         sourceDocId = docId
+        copiedAt = System.currentTimeMillis()
     }
+}
+
+/**
+ * Plain text on the system clipboard (e.g. an AI summary copied from the recordings panel).
+ * Checks read only the clip description, so they never trigger the system "pasted" notice.
+ */
+object SystemClipText {
+    private fun manager(context: Context): ClipboardManager? = context.getSystemService(ClipboardManager::class.java)
+
+    fun available(context: Context): Boolean = runCatching {
+        val d = manager(context)?.primaryClipDescription ?: return false
+        d.hasMimeType(ClipDescription.MIMETYPE_TEXT_PLAIN) || d.hasMimeType(ClipDescription.MIMETYPE_TEXT_HTML)
+    }.getOrDefault(false)
+
+    /** When the clip was set (wall clock), or null when unknown. */
+    fun timestamp(context: Context): Long? = runCatching { manager(context)?.primaryClipDescription?.timestamp }.getOrNull()?.takeIf { it > 0L }
+
+    fun read(context: Context): String? = runCatching {
+        val clip = manager(context)?.primaryClip ?: return null
+        if (clip.itemCount == 0) return null
+        clip.getItemAt(0).coerceToText(context)?.toString()
+    }.getOrNull()?.trim()?.takeIf { it.isNotEmpty() }
 }
 
 /**
@@ -257,7 +287,9 @@ class BoardOperations(private val c: WhiteboardController) {
             val h = if (page.isInfinite) PageSizePreset.A4.heightPt else page.heightPt
             val margin = min(48f, min(w, h) * 0.08f)
             val fitted = withContext(Dispatchers.Default) {
-                FragmentOps.fitInto(FragmentOps.compactZ(FragmentOps.withFreshIds(selection.content)), Box(margin, margin, w - margin, h - margin))
+                // The notebook has none of this board's recordings: anchors stay behind.
+                val portable = FragmentOps.withoutAudio(FragmentOps.withFreshIds(selection.content))
+                FragmentOps.fitInto(FragmentOps.compactZ(portable), Box(margin, margin, w - margin, h - margin))
             }
             DocAssets.copyAssets(graph, docId, target.id, FragmentOps.assetIds(fitted))
             graph.pageStore.save(target.id, page.id, fitted)
@@ -287,7 +319,8 @@ class BoardOperations(private val c: WhiteboardController) {
         try {
             val content = graph.pageStore.load(source.id, page.id)
             DocAssets.copyAssets(graph, source.id, docId, FragmentOps.assetIds(content))
-            var fragment = FragmentOps.compactZ(FragmentOps.withFreshIds(content), base = 2)
+            // Anchors of the notebook's recordings mean nothing on the board.
+            var fragment = FragmentOps.compactZ(FragmentOps.withFreshIds(FragmentOps.forDocument(content, source.id, docId)), base = 2)
             if (!page.isInfinite) {
                 val w = page.widthPt
                 val h = page.heightPt
@@ -358,14 +391,37 @@ class BoardOperations(private val c: WhiteboardController) {
         if (fragment != null && !cut) c.messages.tryEmit(UiMessage(R.string.wb_copied))
     }
 
+    /** True when there is something to paste: copied board items or text on the system clipboard. */
+    fun canPaste(): Boolean = BoardClipboard.content != null || SystemClipText.available(graph.context)
+
+    /**
+     * Pastes the newer of the board clipboard and system-clipboard text at [at] (board points,
+     * null = centre of the view). Text becomes a new text box; nothing existing is replaced.
+     */
     suspend fun paste(at: PointF?) {
         val canvas = c.canvas ?: return
-        val fragment = BoardClipboard.content ?: return
-        val from = BoardClipboard.sourceDocId
-        if (from != null && from != docId) {
-            runCatching { DocAssets.copyAssets(graph, from, docId, FragmentOps.assetIds(fragment)) }
+        val context = graph.context
+        val hasText = SystemClipText.available(context)
+        when (RecordLogic.pasteSource(BoardClipboard.copiedAt.takeIf { BoardClipboard.content != null }, hasText, if (hasText) SystemClipText.timestamp(context) else null)) {
+            PasteSource.BOARD -> {
+                val fragment = BoardClipboard.content ?: return
+                val from = BoardClipboard.sourceDocId
+                if (from != null && from != docId) {
+                    runCatching { DocAssets.copyAssets(graph, from, docId, FragmentOps.assetIds(fragment)) }
+                }
+                // Anchors only mean something on the board they were written on.
+                canvas.insertItems(0, FragmentOps.forDocument(fragment, from, docId), at, select = true)
+            }
+            PasteSource.TEXT -> {
+                val text = SystemClipText.read(context)
+                if (text == null) {
+                    c.messages.tryEmit(UiMessage(R.string.wb_audio_nothing_to_paste))
+                    return
+                }
+                canvas.insertText(0, text, at, c.tools.text.copy(fontSizePt = c.tools.text.fontSizePt.coerceIn(12f, 18f)))
+            }
+            PasteSource.NONE -> c.messages.tryEmit(UiMessage(R.string.wb_audio_nothing_to_paste))
         }
-        canvas.insertItems(0, fragment, at, select = true)
     }
 
     // ------------------------------------------------------------------ AI
