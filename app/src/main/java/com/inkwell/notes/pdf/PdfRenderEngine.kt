@@ -1,0 +1,255 @@
+package com.inkwell.notes.pdf
+
+import android.graphics.Bitmap
+import android.graphics.Color
+import android.graphics.Matrix
+import android.graphics.pdf.PdfRenderer
+import android.os.ParcelFileDescriptor
+import android.util.Log
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.asCoroutineDispatcher
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.io.File
+import java.io.IOException
+import java.util.concurrent.Executors
+
+/**
+ * Renders source-PDF pages with the platform [PdfRenderer]. One renderer per open document,
+ * all access serialised on a dedicated thread (a renderer allows a single open page at a time,
+ * and pdfium is not re-entrant). Renders land in an LRU bitmap cache keyed by
+ * (document, page, width bucket).
+ *
+ * Bitmaps returned from [render] are shared with the cache: draw them, never recycle them.
+ */
+internal class PdfRenderEngine(
+    private val sourceFile: (docId: String) -> File,
+    private val scope: CoroutineScope,
+    maxHeapBytes: Long = Runtime.getRuntime().maxMemory(),
+) {
+    /** The thread every [PdfRenderer] call runs on. */
+    val dispatcher: CoroutineDispatcher = Executors.newSingleThreadExecutor { r ->
+        Thread(r, "inkwell-pdf-render").apply { isDaemon = true }
+    }.asCoroutineDispatcher()
+
+    private val cache = SizedLruCache<RenderKey, Bitmap>(RenderSizing.cacheBudgetBytes(maxHeapBytes)) {
+        it.allocationByteCount.toLong()
+    }
+
+    /** Open renderers, least recently used first. Only touched on [dispatcher]. */
+    private val open = LinkedHashMap<String, OpenPdf>(8, 0.75f, true)
+
+    private class OpenPdf(
+        val file: File,
+        val stamp: FileStamp,
+        val descriptor: ParcelFileDescriptor,
+        val renderer: PdfRenderer,
+    ) {
+        val pageCount: Int = renderer.pageCount
+        var sizes: List<Pair<Float, Float>>? = null
+
+        fun close() {
+            try {
+                renderer.close()
+            } catch (t: Throwable) {
+                Log.w(TAG, "Closing renderer failed (${t.javaClass.simpleName})")
+            }
+            runCatching { descriptor.close() }
+        }
+    }
+
+    /** Detects a source file that was replaced behind an open renderer. */
+    private data class FileStamp(val length: Long, val modified: Long) {
+        companion object {
+            fun of(file: File) = FileStamp(file.length(), file.lastModified())
+        }
+    }
+
+    /** Outcome of opening a file that is not (yet) a document's source. */
+    sealed interface Probe {
+        data class Ok(val sizes: List<Pair<Float, Float>>) : Probe
+        /** Encrypted: PdfRenderer refuses it without a password. */
+        data object Locked : Probe
+        data object Damaged : Probe
+    }
+
+    suspend fun render(docId: String, pdfPageIndex: Int, widthPx: Int, heightPx: Int): Bitmap? {
+        if (pdfPageIndex < 0) return null
+        val target = RenderSizing.target(widthPx, heightPx) ?: return null
+        val key = RenderKey(docId, pdfPageIndex, target.width)
+        cached(key, target)?.let { return it }
+        return withContext(dispatcher) {
+            // Another request may have rendered it while this one waited for the thread.
+            cached(key, target)?.let { return@withContext it }
+            val pdf = openPdf(docId) ?: return@withContext null
+            if (pdfPageIndex >= pdf.pageCount) return@withContext null
+            val bitmap = draw(docId, pdf, pdfPageIndex, target) ?: return@withContext null
+            cache.put(key, bitmap)
+            bitmap
+        }
+    }
+
+    private fun cached(key: RenderKey, target: PixelSize): Bitmap? {
+        val hit = cache.get(key) ?: return null
+        if (hit.isRecycled || !RenderSizing.matches(hit.width, hit.height, target)) {
+            cache.remove(key)
+            return null
+        }
+        return hit
+    }
+
+    /** Page sizes in points, read once per open document. */
+    suspend fun pageSizes(docId: String): List<Pair<Float, Float>> = withContext(dispatcher) {
+        val pdf = openPdf(docId) ?: return@withContext emptyList()
+        pdf.sizes ?: try {
+            readSizes(pdf.renderer).also { pdf.sizes = it }
+        } catch (e: Exception) {
+            Log.w(TAG, "Reading page sizes failed (${e.javaClass.simpleName})")
+            closeDoc(docId)
+            emptyList()
+        }
+    }
+
+    suspend fun pageCount(docId: String): Int = withContext(dispatcher) { openPdf(docId)?.pageCount ?: 0 }
+
+    /** Opens an arbitrary PDF file (an import in progress) just to validate it and read its page sizes. */
+    suspend fun probe(file: File): Probe = withContext(dispatcher) {
+        var descriptor: ParcelFileDescriptor? = null
+        try {
+            descriptor = ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY)
+            val renderer = PdfRenderer(descriptor)
+            try {
+                Probe.Ok(readSizes(renderer))
+            } finally {
+                renderer.close()
+            }
+        } catch (e: SecurityException) {
+            Probe.Locked
+        } catch (e: IOException) {
+            Probe.Damaged
+        } catch (e: RuntimeException) {
+            Log.w(TAG, "PDF probe failed (${e.javaClass.simpleName})")
+            Probe.Damaged
+        } finally {
+            runCatching { descriptor?.close() }
+        }
+    }
+
+    /**
+     * Moves [replacement] over the document's source file on the render thread, after closing
+     * its renderer and dropping its cached pages, so no render ever sees a half-replaced file.
+     */
+    suspend fun replaceSource(docId: String, replacement: File) = withContext(dispatcher) {
+        closeDoc(docId)
+        val target = sourceFile(docId)
+        target.parentFile?.mkdirs()
+        if (!replacement.renameTo(target)) {
+            // Different file systems: copy next to the target, then rename atomically.
+            val tmp = File(target.parentFile, target.name + ".incoming")
+            try {
+                replacement.copyTo(tmp, overwrite = true)
+                if (!tmp.renameTo(target)) throw IOException("Could not replace the source PDF")
+            } finally {
+                tmp.delete()
+            }
+            replacement.delete()
+        }
+        cache.removeIf { it.docId == docId }
+    }
+
+    /** Releases the document's renderer and cached pages. Safe from any thread. */
+    fun close(docId: String) {
+        cache.removeIf { it.docId == docId }
+        scope.launch(dispatcher) { closeDoc(docId) }
+    }
+
+    /** Drops cached bitmaps under memory pressure; [fraction] of the budget is kept. */
+    fun trimCache(fraction: Float) {
+        if (fraction <= 0f) cache.clear() else cache.trimToFraction(fraction)
+    }
+
+    private fun closeDoc(docId: String) {
+        open.remove(docId)?.close()
+        cache.removeIf { it.docId == docId }
+    }
+
+    /** Must run on [dispatcher]. */
+    private fun openPdf(docId: String): OpenPdf? {
+        val file = sourceFile(docId)
+        val existing = open[docId]
+        if (!file.isFile) {
+            if (existing != null) closeDoc(docId)
+            return null
+        }
+        val stamp = FileStamp.of(file)
+        if (existing != null) {
+            if (existing.stamp == stamp) return existing
+            // The file changed (merge, restore): reopen and forget stale renders.
+            closeDoc(docId)
+        }
+        var descriptor: ParcelFileDescriptor? = null
+        return try {
+            descriptor = ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY)
+            val pdf = OpenPdf(file, stamp, descriptor, PdfRenderer(descriptor))
+            open[docId] = pdf
+            while (open.size > MAX_OPEN) {
+                val eldest = open.entries.iterator().next()
+                open.remove(eldest.key)
+                eldest.value.close()
+            }
+            pdf
+        } catch (e: Exception) {
+            Log.w(TAG, "Opening a source PDF failed (${e.javaClass.simpleName})")
+            runCatching { descriptor?.close() }
+            null
+        }
+    }
+
+    private fun readSizes(renderer: PdfRenderer): List<Pair<Float, Float>> =
+        List(renderer.pageCount) { i ->
+            renderer.openPage(i).use { page -> page.width.toFloat() to page.height.toFloat() }
+        }
+
+    /** Must run on [dispatcher]. */
+    private fun draw(docId: String, pdf: OpenPdf, index: Int, target: PixelSize): Bitmap? {
+        val bitmap = allocate(target) ?: return null
+        return try {
+            bitmap.eraseColor(Color.WHITE)
+            pdf.renderer.openPage(index).use { page ->
+                val pw = page.width.coerceAtLeast(1).toFloat()
+                val ph = page.height.coerceAtLeast(1).toFloat()
+                val matrix = Matrix().apply { setScale(bitmap.width / pw, bitmap.height / ph) }
+                page.render(bitmap, null, matrix, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+            }
+            bitmap
+        } catch (e: Exception) {
+            Log.w(TAG, "Rendering page $index failed (${e.javaClass.simpleName})")
+            // A renderer in a bad state is reopened on the next request.
+            if (e is IllegalStateException) closeDoc(docId)
+            null
+        }
+    }
+
+    private fun allocate(size: PixelSize): Bitmap? {
+        try {
+            return Bitmap.createBitmap(size.width, size.height, Bitmap.Config.ARGB_8888)
+        } catch (oom: OutOfMemoryError) {
+            Log.w(TAG, "Out of memory for a ${size.width}x${size.height} render; clearing the cache")
+        } catch (e: IllegalArgumentException) {
+            return null
+        }
+        cache.clear()
+        return try {
+            Bitmap.createBitmap(size.width, size.height, Bitmap.Config.ARGB_8888)
+        } catch (oom: OutOfMemoryError) {
+            null
+        }
+    }
+
+    companion object {
+        private const val TAG = "PdfRender"
+        /** Open renderers kept at once (each holds a file descriptor and native memory). */
+        const val MAX_OPEN = 4
+    }
+}

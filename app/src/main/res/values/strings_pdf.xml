@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- PDF import, page operations and document scanning (package pdf). -->
+    <string name="pdf_error_open_failed">The file could not be opened. It may have been moved or the app that shared it no longer allows access.</string>
+    <string name="pdf_error_not_pdf">This file is not a PDF.</string>
+    <string name="pdf_error_empty_file">This file is empty.</string>
+    <string name="pdf_error_password">This PDF is protected with a password. Remove the password in another app, then import it again.</string>
+    <string name="pdf_error_damaged">This PDF is damaged and could not be opened.</string>
+    <string name="pdf_error_no_pages">This PDF has no pages.</string>
+    <string name="pdf_error_no_space">There is not enough free storage on this device to import this file.</string>
+    <string name="pdf_error_save_failed">The document could not be saved. Nothing was changed.</string>
+    <string name="pdf_error_merge_failed">The PDF pages could not be combined. Nothing was changed.</string>
+    <string name="pdf_error_source_unreadable">The PDF inside this document could not be read.</string>
+    <string name="pdf_error_images_unreadable">None of the selected images could be read.</string>
+    <string name="pdf_error_no_images">No images were selected.</string>
+    <string name="pdf_error_document_missing">This document no longer exists.</string>
+    <string name="pdf_error_unsupported_document">Only notebooks and PDFs have pages that can be extracted, split or merged.</string>
+    <string name="pdf_error_no_pages_selected">Select at least one page.</string>
+    <string name="pdf_error_invalid_split">A document can only be split between two pages.</string>
+    <string name="pdf_error_nothing_scanned">The scan did not contain any pages.</string>
+    <string name="pdf_error_too_large">This file is too large to open on this device.</string>
+    <string name="pdf_scanner_unavailable">The document scanner is not available. It needs up-to-date Google Play services and, the first time, an internet connection to download.</string>
+    <string name="pdf_scanner_failed">The document scanner could not be started.</string>
+</resources>
