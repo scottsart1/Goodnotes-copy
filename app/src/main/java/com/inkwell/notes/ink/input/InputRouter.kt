@@ -551,8 +551,9 @@ internal class InputRouter(private val e: InkEngine) {
             e.viewportCtl.stop()
             handler.postDelayed(longPress, longPressMs)
             val role = if (mouse) FingerRole.NAVIGATE else policy.fingerRole()
-            // A finger on the selection box drags it, whatever the finger otherwise does.
-            val onSelection = e.selection.hit(f.x, f.y) != null
+            // A finger on the selection box drags it, whatever the finger otherwise does (unless the
+            // selection fills the screen: then the finger keeps scrolling).
+            val onSelection = e.selection.hit(f.x, f.y) != null && !e.selection.coversView()
             if (onSelection || role != FingerRole.NAVIGATE) {
                 pendingSamples.clear()
                 pendingSamples += Sample(f.x, f.y, event.eventTime)

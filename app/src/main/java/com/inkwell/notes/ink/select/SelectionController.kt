@@ -153,6 +153,22 @@ internal class SelectionController(private val e: InkEngine) {
         return handles.hit(vx, vy)
     }
 
+    /**
+     * True when the selection box covers most of the view: a single finger then scrolls instead
+     * of dragging it (the stylus still drags), so a large selection never traps navigation.
+     */
+    fun coversView(): Boolean {
+        if (m != null) return false
+        val i = currentPage()
+        if (i < 0) return false
+        layoutHandles(i)
+        val vp = e.viewport
+        val b = handles.box
+        val w = (minOf(b.right, vp.viewWidth) - maxOf(b.left, 0f)).coerceAtLeast(0f)
+        val h = (minOf(b.bottom, vp.viewHeight) - maxOf(b.top, 0f)).coerceAtLeast(0f)
+        return w * h >= 0.8f * vp.viewWidth * vp.viewHeight
+    }
+
     // ------------------------------------------------------------------ Gestures
 
     /** Starts a manipulation at view point ([vx], [vy]) grabbing [handle] (hit-tested when null). */
