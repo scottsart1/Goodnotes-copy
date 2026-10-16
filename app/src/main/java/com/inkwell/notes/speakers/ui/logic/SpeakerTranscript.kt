@@ -158,9 +158,16 @@ object SpeakerTranscript {
         return best
     }
 
+    /** The number of a label "S<n>", or null for any other label. */
+    fun labelNumber(label: String): Int? = NUMBERED_LABEL.matchEntire(label.trim())?.groupValues?.get(1)?.toIntOrNull()
+
+    /** Voices in order of first appearance (S1, S2, ... S10), other labels last. */
+    fun inOrder(speakers: List<RecordingSpeaker>): List<RecordingSpeaker> =
+        speakers.sortedWith(compareBy<RecordingSpeaker> { labelNumber(it.label) ?: Int.MAX_VALUE }.thenBy { it.label })
+
     /** "S<n>" one past the highest numbered label, for a voice added by hand. */
     fun nextFreeLabel(existing: Collection<String>): String {
-        val max = existing.mapNotNull { NUMBERED_LABEL.matchEntire(it.trim())?.groupValues?.get(1)?.toIntOrNull() }.maxOrNull() ?: 0
+        val max = existing.mapNotNull { labelNumber(it) }.maxOrNull() ?: 0
         return "S${max + 1}"
     }
 

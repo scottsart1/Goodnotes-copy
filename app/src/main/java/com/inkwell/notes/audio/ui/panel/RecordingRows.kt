@@ -74,6 +74,7 @@ internal fun RecordingRow(
     onCancelRename: () -> Unit,
     onExport: () -> Unit,
     onDelete: () -> Unit,
+    newVoices: Boolean = false,
 ) {
     val c = Inkwell.colors
     Row(
@@ -96,7 +97,7 @@ internal fun RecordingRow(
             } else {
                 Text(rec.title, style = MaterialTheme.typography.titleSmall, color = c.ink, maxLines = 2, overflow = TextOverflow.Ellipsis)
             }
-            RecordingMeta(rec, liveElapsedMs)
+            RecordingMeta(rec, liveElapsedMs, newVoices)
         }
         if (!renaming) {
             RecordingMenu(
@@ -111,7 +112,7 @@ internal fun RecordingRow(
 }
 
 @Composable
-internal fun RecordingMeta(rec: Recording, liveElapsedMs: Long?) {
+internal fun RecordingMeta(rec: Recording, liveElapsedMs: Long?, newVoices: Boolean = false) {
     val c = Inkwell.colors
     val context = LocalContext.current
     val date = remember(rec.startedAt) {
@@ -130,6 +131,7 @@ internal fun RecordingMeta(rec: Recording, liveElapsedMs: Long?) {
             TranscriptStatus.FAILED -> AudioBadge(stringResource(R.string.audio_status_failed), color = c.danger)
             TranscriptStatus.NONE -> Unit
         }
+        if (newVoices) AudioBadge(stringResource(R.string.spk_badge_new_voices), color = c.accent)
     }
 }
 

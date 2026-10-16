@@ -1,0 +1,213 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Voices in a transcript -->
+    <string name="spk_tentative_name">%1$s?</string>
+    <string name="spk_voice_cd">%1$s speaking</string>
+    <string name="spk_voice_match_cd">%1$s, %2$d%% match, not confirmed yet</string>
+    <string name="spk_voice_guess_cd">%1$s, recognised automatically, not confirmed yet</string>
+    <string name="spk_block_cd">%1$s at %2$s: %3$s</string>
+    <string name="spk_block_menu">Options for this passage</string>
+    <string name="spk_change_speaker">Change speaker</string>
+    <string name="spk_share">%1$d%%</string>
+    <string name="spk_share_small" formatted="false">under 1%</string>
+    <string name="spk_chip_cd">%1$s, %2$s of talk time</string>
+    <string name="spk_chip_menu">Options for %1$s</string>
+    <string name="spk_chip_filter_on">Showing only %1$s. Tap to show everyone</string>
+    <string name="spk_chip_filter_off">Show only %1$s</string>
+    <string name="spk_speakers_title">Speakers</string>
+    <string name="spk_filter_label">Only %1$s</string>
+    <string name="spk_filter_clear">Show everyone</string>
+    <string name="spk_prev_block">Previous time %1$s spoke</string>
+    <string name="spk_next_block">Next time %1$s spoke</string>
+    <string name="spk_no_blocks">No passages by %1$s in the transcript.</string>
+    <string name="spk_rename_voice">Rename</string>
+    <string name="spk_name_voice">Name this voice</string>
+    <string name="spk_not_person">Not %1$s</string>
+    <string name="spk_confirm_person">Yes, this is %1$s</string>
+    <string name="spk_merge_voice">Same person as another voice…</string>
+    <string name="spk_lanes_cd">Who spoke when. %1$s</string>
+    <string name="spk_lanes_entry">%1$s %2$s</string>
+    <string name="spk_lanes_seek">Jump to this speaker</string>
+
+    <!-- Status of identification -->
+    <string name="spk_identifying_progress">Identifying speakers %1$d/%2$d</string>
+    <string name="spk_identifying">Identifying speakers…</string>
+    <string name="spk_identify_queued">Waiting to identify speakers</string>
+    <string name="spk_models_downloading">Downloading voice models %1$d of %2$d MB</string>
+    <string name="spk_models_downloading_unknown">Downloading voice models, %1$d MB so far</string>
+    <string name="spk_models_waiting">Waiting to download the voice models</string>
+    <string name="spk_models_waiting_wifi">Waiting for Wi-Fi to download the voice models</string>
+    <string name="spk_models_failed">The voice models couldn\'t be downloaded. %1$s</string>
+    <string name="spk_identify_failed">Couldn\'t identify the speakers.</string>
+    <string name="spk_try_again">Try again</string>
+    <string name="spk_identify_title">Who\'s speaking?</string>
+    <string name="spk_identify_body">Inkwell can tell the voices in this recording apart, here on this tablet. Nothing is uploaded.</string>
+    <string name="spk_identify_needs_models">The first time needs a one-time download of the voice models (about %1$d MB). After that it works offline.</string>
+    <string name="spk_identify_action">Identify speakers</string>
+    <string name="spk_identify_download_action">Download and identify</string>
+    <string name="spk_identify_none">No separate voices were found in this recording.</string>
+    <string name="spk_identify_again">Identify speakers again</string>
+    <string name="spk_cancel">Cancel</string>
+    <string name="spk_action_failed">Couldn\'t change the speaker. Please try again.</string>
+    <string name="spk_identify_start_failed">Couldn\'t start identifying speakers. Please try again.</string>
+
+    <!-- Naming -->
+    <plurals name="spk_new_voices">
+        <item quantity="one">%d new voice</item>
+        <item quantity="other">%d new voices</item>
+    </plurals>
+    <string name="spk_name_them">Name them</string>
+    <string name="spk_banner_cd">%1$s in this recording. Name them</string>
+    <string name="spk_prompt_body">Tap to name them</string>
+    <string name="spk_prompt_cd">%1$s in your last recording. Tap to name them</string>
+    <string name="spk_dismiss">Dismiss</string>
+    <string name="spk_badge_new_voices">New voices</string>
+    <string name="spk_naming_title">Who was speaking?</string>
+    <string name="spk_naming_close">Close without saving</string>
+    <string name="spk_voice_line">%1$s · %2$s</string>
+    <string name="spk_voice_number">Speaker %1$d</string>
+    <plurals name="spk_minutes">
+        <item quantity="one">%d min</item>
+        <item quantity="other">%d min</item>
+    </plurals>
+    <plurals name="spk_seconds">
+        <item quantity="one">%d s</item>
+        <item quantity="other">%d s</item>
+    </plurals>
+    <string name="spk_play_sample">Play a sample of %1$s</string>
+    <string name="spk_stop_sample">Stop the sample</string>
+    <string name="spk_name_hint">Name</string>
+    <string name="spk_this_is_me">This is me</string>
+    <string name="spk_me_badge">Me</string>
+    <string name="spk_sounds_like">Sounds like %1$s</string>
+    <string name="spk_sounds_like_pct">Sounds like %1$s · %2$d%% match</string>
+    <string name="spk_confirm">Confirm</string>
+    <string name="spk_not_them">Not them</string>
+    <string name="spk_skip">Skip</string>
+    <string name="spk_done">Done</string>
+    <string name="spk_save">Save</string>
+    <string name="spk_saving">Saving…</string>
+    <string name="spk_use_person">Use %1$s</string>
+    <string name="spk_explainer">Voices are stored only on this tablet, encrypted. Turn this off in Settings.</string>
+    <string name="spk_explainer_ok">Got it</string>
+    <string name="spk_not_remembered">Remember voices is off in Settings, so these people won\'t be recognised in your next recording.</string>
+    <string name="spk_naming_failed">Couldn\'t save the names. Please try again.</string>
+    <string name="spk_naming_empty">No voices to name in this recording yet.</string>
+    <string name="spk_naming_loading">Loading voices…</string>
+
+    <!-- Speaker dialogs -->
+    <string name="spk_rename_title">Who is %1$s?</string>
+    <string name="spk_change_title">Who is speaking at %1$s?</string>
+    <string name="spk_change_in_recording">In this recording</string>
+    <string name="spk_change_people">People you know</string>
+    <string name="spk_change_someone_else">Someone else</string>
+    <string name="spk_change_name_hint">Type a name</string>
+    <string name="spk_merge_title">Merge %1$s into…</string>
+    <string name="spk_merge_body">Use this when two labels are the same person. Every passage of %1$s moves to the voice you pick.</string>
+    <string name="spk_close">Close</string>
+
+    <!-- Transcription consent with cloud speaker labels -->
+    <string name="spk_consent_clips">Short voice clips (a few seconds each, up to four) of people you\'ve named are sent too, so OpenAI can label who is speaking.</string>
+    <string name="spk_cloud_speakers_note">OpenAI also labels who is speaking.</string>
+
+    <!-- Settings: Voices & speakers -->
+    <string name="spk_settings_title">Voices &amp; speakers</string>
+    <string name="spk_set_engine">Who\'s speaking</string>
+    <string name="spk_set_engine_desc">After a recording, Inkwell tells the voices apart and labels every passage with who said it.</string>
+    <string name="spk_set_engine_device">On this tablet</string>
+    <string name="spk_set_engine_device_sub">Recommended. Works offline and without an AI key. Needs a one-time download of about %1$d MB. Voices never leave the tablet.</string>
+    <string name="spk_set_engine_openai">OpenAI</string>
+    <string name="spk_set_engine_openai_sub">Labels speakers while transcribing. Sends the audio and up to four short voice clips of people you\'ve named to OpenAI. Needs an OpenAI key.</string>
+    <string name="spk_set_engine_openai_cost">About %1$s per minute of audio.</string>
+    <string name="spk_set_engine_openai_missing">There is no OpenAI key yet, so speakers won\'t be labelled. Add one in AI providers.</string>
+    <string name="spk_set_open_ai">Open AI providers</string>
+    <string name="spk_set_engine_off">Off</string>
+    <string name="spk_set_engine_off_sub">Transcripts don\'t show who is speaking.</string>
+    <string name="spk_set_models">Voice models</string>
+    <string name="spk_set_models_not_downloaded">Not downloaded. About %1$d MB, downloaded once.</string>
+    <string name="spk_set_models_ready">Ready. Works offline.</string>
+    <string name="spk_set_models_failed">Download failed. %1$s</string>
+    <string name="spk_set_download">Download</string>
+    <string name="spk_set_delete">Delete</string>
+    <string name="spk_set_delete_models_title">Delete the voice models?</string>
+    <string name="spk_set_delete_models_body">They are downloaded again the next time speakers are identified. Your people and their voiceprints stay.</string>
+    <string name="spk_set_models_deleted">Voice models deleted.</string>
+    <string name="spk_set_wifi_only">Download on Wi-Fi only</string>
+    <string name="spk_set_wifi_only_sub">Wait for an unmetered network before downloading the voice models.</string>
+    <string name="spk_set_naming">Naming</string>
+    <string name="spk_set_ask">Ask me to name new voices</string>
+    <string name="spk_set_ask_sub">After a recording, a small card offers to name voices Inkwell hasn\'t heard before.</string>
+    <string name="spk_set_remember">Remember voices</string>
+    <string name="spk_set_remember_sub">Keeps a voiceprint of each person you name so they\'re recognised in later recordings. Voiceprints are encrypted, stay on this tablet and are never synced, exported or backed up.</string>
+    <string name="spk_set_forget_title">Delete stored voiceprints too?</string>
+    <string name="spk_set_forget_after_off">New voices won\'t be remembered from now on. You can also delete the voiceprints already stored. People and names in transcripts stay.</string>
+    <string name="spk_set_keep">Keep them</string>
+    <string name="spk_set_delete_voiceprints">Delete voiceprints</string>
+    <string name="spk_set_expected">Expected speakers</string>
+    <string name="spk_set_expected_sub">Telling Inkwell how many people speak makes separating voices more reliable.</string>
+    <string name="spk_set_expected_auto">Auto</string>
+    <string name="spk_set_sensitivity">Recognising people</string>
+    <string name="spk_set_sensitivity_sub">How closely a voice must match before it is labelled with someone you know.</string>
+    <string name="spk_set_strict">Strict</string>
+    <string name="spk_set_balanced">Balanced</string>
+    <string name="spk_set_loose">Loose</string>
+    <string name="spk_set_sensitivity_strict_note">Fewer automatic labels; rarely the wrong person.</string>
+    <string name="spk_set_sensitivity_balanced_note">A good balance for most meetings and lectures.</string>
+    <string name="spk_set_sensitivity_loose_note">More automatic labels; check them more often.</string>
+    <string name="spk_set_people">People</string>
+    <string name="spk_set_people_desc">People you have named. Only names appear in transcripts, exports and sync.</string>
+    <string name="spk_set_people_empty">Nobody yet. When you name a voice after a recording, the person appears here.</string>
+    <plurals name="spk_set_samples">
+        <item quantity="one">%d voice sample</item>
+        <item quantity="other">%d voice samples</item>
+    </plurals>
+    <string name="spk_set_no_samples">No voiceprint</string>
+    <plurals name="spk_set_recordings">
+        <item quantity="one">%d recording</item>
+        <item quantity="other">%d recordings</item>
+    </plurals>
+    <string name="spk_set_person_menu">Options for %1$s</string>
+    <string name="spk_set_rename">Rename</string>
+    <string name="spk_set_rename_title">Rename %1$s</string>
+    <string name="spk_set_mark_me">This is me</string>
+    <string name="spk_set_unmark_me">This isn\'t me</string>
+    <string name="spk_set_merge">Merge into…</string>
+    <string name="spk_set_merge_title">Merge %1$s into…</string>
+    <string name="spk_set_merge_body">%1$s\'s voice samples and labels move to the person you pick, and %1$s is removed.</string>
+    <string name="spk_set_record_sample">Record a voice sample</string>
+    <string name="spk_set_delete_person">Delete</string>
+    <string name="spk_set_delete_person_title">Delete %1$s?</string>
+    <string name="spk_set_delete_person_body">Their voiceprint is deleted and they won\'t be recognised again. Names already in transcripts stay.</string>
+    <string name="spk_set_record_me">Record my voice</string>
+    <string name="spk_set_record_me_sub">Read a short paragraph so Inkwell recognises you from the first recording.</string>
+    <string name="spk_set_record">Record</string>
+    <string name="spk_set_your_name">Your name</string>
+    <string name="spk_set_your_name_title">What should transcripts call you?</string>
+    <string name="spk_set_continue">Continue</string>
+    <string name="spk_set_forget_all">Forget all voices</string>
+    <string name="spk_set_forget_all_sub">Deletes every voiceprint on this tablet. People and names in transcripts stay.</string>
+    <string name="spk_set_forget_all_title">Forget all voices?</string>
+    <string name="spk_set_forget_all_body">Every voiceprint is deleted, so nobody is recognised automatically until you name them again. People and names in transcripts stay.</string>
+    <string name="spk_set_forget">Forget</string>
+    <string name="spk_set_forgotten">All voiceprints were deleted.</string>
+    <string name="spk_set_failed">Couldn\'t save that change. Please try again.</string>
+    <string name="spk_set_voice_off_note">Remember voices is off, so voice samples can\'t be recorded.</string>
+    <string name="spk_me_label">%1$s (me)</string>
+
+    <!-- Enrollment ("Record my voice") -->
+    <string name="spk_enroll_title">Record a voice sample for %1$s</string>
+    <string name="spk_enroll_body">Read this aloud in your normal voice, about 15 seconds:</string>
+    <string name="spk_enroll_paragraph">“I\'m recording a short voice sample so my notes know when I\'m speaking. The quick brown fox jumps over the lazy dog, and the five boxing wizards jump quickly. Today I will write down the main points, the decisions and what to do next.”</string>
+    <string name="spk_enroll_start">Start recording</string>
+    <string name="spk_enroll_stop">Finish</string>
+    <string name="spk_enroll_seconds_left">%1$d s left</string>
+    <string name="spk_enroll_level_cd">Microphone level</string>
+    <string name="spk_enroll_saving">Saving the voice sample…</string>
+    <string name="spk_enroll_saved">Voice sample saved. %1$s will be recognised in new recordings.</string>
+    <string name="spk_enroll_too_little">There wasn\'t enough speech in that sample. Find a quiet spot and try again.</string>
+    <string name="spk_enroll_mic_busy">The microphone is in use by another app.</string>
+    <string name="spk_enroll_doc_recording">Stop the recording in your notebook first.</string>
+    <string name="spk_enroll_permission">Inkwell needs microphone access to record a voice sample.</string>
+    <string name="spk_enroll_failed">Couldn\'t save the voice sample. Please try again.</string>
+    <string name="spk_enroll_privacy">The sample is turned into an encrypted voiceprint on this tablet and then deleted.</string>
+</resources>

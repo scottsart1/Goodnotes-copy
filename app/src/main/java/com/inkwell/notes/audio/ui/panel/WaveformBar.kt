@@ -23,6 +23,8 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.setProgress
 import androidx.compose.ui.unit.dp
 import com.inkwell.notes.audio.logic.Waveform
+import com.inkwell.notes.speakers.ui.logic.LaneGeometry
+import com.inkwell.notes.speakers.ui.logic.SpeakerLanes
 import com.inkwell.notes.ui.theme.Inkwell
 import kotlin.math.max
 
@@ -94,6 +96,54 @@ internal fun WaveformBar(
         }
         // Playhead.
         drawRect(c.accent, Offset((split - 1.dp.toPx() / 2f).coerceIn(0f, size.width - 1.dp.toPx()), 0f), Size(1.dp.toPx(), size.height))
+    }
+}
+
+/**
+ * Who spoke when, as thin coloured segments under the waveform (same timeline). Tapping a
+ * segment seeks to the start of that stretch of speech. With [focusLabel] set (the transcript
+ * is filtered to one voice) the other voices are dimmed. Colours are resolved once per change,
+ * so drawing allocates nothing.
+ */
+@Composable
+internal fun SpeakerLaneBar(
+    geometry: LaneGeometry,
+    focusLabel: String?,
+    onSeek: (Long) -> Unit,
+    description: String,
+    modifier: Modifier = Modifier,
+) {
+    val c = Inkwell.colors
+    val seek by rememberUpdatedState(onSeek)
+    val colors = remember(geometry, c, focusLabel) {
+        Array(geometry.size) { i ->
+            val base = c.speaker(geometry.colors[i])
+            if (focusLabel != null && geometry.labels[i] != focusLabel) base.copy(alpha = 0.22f) else base
+        }
+    }
+    Canvas(
+        modifier
+            .fillMaxWidth()
+            .height(20.dp)
+            .pointerInput(geometry) {
+                detectTapGestures { o ->
+                    if (size.width <= 0) return@detectTapGestures
+                    val i = SpeakerLanes.hit(geometry, o.x / size.width, slop = 8.dp.toPx() / size.width)
+                    if (i >= 0) seek(geometry.startMs[i])
+                }
+            }
+            .semantics { contentDescription = description },
+    ) {
+        val h = 6.dp.toPx()
+        val top = (size.height - h) / 2f
+        val minW = 2.dp.toPx()
+        val gap = 1.dp.toPx()
+        val radius = CornerRadius(h / 2f)
+        for (i in 0 until geometry.size) {
+            val x0 = geometry.starts[i] * size.width
+            val x1 = max(geometry.ends[i] * size.width - gap, x0 + minW)
+            drawRoundRect(colors[i], Offset(x0, top), Size(x1 - x0, h), radius)
+        }
     }
 }
 

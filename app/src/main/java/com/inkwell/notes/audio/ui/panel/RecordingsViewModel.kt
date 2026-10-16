@@ -16,7 +16,6 @@ import com.inkwell.notes.audio.RecordingState
 import com.inkwell.notes.audio.logic.AudioText
 import com.inkwell.notes.audio.logic.MarkdownBlocks
 import com.inkwell.notes.audio.logic.TranscriptAction
-import com.inkwell.notes.audio.logic.TranscriptFilter
 import com.inkwell.notes.audio.logic.TranscriptPrompts
 import com.inkwell.notes.audio.logic.Waveform
 import com.inkwell.notes.audio.recorder.AudioFiles
@@ -29,18 +28,31 @@ import com.inkwell.notes.core.model.AiUsage
 import com.inkwell.notes.core.model.BlockType
 import com.inkwell.notes.core.model.DocKind
 import com.inkwell.notes.core.model.ModelRef
+import com.inkwell.notes.core.model.Person
 import com.inkwell.notes.core.model.Recording
+import com.inkwell.notes.core.model.RecordingSpeaker
+import com.inkwell.notes.core.model.SpeakerEngine
+import com.inkwell.notes.core.model.SpeakerPrefs
+import com.inkwell.notes.core.model.SpeakerTurn
 import com.inkwell.notes.core.model.TextSource
 import com.inkwell.notes.core.model.TranscriptSegment
 import com.inkwell.notes.core.model.TypedBlock
 import com.inkwell.notes.core.model.TypedDocument
 import com.inkwell.notes.core.storage.FileStore
+import com.inkwell.notes.speakers.DiarizationPhase
+import com.inkwell.notes.speakers.SpeakerModelState
+import com.inkwell.notes.speakers.ui.SpeakerEditor
+import com.inkwell.notes.speakers.ui.logic.BlockMove
+import com.inkwell.notes.speakers.ui.logic.NameSuggestions
+import com.inkwell.notes.speakers.ui.logic.SpeakerTranscript
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
@@ -64,13 +76,22 @@ internal data class AiAvailability(
     val transcriptionModel: ModelRef? = null,
     val transcriptionModelName: String? = null,
     val usdPerAudioMinute: Double? = null,
+    /** Speakers are labelled by OpenAI while transcribing (engine OPENAI and an OpenAI key). */
+    val cloudSpeakers: Boolean = false,
 )
 
 /** A confirmation before audio or text leaves the device. */
 internal sealed interface Consent {
     val provider: AiProviderId
 
-    data class Transcribe(val recording: Recording, override val provider: AiProviderId, val minutes: Int, val cost: String?) : Consent
+    /** [voiceClips]: short reference clips of known people are sent with the audio. */
+    data class Transcribe(
+        val recording: Recording,
+        override val provider: AiProviderId,
+        val minutes: Int,
+        val cost: String?,
+        val voiceClips: Boolean = false,
+    ) : Consent
     data class Ask(val pending: PendingAsk, override val provider: AiProviderId, val withNotes: Boolean) : Consent
 }
 
@@ -98,6 +119,16 @@ internal data class AiResultState(
     val savedTitle: String? = null,
     val saveError: String? = null,
 )
+
+/** A speaker dialog of the panel. */
+internal sealed interface SpeakerDialog {
+    /** Name or rename one voice. */
+    data class Name(val speaker: RecordingSpeaker) : SpeakerDialog
+    /** Merge one voice into another. */
+    data class Merge(val speaker: RecordingSpeaker) : SpeakerDialog
+    /** "Change speaker" for one transcript block. */
+    data class Block(val recordingId: String, val segment: TranscriptSegment) : SpeakerDialog
+}
 
 internal class RecordingsViewModel(private val graph: AppGraph, val docId: String) : ViewModel() {
     private val context get() = graph.context
@@ -134,9 +165,74 @@ internal class RecordingsViewModel(private val graph: AppGraph, val docId: Strin
 
     val query = MutableStateFlow("")
 
-    val matches: StateFlow<List<TranscriptFilter.Match>> = combine(transcript, query) { segs, q -> TranscriptFilter.filter(segs, q) }
+    // ------------------------------------------------------------------ speakers
+
+    val speakerPrefs: StateFlow<SpeakerPrefs> = graph.settings.settings.map { it.speakers }.distinctUntilChanged()
+        .stateIn(viewModelScope, SharingStarted.Eagerly, graph.settings.current.speakers)
+
+    /** Voices of the selected recording, in order of first appearance. */
+    val speakers: StateFlow<List<RecordingSpeaker>> = selectedId
+        .flatMapLatest { id -> if (id == null) flowOf(emptyList()) else graph.speakers.speakers(id).catch { emit(emptyList()) } }
+        .map { SpeakerTranscript.inOrder(it) }
+        .flowOn(Dispatchers.IO)
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    val turns: StateFlow<List<SpeakerTurn>> = selectedId
+        .flatMapLatest { id -> if (id == null) flowOf(emptyList()) else graph.speakers.turns(id).catch { emit(emptyList()) } }
+        .flowOn(Dispatchers.IO)
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    val diarization: StateFlow<DiarizationPhase> = selectedId
+        .flatMapLatest { id -> if (id == null) flowOf(DiarizationPhase.None) else graph.speakers.phase(id).catch { emit(DiarizationPhase.None) } }
+        .flowOn(Dispatchers.IO)
+        .stateIn(viewModelScope, SharingStarted.Eagerly, DiarizationPhase.None)
+
+    val needsNaming: StateFlow<Boolean> = selectedId
+        .flatMapLatest { id -> if (id == null) flowOf(false) else graph.speakers.needsNaming(id).catch { emit(false) } }
+        .flowOn(Dispatchers.IO)
+        .stateIn(viewModelScope, SharingStarted.Eagerly, false)
+
+    val people: StateFlow<List<Person>> = graph.speakers.people()
+        .catch { emit(emptyList()) }
+        .flowOn(Dispatchers.IO)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    val modelState: StateFlow<SpeakerModelState> = graph.speakers.modelState
+
+    /** The voice the transcript is filtered to (a label), or null for everyone. */
+    val speakerFilter = MutableStateFlow<String?>(null)
+
+    /** Why the transcription job could not label speakers in the cloud, when it says so. */
+    val speakerNote: StateFlow<String?> = work
+        .map { info -> info?.takeIf { it.state.isFinished }?.outputData?.getString(KEY_SPEAKER_NOTE)?.trim()?.takeIf { it.isNotEmpty() } }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, null)
+
+    /** Speakers the transcript shows: none while the engine is off (stored names still show). */
+    private val shownSpeakers: Flow<List<RecordingSpeaker>> =
+        combine(speakers, speakerPrefs) { s, p -> if (p.engine == SpeakerEngine.OFF) emptyList() else s }
+
+    val rows: StateFlow<List<SpeakerTranscript.Row>> = combine(transcript, query, shownSpeakers, speakerFilter) { segs, q, spk, only ->
+        SpeakerTranscript.rows(segs, q, spk.associateBy { it.label }, only)
+    }
         .flowOn(Dispatchers.Default)
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    /** Whole-percent share of talk time per label. */
+    val shares: StateFlow<Map<String, Int>> = combine(speakers, turns) { s, t -> SpeakerTranscript.talkShares(s, t) }
+        .flowOn(Dispatchers.Default)
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyMap())
+
+    private val speakerEditor = SpeakerEditor(graph) { message = context.getString(R.string.spk_action_failed) }
+
+    private val namingFlows = HashMap<String, StateFlow<Boolean>>()
+
+    /** Whether [recordingId] has voices waiting for a name (for the list's badge). Main thread. */
+    fun needsNamingOf(recordingId: String): StateFlow<Boolean> = namingFlows.getOrPut(recordingId) {
+        graph.speakers.needsNaming(recordingId)
+            .catch { emit(false) }
+            .flowOn(Dispatchers.IO)
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+    }
 
     /** Envelope of the selected recording (0..1 per 100 ms), null while loading or missing. */
     val waveform: StateFlow<FloatArray?> = selected
@@ -166,6 +262,9 @@ internal class RecordingsViewModel(private val graph: AppGraph, val docId: Strin
     var largeRequest by mutableStateOf<PendingAsk?>(null)
     var aiResult by mutableStateOf<AiResultState?>(null)
     var pickingPassage by mutableStateOf(false)
+    /** The recording whose naming sheet is open. */
+    var namingFor by mutableStateOf<String?>(null)
+    var speakerDialog by mutableStateOf<SpeakerDialog?>(null)
     private var aiJob: Job? = null
 
     init {
@@ -180,6 +279,13 @@ internal class RecordingsViewModel(private val graph: AppGraph, val docId: Strin
                 if (id != null && list.none { it.id == id } && loadedFlag.value) selectedId.value = null
             }
         }
+        // A merged or removed voice can't stay the filter.
+        viewModelScope.launch {
+            speakers.collect { list ->
+                val only = speakerFilter.value
+                if (only != null && list.none { it.label == only }) speakerFilter.value = null
+            }
+        }
     }
 
     private fun computeAvailability(): AiAvailability {
@@ -190,7 +296,9 @@ internal class RecordingsViewModel(private val graph: AppGraph, val docId: Strin
         val name = model?.let { runCatching { ai.modelInfo(it)?.displayName }.getOrNull() ?: it.modelId }
         // Speech-to-text is billed per audio minute; the price table lives in the AI engine.
         val perMinute = model?.let { ref -> runCatching { (ai as? AiServiceImpl)?.engine?.models?.spec(ref)?.usdPerAudioMinute }.getOrNull() }
-        return AiAvailability(graph.settings.current.ai.enabled, transcribe, summarize, model, name, perMinute)
+        val cloudSpeakers = transcribe && graph.settings.current.speakers.engine == SpeakerEngine.OPENAI &&
+            runCatching { ai.canDiarize() }.getOrDefault(false)
+        return AiAvailability(graph.settings.current.ai.enabled, transcribe, summarize, model, name, perMinute, cloudSpeakers)
     }
 
     // ------------------------------------------------------------------ navigation
@@ -199,9 +307,72 @@ internal class RecordingsViewModel(private val graph: AppGraph, val docId: Strin
         if (selectedId.value != id) {
             query.value = ""
             pickingPassage = false
+            speakerFilter.value = null
+            speakerDialog = null
         }
         renamingId = null
         selectedId.value = id
+    }
+
+    // ------------------------------------------------------------------ speakers
+
+    fun toggleSpeakerFilter(label: String) {
+        speakerFilter.value = if (speakerFilter.value == label) null else label
+    }
+
+    /** Seeks to the next (or previous) block of the filtered voice and plays from there. */
+    fun seekToVoice(rec: Recording, forward: Boolean) {
+        val key = speakerFilter.value ?: return
+        val starts = SpeakerTranscript.blockStarts(key, transcript.value, speakers.value.associateBy { it.label }, turns.value)
+        if (starts.isEmpty()) {
+            val name = speakers.value.firstOrNull { it.label == key }?.displayName ?: key
+            message = context.getString(R.string.spk_no_blocks, name)
+            return
+        }
+        val pos = positionFor(rec)
+        val target = if (forward) SpeakerTranscript.next(starts, pos) else SpeakerTranscript.previous(starts, pos)
+        if (target != null) seek(rec, target, play = true)
+    }
+
+    fun identifySpeakers(rec: Recording, replace: Boolean) {
+        speakerEditor.run(onFailure = { message = context.getString(R.string.spk_identify_start_failed) }) {
+            identify(docId, rec.id, replace)
+        }
+    }
+
+    fun cancelIdentify(rec: Recording) {
+        speakerEditor.run { cancel(rec.id) }
+    }
+
+    fun nameVoice(s: RecordingSpeaker, name: String) {
+        speakerDialog = null
+        val clean = NameSuggestions.clean(name)
+        if (clean.isNotEmpty()) speakerEditor.name(s.recordingId, s.label, clean)
+    }
+
+    fun assignVoice(s: RecordingSpeaker, person: Person?) {
+        speakerDialog = null
+        speakerEditor.assign(s.recordingId, s.label, person?.id)
+    }
+
+    fun confirmVoice(s: RecordingSpeaker) {
+        speakerEditor.confirm(s.recordingId, s.label)
+    }
+
+    fun mergeVoice(from: RecordingSpeaker, into: RecordingSpeaker) {
+        speakerDialog = null
+        if (speakerFilter.value == from.label) speakerFilter.value = into.label
+        speakerEditor.merge(from.recordingId, from.label, into.label)
+    }
+
+    fun moveBlock(recordingId: String, segment: TranscriptSegment, move: BlockMove?) {
+        speakerDialog = null
+        if (move == null || (move is BlockMove.ToVoice && move.label == segment.speakerLabel)) return
+        speakerEditor.move(recordingId, segment.startMs, move)
+    }
+
+    fun changeSpeaker(rec: Recording, segment: TranscriptSegment) {
+        speakerDialog = SpeakerDialog.Block(rec.id, segment)
     }
 
     // ------------------------------------------------------------------ rename
@@ -267,7 +438,7 @@ internal class RecordingsViewModel(private val graph: AppGraph, val docId: Strin
         }
         val provider = a.transcriptionModel?.provider ?: AiProviderId.OPENAI
         if (graph.settings.current.privacy.confirmAiTransmission && !AudioAiConsent.has(provider)) {
-            consent = Consent.Transcribe(rec, provider, transcriptionMinutes(rec), transcriptionCost(rec))
+            consent = Consent.Transcribe(rec, provider, transcriptionMinutes(rec), transcriptionCost(rec), voiceClips = a.cloudSpeakers)
             return
         }
         startTranscription(rec)
@@ -469,14 +640,18 @@ internal class RecordingsViewModel(private val graph: AppGraph, val docId: Strin
         val rec = pendingDelete ?: return
         pendingDelete = null
         if (selectedId.value == rec.id) select(null)
+        if (namingFor == rec.id) namingFor = null
         if (playback.value.recording?.id == rec.id) graph.playback.release()
         // Outlives the panel: deleting must finish even if it is closed right away.
         graph.appScope.launch(Dispatchers.IO) {
             try {
                 runCatching { Transcriptions.cancel(graph, rec.id) }
+                runCatching { graph.speakers.cancel(rec.id) }
                 db.transcripts().deleteForRecording(rec.id)
                 db.recordings().delete(rec.id)
                 graph.files.audioDir(rec.documentId, rec.id).deleteRecursively()
+                // The recording's speakers and turns go with its row; this drops its voice data.
+                runCatching { graph.speakers.onRecordingDeleted(rec.id) }
                 runCatching { graph.search.replaceTranscript(docId, rec.id, emptyList(), "deleted") }
             } catch (t: Throwable) {
                 Log.w(TAG, "Delete failed", t)
@@ -493,6 +668,8 @@ internal class RecordingsViewModel(private val graph: AppGraph, val docId: Strin
         private const val TAG = "RecordingsPanel"
         private const val MAX_TITLE = 120
         const val AUDIO_MIME = "audio/mp4"
+        /** Output of the transcription job when OpenAI could not label speakers (see TranscriptionWorker). */
+        const val KEY_SPEAKER_NOTE = "speakerNote"
         private val TYPED_JSON = Json { encodeDefaults = true; ignoreUnknownKeys = true }
     }
 }

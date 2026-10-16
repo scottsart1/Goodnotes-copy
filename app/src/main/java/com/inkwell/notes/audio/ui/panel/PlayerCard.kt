@@ -33,6 +33,7 @@ import com.inkwell.notes.R
 import com.inkwell.notes.audio.PlaybackState
 import com.inkwell.notes.audio.logic.AudioText
 import com.inkwell.notes.core.model.Recording
+import com.inkwell.notes.speakers.ui.logic.LaneGeometry
 import com.inkwell.notes.ui.theme.Inkwell
 import java.util.Locale
 
@@ -50,6 +51,9 @@ internal fun PlayerCard(
     onSpeed: (Float) -> Unit,
     onShowNotes: () -> Unit,
     modifier: Modifier = Modifier,
+    lanes: LaneGeometry = LaneGeometry.EMPTY,
+    lanesDescription: String = "",
+    focusLabel: String? = null,
 ) {
     val c = Inkwell.colors
     val mine = playback.recording?.id == recording.id
@@ -67,13 +71,17 @@ internal fun PlayerCard(
             .padding(horizontal = 16.dp, vertical = 14.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        WaveformBar(
-            values = waveform,
-            positionMs = position,
-            durationMs = duration,
-            onSeek = onSeek,
-            description = stringResource(R.string.audio_waveform_cd, AudioText.clock(position), AudioText.clock(duration)),
-        )
+        Column(Modifier.fillMaxWidth()) {
+            WaveformBar(
+                values = waveform,
+                positionMs = position,
+                durationMs = duration,
+                onSeek = onSeek,
+                description = stringResource(R.string.audio_waveform_cd, AudioText.clock(position), AudioText.clock(duration)),
+            )
+            // Who spoke when, on the same timeline.
+            if (!lanes.isEmpty()) SpeakerLaneBar(lanes, focusLabel, onSeek, lanesDescription, Modifier.padding(top = 2.dp))
+        }
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Text(AudioText.clock(position), style = tnum, color = c.ink)
             Spacer(Modifier.weight(1f))
