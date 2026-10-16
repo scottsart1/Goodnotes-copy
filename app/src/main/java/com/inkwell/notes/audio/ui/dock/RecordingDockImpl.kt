@@ -26,6 +26,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.util.VelocityTracker
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -95,8 +96,10 @@ private fun BoxWithConstraintsScope.DockedControl(
     val scope = rememberCoroutineScope()
     val settings by graph.settings.settings.collectAsStateWithLifecycle()
 
-    val widthPx = constraints.maxWidth.toFloat()
-    val heightPx = constraints.maxHeight.toFloat()
+    // Unbounded constraints (an unusual host) fall back to the window size.
+    val window = LocalConfiguration.current
+    val widthPx = if (constraints.hasBoundedWidth) constraints.maxWidth.toFloat() else with(density) { window.screenWidthDp.dp.toPx() }
+    val heightPx = if (constraints.hasBoundedHeight) constraints.maxHeight.toFloat() else with(density) { window.screenHeightDp.dp.toPx() }
     val metrics = remember(widthPx, heightPx, density) {
         with(density) {
             DockMetrics(
