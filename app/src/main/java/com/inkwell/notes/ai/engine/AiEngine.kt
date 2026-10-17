@@ -8,8 +8,11 @@ import com.inkwell.notes.ai.net.SseEvent
 import com.inkwell.notes.ai.net.ErrorMapper
 import com.inkwell.notes.ai.net.SseParser
 import com.inkwell.notes.ai.provider.ChatCall
+import com.inkwell.notes.ai.provider.DiarizeReferences
+import com.inkwell.notes.ai.provider.DiarizedTranscriptionParser
 import com.inkwell.notes.ai.provider.ModelSpec
 import com.inkwell.notes.ai.provider.OpenAiAdapter
+import com.inkwell.notes.ai.provider.OpenAiModels
 import com.inkwell.notes.ai.provider.ProviderAdapter
 import com.inkwell.notes.ai.provider.ProviderRegistry
 import com.inkwell.notes.ai.provider.StopReason
@@ -32,6 +35,7 @@ import com.inkwell.notes.core.model.ModelRef
 import com.inkwell.notes.core.model.Transcript
 import com.inkwell.notes.core.model.TranscriptSegment
 import com.inkwell.notes.core.storage.db.AiUsageEntity
+import com.inkwell.notes.speakers.SpeakerReference
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
@@ -235,7 +239,25 @@ class AiEngine(
 
     fun monthStart(): Long = MonthWindow.startOfMonth(clock(), zone())
 
-    suspend fun monthSpendUsd(): Double = runCatching { usage.costSince(monthStart()) }.getOrDefault(0.0)
+    /** Last month spend read from the usage table, for checks that cannot query it (main thread). */
+    private class SpendSnapshot(val monthStart: Long, val spent: Double)
+
+    @Volatile private var spendSnapshot: SpendSnapshot? = null
+
+    suspend fun monthSpendUsd(): Double {
+        val start = monthStart()
+        return runCatching { usage.costSince(start) }
+            .onSuccess { spendSnapshot = SpendSnapshot(start, it) }
+            .getOrDefault(0.0)
+    }
+
+    /** True when the last known spend of this month already reached the hard limit (unknown: false). */
+    fun budgetKnownExceeded(): Boolean {
+        val limit = prefs().monthlyHardLimitUsd
+        if (limit <= 0.0) return false
+        val snap = spendSnapshot ?: return false
+        return snap.monthStart == monthStart() && snap.spent >= limit
+    }
 
     /** Failure when the monthly hard limit is reached, else null. */
     suspend fun budgetFailure(): AiFailure? {
@@ -654,6 +676,84 @@ class AiEngine(
         return Transcript(recordingId, all, "openai:${ref.modelId}", language ?: detected)
     }
 
+    // ------------------------------------------------------------------ speaker-labelled transcription
+
+    /**
+     * True when speakers can be labelled by OpenAI: AI on, OpenAI enabled with a stored key and
+     * a usable (official or custom) endpoint. The monthly limit is not part of this check.
+     */
+    fun diarizeConfigured(): Boolean {
+        val p = AiProviderId.OPENAI
+        if (!prefs().enabled || !usable(p)) return false
+        if (providers.find(p) !is OpenAiAdapter) return false
+        return runCatching { endpoint(p) }.isSuccess
+    }
+
+    /** [diarizeConfigured] and the monthly limit not known to be reached. Never touches the disk or network. */
+    fun canDiarize(): Boolean = diarizeConfigured() && !budgetKnownExceeded()
+
+    /**
+     * Transcribes one file with speaker labels (gpt-4o-transcribe-diarize, diarized_json).
+     * Segments carry the provider's speaker label, are shifted by [offsetMs] and clamped to
+     * [durationMs]. [references] are filtered to what the API accepts; when the API still
+     * refuses the request (400, 413, 422) it is sent once more without them, so voices are labelled
+     * as new rather than the transcript failing. Null when unavailable; throws [AiException].
+     */
+    suspend fun transcribeDiarized(
+        recordingId: String,
+        file: File,
+        durationMs: Long,
+        offsetMs: Long,
+        references: List<SpeakerReference>,
+        language: String?,
+    ): Transcript? = withContext(io) { transcribeDiarizedOnIo(recordingId, file, durationMs, offsetMs, references, language) }
+
+    private suspend fun transcribeDiarizedOnIo(
+        recordingId: String,
+        file: File,
+        durationMs: Long,
+        offsetMs: Long,
+        references: List<SpeakerReference>,
+        language: String?,
+    ): Transcript? {
+        val p = AiProviderId.OPENAI
+        if (!diarizeConfigured()) return null
+        val adapter = providers.find(p) as? OpenAiAdapter ?: return null
+        budgetFailure()?.let { throw it.toException() }
+        val key = keys.get(p)?.takeIf { it.isNotBlank() } ?: return null
+        keyFailure(p, key)?.let { throw it.toException() }
+        val (base, _) = endpoint(p)
+        val model = OpenAiModels.DIARIZE_MODEL
+        val source = "openai:$model"
+        if (!file.isFile || file.length() == 0L) return Transcript(recordingId, emptyList(), source, language)
+        if (file.length() > MAX_AUDIO_UPLOAD_BYTES) throw AiException("This audio segment is larger than OpenAI's 25 MB upload limit.")
+        val refs = DiarizeReferences.prepare(references)
+        val body = try {
+            executeForBodyOrFail(p, adapter.diarizedTranscriptionRequest(base, key, file, model, language, refs), key, model)
+        } catch (e: FailureException) {
+            if (refs.isEmpty() || e.failure.httpStatus !in REFERENCE_REFUSED_STATUSES) throw e.failure.toException()
+            try {
+                executeForBodyOrFail(p, adapter.diarizedTranscriptionRequest(base, key, file, model, language, emptyList()), key, model)
+            } catch (e2: FailureException) {
+                throw e2.failure.toException()
+            }
+        }
+        val parsed = DiarizedTranscriptionParser.parse(body, offsetMs, durationMs)
+        val spec = models.spec(ModelRef(p, model))
+        val billedMs = durationMs.takeIf { it > 0 } ?: parsed.durationMs
+        val outTokens = parsed.outputTokens ?: TokenEstimator.text(parsed.segments.joinToString("\n") { it.text })
+        runCatching {
+            usage.record(
+                AiUsageEntity(
+                    timestamp = clock(), provider = p.name, model = model, task = AiTask.TRANSCRIPTION.name,
+                    inputTokens = parsed.inputTokens ?: 0, outputTokens = outTokens,
+                    estimatedCostUsd = CostCalculator.audio(spec, billedMs), documentId = null,
+                ),
+            )
+        }
+        return Transcript(recordingId, parsed.segments, source, language ?: parsed.language)
+    }
+
     // ------------------------------------------------------------------ embeddings
 
     /** Embeddings in batches of 64; null when semantic search or an embedding model is unavailable. */
@@ -702,6 +802,8 @@ class AiEngine(
         const val MAX_RETRY_AFTER_MS = 30_000L
         const val MAX_ERROR_BODY = 64L * 1024
         const val MAX_AUDIO_UPLOAD_BYTES = 25L * 1024 * 1024
+        /** Responses after which a speaker-labelled request is sent again without its reference clips. */
+        private val REFERENCE_REFUSED_STATUSES = setOf(400, 413, 422)
         const val EMBED_BATCH = 64
         const val MAX_EMBED_CHARS = 24_000
         const val REFUSAL_MESSAGE = "The model declined this request."

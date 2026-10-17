@@ -62,6 +62,7 @@ object Items {
         is ShapeItem -> item.audio
         is TextItem -> item.audio
         is ImageItem -> item.audio
+        is StickyItem -> item.audio
         else -> null
     }
 
@@ -99,12 +100,13 @@ object Items {
         else -> item
     }
 
-    /** Attaches an audio anchor where the model supports one (stickies/connectors have none). */
+    /** Attaches an audio anchor where the model supports one (connectors have none). */
     fun withAudio(item: Any, anchor: AudioAnchor?): Any = when (item) {
         is Stroke -> item.copy(audio = anchor)
         is ShapeItem -> item.copy(audio = anchor)
         is TextItem -> item.copy(audio = anchor)
         is ImageItem -> item.copy(audio = anchor)
+        is StickyItem -> item.copy(audio = anchor)
         else -> item
     }
 

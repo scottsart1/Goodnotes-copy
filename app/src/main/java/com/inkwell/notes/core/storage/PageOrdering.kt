@@ -52,6 +52,7 @@ internal object PageOrdering {
         shapes = content.shapes.map { if (it.audio == null) it else it.copy(audio = null) },
         texts = content.texts.map { if (it.audio == null) it else it.copy(audio = null) },
         images = content.images.map { if (it.audio == null) it else it.copy(audio = null) },
+        stickies = content.stickies.map { if (it.audio == null) it else it.copy(audio = null) },
     )
 
     /** Puts [image] beneath everything else on the page (a flattened PDF background). */

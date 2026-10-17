@@ -45,6 +45,42 @@ data class InkwellColors(
     val pageShadow: Color,
     val selection: Color,
     val isDark: Boolean,
+    /**
+     * Eight restrained, mutually distinguishable voice colours (dots, chips, waveform lanes),
+     * indexed by Person.colorIndex / RecordingSpeaker.colorIndex. Never used for state.
+     */
+    val speakers: List<Color> = LightSpeakerPalette,
+) {
+    /** The palette colour for [index]; any int (negative or past the end) wraps around. */
+    fun speaker(index: Int): Color = speakers[Math.floorMod(index, speakers.size)]
+}
+
+/**
+ * Voice colours on light grounds: muted, mid-tone, at least 4:1 against white (3.5:1 on the
+ * accent tint of a selected row) so a 10dp dot reads, and spread around the hue circle (teal, ochre, violet, slate blue, rose, green,
+ * brown, slate). Red is left out: it means "recording".
+ */
+val LightSpeakerPalette = listOf(
+    Color(0xFF1F8379),
+    Color(0xFFA86F12),
+    Color(0xFF8250AA),
+    Color(0xFF3F67B0),
+    Color(0xFFB8486F),
+    Color(0xFF55822A),
+    Color(0xFF86643F),
+    Color(0xFF5F6977),
+)
+
+/** The same voices for dark grounds: lighter and a little softer, at least 5:1 on the dark surfaces. */
+val DarkSpeakerPalette = listOf(
+    Color(0xFF6CC4B8),
+    Color(0xFFE1B262),
+    Color(0xFFC39BE2),
+    Color(0xFF8FB0EA),
+    Color(0xFFEE93B2),
+    Color(0xFF9DCA74),
+    Color(0xFFCDAB86),
+    Color(0xFFA9B2C0),
 )
 
 val LightInkwell = InkwellColors(
@@ -65,6 +101,7 @@ val LightInkwell = InkwellColors(
     pageShadow = Color(0x1F1A1916),
     selection = Color(0xFF2952CC),
     isDark = false,
+    speakers = LightSpeakerPalette,
 )
 
 val DarkInkwell = InkwellColors(
@@ -85,6 +122,7 @@ val DarkInkwell = InkwellColors(
     pageShadow = Color(0x66000000),
     selection = Color(0xFF8FA8F0),
     isDark = true,
+    speakers = DarkSpeakerPalette,
 )
 
 val LocalInkwellColors = staticCompositionLocalOf { LightInkwell }

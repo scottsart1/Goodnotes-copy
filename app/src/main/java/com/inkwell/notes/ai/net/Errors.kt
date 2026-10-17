@@ -40,6 +40,8 @@ object Redactor {
         Regex("""sk-[A-Za-z0-9_\-]{12,}"""),
         Regex("""(?i)(bearer\s+)[A-Za-z0-9._\-]{8,}"""),
         Regex("""(?i)(x-api-key["']?\s*[:=]\s*["']?)[A-Za-z0-9._\-]{8,}"""),
+        // Inline media a provider may echo back in a validation error (voice reference clips, page images).
+        Regex("""(data:[A-Za-z]+/[A-Za-z0-9.+\-]+;base64,)[A-Za-z0-9+/=]{8,}"""),
     )
 
     fun redact(text: String?, vararg secrets: String?): String {

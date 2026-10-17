@@ -161,6 +161,9 @@ private fun RightPanelContent(controller: NotebookController, ui: PaneUiState, a
             onShowNotesAt = actions::showNotesAt,
             onClose = { ui.right = null },
             modifier = Modifier.fillMaxSize(),
+            onInsert = { text ->
+                if (text.isNotBlank()) controller.canvas.insertText(controller.currentPage, text.trim(), null, controller.tools.state.text, origin = "ai")
+            },
         )
         RightPanel.SEARCH -> Column(Modifier.fillMaxSize()) {
             PanelHeader(stringResource(R.string.editor_search_title), onClose = { ui.right = null })

@@ -12,6 +12,8 @@ enum class TranscriptAction(val label: String, val needsPassage: Boolean = false
     DECISIONS("Decisions"),
     KEY_TOPICS("Key topics"),
     ACTION_ITEMS("Action items"),
+    /** Per-person summary and action items; offered when the transcript has speaker names. */
+    BY_SPEAKER("By person"),
     REVISION_NOTES("Revision notes"),
     EXPLAIN("Explain a passage", needsPassage = true),
     COMPARE("Compare with my notes", needsNotes = true),
@@ -29,9 +31,12 @@ object TranscriptPrompts {
         Answer in the language of the transcript. Use concise Markdown: short headings, bullet lists, no preamble.
     """.trimIndent()
 
-    /** "[m:ss] text" lines, one per segment. */
+    /** "[m:ss] text" lines, one per segment, with "Name: " before the text when the speaker is known. */
     fun formatTranscript(segments: List<TranscriptSegment>): String =
-        segments.joinToString("\n") { "[${AudioText.clock(it.startMs)}] ${it.text.trim()}" }
+        segments.joinToString("\n") { s ->
+            val who = s.speaker?.trim()?.takeIf { it.isNotEmpty() }?.let { "$it: " }.orEmpty()
+            "[${AudioText.clock(s.startMs)}] $who${s.text.trim()}"
+        }
 
     /**
      * Keeps whole lines of [text] up to [maxChars], marking the cut with [TRUNCATION_NOTE].
@@ -61,6 +66,10 @@ object TranscriptPrompts {
             "List the key topics in the order they were discussed. For each: a short heading, one line on what was said, and the timestamp where it starts."
         TranscriptAction.ACTION_ITEMS ->
             "Extract the action items as a Markdown checklist (- [ ] ...). Include the owner and due date when mentioned, and the timestamp. If there are none, say so."
+        TranscriptAction.BY_SPEAKER ->
+            "Summarize by person. For each speaker named in the transcript, in order of how much they spoke: a heading with their name, " +
+                "what they said or argued (bullets with timestamps), and their action items as a checklist (- [ ] ...). " +
+                "Use the names exactly as written. If the transcript has no speaker names, say so and summarize it as a whole."
         TranscriptAction.REVISION_NOTES ->
             "Turn this recording into revision notes: a heading per topic, key definitions, formulas and examples as they were given, " +
                 "and finish with five short self-test questions (answers below them)."

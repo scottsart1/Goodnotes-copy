@@ -71,6 +71,7 @@ import com.inkwell.notes.settings.sections.PaperSection
 import com.inkwell.notes.settings.sections.PrivacySection
 import com.inkwell.notes.settings.sections.RecordingSection
 import com.inkwell.notes.settings.sections.SectionHost
+import com.inkwell.notes.settings.sections.SpeakersSection
 import com.inkwell.notes.settings.sections.ToolbarSection
 import com.inkwell.notes.settings.ui.Radius12
 import com.inkwell.notes.settings.ui.Radius8
@@ -283,7 +284,7 @@ private fun SectionDetail(
                             SettingsSection.STORAGE -> HostedSection { StorageSettingsContent(it) }
                             SettingsSection.PRIVACY -> PrivacySection(settings, actions)
                             SettingsSection.ABOUT -> AboutSection(actions, openSection)
-                            else -> GeneralSection(settings, actions)
+                            SettingsSection.SPEAKERS -> SpeakersSection(settings, actions, openSection)
                         }
                     }
                 }

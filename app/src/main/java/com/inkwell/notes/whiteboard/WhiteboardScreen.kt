@@ -29,6 +29,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.FileDownload
+import androidx.compose.material.icons.outlined.GraphicEq
 import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.automirrored.outlined.NoteAdd
 import androidx.compose.material.icons.outlined.PostAdd
@@ -41,6 +42,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -51,7 +53,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
@@ -65,6 +69,8 @@ import com.inkwell.notes.ai.ui.AiPanel
 import com.inkwell.notes.ai.ui.AiPanelContext
 import com.inkwell.notes.app.AppGraph
 import com.inkwell.notes.app.AppNavigator
+import com.inkwell.notes.audio.ui.RecordingDock
+import com.inkwell.notes.audio.ui.RecordingsPanel
 import com.inkwell.notes.core.model.PaperSpec
 import com.inkwell.notes.core.model.PaperStyle
 import com.inkwell.notes.export.ui.ExportDialog
@@ -81,12 +87,16 @@ import com.inkwell.notes.whiteboard.kit.PillSurface
 import com.inkwell.notes.whiteboard.kit.RenameDialog
 import com.inkwell.notes.whiteboard.kit.SlimTopBar
 import com.inkwell.notes.whiteboard.kit.UiMessage
+import com.inkwell.notes.whiteboard.logic.BoardAnchors
 import com.inkwell.notes.whiteboard.ui.AddNotebookPageDialog
+import com.inkwell.notes.whiteboard.ui.BoardRecordButton
+import com.inkwell.notes.whiteboard.ui.BoardRecordingDialogs
 import com.inkwell.notes.whiteboard.ui.BoardToolPill
 import com.inkwell.notes.whiteboard.ui.ExportAction
 import com.inkwell.notes.whiteboard.ui.ExportAreaOverlay
 import com.inkwell.notes.whiteboard.ui.LongPressMenu
 import com.inkwell.notes.whiteboard.ui.MenuRow
+import com.inkwell.notes.whiteboard.ui.MicPermissionEffect
 import com.inkwell.notes.whiteboard.ui.Minimap
 import com.inkwell.notes.whiteboard.ui.PdfSnippetDialog
 import com.inkwell.notes.whiteboard.ui.SelectionActions
@@ -101,10 +111,15 @@ import java.io.File
 
 private enum class BoardDialog { PDF_SNIPPET, SEND_TO_NOTEBOOK, ADD_PAGE, RENAME, EXPORT_BOARD }
 
+/** The one side panel the board shows at a time. */
+private enum class SidePanel { AI, RECORDINGS }
+
 /**
  * Infinite whiteboard: one unbounded page on the ink canvas with its own tool pill
- * (connectors, sticky notes, PDF snippets, area export), a minimap, zoom controls and the
- * assistant panel. Content autosaves (debounced) and is flushed when the app pauses.
+ * (connectors, sticky notes, PDF snippets, area export), a minimap, zoom controls, audio
+ * recording synced to what is written (record control, edge-docked recorder, recordings
+ * panel with transcripts) and the assistant panel. Content autosaves (debounced) and is
+ * flushed when the app pauses.
  */
 @Composable
 fun WhiteboardScreen(docId: String, nav: AppNavigator) {
@@ -162,8 +177,10 @@ private fun WhiteboardContent(controller: WhiteboardController, nav: AppNavigato
     val snackbar = remember { SnackbarHostState() }
     CollectMessages(controller.messages, snackbar)
 
-    var aiOpen by remember { mutableStateOf(false) }
+    // Saved so the recordings panel survives process death; the assistant needs a fresh context.
+    var panel by rememberSaveable { mutableStateOf<SidePanel?>(null) }
     var aiContext by remember { mutableStateOf<AiPanelContext?>(null) }
+    if (panel == SidePanel.AI && aiContext == null) SideEffect { panel = null }
     var exportMode by remember { mutableStateOf(false) }
     var dialog by remember { mutableStateOf<BoardDialog?>(null) }
     var minimapCollapsed by rememberSaveable { mutableStateOf<Boolean?>(null) }
@@ -203,19 +220,34 @@ private fun WhiteboardContent(controller: WhiteboardController, nav: AppNavigato
             controller.busy = R.string.wb_reading_board
             try {
                 aiContext = controller.ops.aiContext()
-                aiOpen = true
+                panel = SidePanel.AI
             } finally {
                 controller.busy = null
             }
         }
     }
 
-    BackHandler(enabled = aiOpen && !exportMode) { aiOpen = false }
+    BackHandler(enabled = panel != null && !exportMode) { panel = null }
+
+    val audio = controller.audio
+    val phone = LocalConfiguration.current.screenWidthDp < 600
+    val density = LocalDensity.current
+    MicPermissionEffect(audio)
+    LaunchedEffect(audio) { audio.panelRequests.collect { panel = SidePanel.RECORDINGS } }
+    val toggleRecordings = { panel = if (panel == SidePanel.RECORDINGS) null else SidePanel.RECORDINGS }
+    val showNotesAt: (String, Long) -> Unit = { recordingId, positionMs ->
+        // A phone's panel covers the whole board: step aside so the notes can be seen.
+        if (phone) panel = null
+        audio.showNotesAt(recordingId, positionMs)
+    }
 
     BoxWithConstraints(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal))) {
         val wide = maxWidth >= 1000.dp
         val narrow = maxWidth < 600.dp
         val collapsed = minimapCollapsed ?: narrow
+        // An overlay panel (between the phone and wide layouts) covers the canvas' right edge.
+        val coverPx = if (panel != null && !wide && !phone) minOf(with(density) { Dimens.panelWidth.toPx() }, canvasSize.width.toFloat()) else 0f
+        SideEffect { audio.panelCoverPx = coverPx }
         Column(Modifier.fillMaxSize()) {
             TopBarFrame {
                 SlimTopBar(
@@ -223,6 +255,11 @@ private fun WhiteboardContent(controller: WhiteboardController, nav: AppNavigato
                     onBack = nav::back,
                     onTitleClick = { dialog = BoardDialog.RENAME },
                 ) {
+                    BoardRecordButton(controller.docId, audio::onRecord)
+                    KitIconButton(
+                        Icons.Outlined.GraphicEq, stringResource(R.string.wb_audio_recordings), toggleRecordings,
+                        selected = panel == SidePanel.RECORDINGS,
+                    )
                     Box {
                         KitIconButton(Icons.Outlined.MoreVert, stringResource(R.string.cd_more), { menuOpen = true })
                         BoardMenu(
@@ -254,14 +291,14 @@ private fun WhiteboardContent(controller: WhiteboardController, nav: AppNavigato
                             presets = settings.penPresets,
                             canUndo = controller.canUndo,
                             canRedo = controller.canRedo,
-                            aiOpen = aiOpen,
+                            aiOpen = panel == SidePanel.AI,
                             exportActive = exportMode,
                             onToolState = controller::updateTools,
                             onImage = { controller.requestImage(null) },
                             onUndo = controller::undo,
                             onRedo = controller::redo,
                             onPdfSnippet = { dialog = BoardDialog.PDF_SNIPPET },
-                            onAi = { if (aiOpen) aiOpen = false else openAi() },
+                            onAi = { if (panel == SidePanel.AI) panel = null else openAi() },
                             onExportArea = { controller.canvas?.clearSelection(); exportMode = true },
                             modifier = Modifier.align(Alignment.TopCenter).padding(top = 8.dp, start = 8.dp, end = 8.dp),
                         )
@@ -274,6 +311,7 @@ private fun WhiteboardContent(controller: WhiteboardController, nav: AppNavigato
                         }
 
                         val sel = controller.selection
+                        val selAnchor = remember(sel) { sel?.content?.let { BoardAnchors.firstAnchor(it) } }
                         if (sel != null && controller.textEdit == null && controller.stickyEdit == null) {
                             SelectionBar(
                                 sel,
@@ -289,6 +327,7 @@ private fun WhiteboardContent(controller: WhiteboardController, nav: AppNavigato
                                     onUngroup = { controller.canvas?.ungroupSelection() },
                                     onSendToNotebook = { dialog = BoardDialog.SEND_TO_NOTEBOOK },
                                     onAskAi = { openAi() },
+                                    onPlayFromHere = selAnchor?.let { a -> { audio.playFrom(a) } },
                                 ),
                             )
                         }
@@ -320,6 +359,9 @@ private fun WhiteboardContent(controller: WhiteboardController, nav: AppNavigato
                         )
                     }
 
+                    // Edge-docked recorder; it draws only its own control, so ink underneath keeps working.
+                    RecordingDock(controller.docId, Modifier.fillMaxSize())
+
                     controller.textEdit?.let { req ->
                         TextBoxEditor(req, controller.page?.paper?.color ?: 0xFFFFFFFF.toInt()) { text, cfg -> controller.commitText(req, text, cfg) }
                     }
@@ -329,7 +371,7 @@ private fun WhiteboardContent(controller: WhiteboardController, nav: AppNavigato
                     controller.longPress?.let { req ->
                         LongPressMenu(
                             request = req,
-                            canPaste = BoardClipboard.content != null,
+                            canPaste = controller.ops.canPaste(),
                             onPaste = { scope.launch { controller.ops.paste(PointF(req.pageX, req.pageY)) } },
                             onSticky = { controller.addStickyAt(req.pageX, req.pageY) },
                             onText = { controller.startTextAt(req.pageX, req.pageY) },
@@ -369,16 +411,15 @@ private fun WhiteboardContent(controller: WhiteboardController, nav: AppNavigato
 
                     controller.busy?.let { res -> BusyPill(stringResource(res), Modifier.align(Alignment.TopEnd).padding(top = 64.dp, end = 12.dp)) }
 
-                    if (aiOpen && !wide) {
-                        aiContext?.let { ctx ->
-                            AiPanel(
-                                context = ctx,
-                                onInsert = { controller.ops.insertAiText(it) },
-                                onOpenSource = { controller.fitContent() },
-                                onClose = { aiOpen = false },
-                                modifier = Modifier.fillMaxSize(),
-                            )
-                        }
+                    if (panel != null && !wide) {
+                        BoardSidePanel(
+                            panel = panel,
+                            controller = controller,
+                            aiContext = aiContext,
+                            onShowNotesAt = showNotesAt,
+                            onClose = { panel = null },
+                            modifier = Modifier.fillMaxSize(),
+                        )
                     }
 
                     KitMessageHost(
@@ -386,16 +427,15 @@ private fun WhiteboardContent(controller: WhiteboardController, nav: AppNavigato
                         Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(bottom = 72.dp),
                     )
                 }
-                if (aiOpen && wide) {
-                    aiContext?.let { ctx ->
-                        AiPanel(
-                            context = ctx,
-                            onInsert = { controller.ops.insertAiText(it) },
-                            onOpenSource = { controller.fitContent() },
-                            onClose = { aiOpen = false },
-                            modifier = Modifier.width(Dimens.panelWidth).fillMaxHeight().navigationBarsPadding(),
-                        )
-                    }
+                if (panel != null && wide) {
+                    BoardSidePanel(
+                        panel = panel,
+                        controller = controller,
+                        aiContext = aiContext,
+                        onShowNotesAt = showNotesAt,
+                        onClose = { panel = null },
+                        modifier = Modifier.width(Dimens.panelWidth).fillMaxHeight().navigationBarsPadding(),
+                    )
                 }
             }
         }
@@ -429,6 +469,41 @@ private fun WhiteboardContent(controller: WhiteboardController, nav: AppNavigato
             onRename = { title -> runCatching { graph.library.renameDocument(controller.docId, title) }.isSuccess },
         )
         BoardDialog.EXPORT_BOARD -> ExportDialog(controller.docId, null) { dialog = null }
+        null -> Unit
+    }
+    BoardRecordingDialogs(audio, controller.docId)
+}
+
+/**
+ * The assistant, or the recordings of this board (list, playback, transcript with speakers
+ * and the transcript AI actions): 420dp at the end on tablets, the full width on phones.
+ */
+@Composable
+private fun BoardSidePanel(
+    panel: SidePanel?,
+    controller: WhiteboardController,
+    aiContext: AiPanelContext?,
+    onShowNotesAt: (String, Long) -> Unit,
+    onClose: () -> Unit,
+    modifier: Modifier,
+) {
+    when (panel) {
+        SidePanel.AI -> aiContext?.let { ctx ->
+            AiPanel(
+                context = ctx,
+                onInsert = { controller.ops.insertAiText(it) },
+                onOpenSource = { controller.fitContent() },
+                onClose = onClose,
+                modifier = modifier,
+            )
+        }
+        SidePanel.RECORDINGS -> RecordingsPanel(
+            docId = controller.docId,
+            onShowNotesAt = onShowNotesAt,
+            onClose = onClose,
+            modifier = modifier,
+            onInsert = { controller.ops.insertAiText(it) },
+        )
         null -> Unit
     }
 }

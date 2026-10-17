@@ -176,6 +176,8 @@ data class StickyItem(
     @ProtoNumber(8) val z: Int = 0,
     @ProtoNumber(9) val createdAt: Long = 0,
     @ProtoNumber(10) val groupId: String? = null,
+    /** Recording position when the note was added (whiteboard meetings); null otherwise. */
+    @ProtoNumber(11) val audio: AudioAnchor? = null,
 )
 
 /**

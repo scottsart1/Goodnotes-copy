@@ -7,11 +7,16 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.res.stringResource
+import com.inkwell.notes.R
 import com.inkwell.notes.app.SettingsSection
+import com.inkwell.notes.settings.SettingsCatalog
+import com.inkwell.notes.settings.ui.ActionRow
 import com.inkwell.notes.core.model.AiTask
 import com.inkwell.notes.core.model.AppSettings
 import com.inkwell.notes.core.model.DockSide
 import com.inkwell.notes.core.model.RecordingPrefs
+import com.inkwell.notes.core.model.SpeakerEngine
 import com.inkwell.notes.settings.logic.SettingsFormat
 import com.inkwell.notes.settings.ui.Choice
 import com.inkwell.notes.settings.ui.Note
@@ -81,6 +86,9 @@ internal fun RecordingSection(s: AppSettings, actions: SettingsActions, openSect
                     modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 12.dp),
                 )
             }
+            if (rec.autoTranscribe && s.speakers.engine == SpeakerEngine.OPENAI) {
+                Note(stringResource(R.string.spk_consent_clips), modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 12.dp))
+            }
         }
 
         SettingsGroup("Audio", description = "Higher quality sounds clearer and takes more space.") {
@@ -99,6 +107,15 @@ internal fun RecordingSection(s: AppSettings, actions: SettingsActions, openSect
                 choices = SegmentChoices.map { Choice(it, SettingsFormat.minutesLabel(it)) },
                 selected = rec.segmentSeconds,
                 onSelect = { sec -> set { it.copy(segmentSeconds = sec) } },
+            )
+        }
+
+        SettingsGroup("Speakers") {
+            ActionRow(
+                title = SettingsSection.SPEAKERS.title,
+                subtitle = SettingsCatalog.SPEAKERS_SUMMARY,
+                actionLabel = "Open",
+                onAction = { openSection(SettingsSection.SPEAKERS) },
             )
         }
 

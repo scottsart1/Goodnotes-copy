@@ -32,6 +32,7 @@ so it is unit-testable without Android.
 | `library` | Home library, folders, trash | `LibraryScreen.kt` |
 | `ai` | Providers, routing, usage/cost, chat panel, AI settings | `AiService.kt`, `ui/AiUi.kt` |
 | `audio` | Recording service, playback, edge-docked recorder, transcripts | `AudioContracts.kt`, `ui/AudioUi.kt`, `RecordingService.kt` |
+| `speakers` | Who spoke when, people, voiceprints, naming after a meeting | `SpeakerContracts.kt` |
 | `ocr` + `search` | ML Kit OCR + handwriting recognition, FTS index, indexing pipeline, search screen | `ocr/OcrContracts.kt`, `search/SearchScreen.kt` |
 | `pdf` | Import, render, text extraction, merge/split/extract, scanning | `PdfService.kt` |
 | `export` | Export formats, thumbnails, backup, sync to folder / notes vault, storage settings UI | `ExportContracts.kt`, `ui/ExportUi.kt` |
@@ -49,7 +50,8 @@ Rules for contracts:
 3. Get collaborators lazily from the graph (`graph.library`, `graph.ai`, ...). Never construct
    another feature's implementation yourself.
 4. `AppDatabase` (entities + DAOs) is shared. You may add queries to the DAO of your own
-   feature; adding columns/entities is allowed only if essential (keep `version = 1`).
+   feature; adding columns/entities is allowed only if essential. A schema change bumps
+   `version` with a non-destructive migration in `db/Migrations.kt` (see `MigrationSchemaTest`).
 5. `app/build.gradle.kts` already declares every dependency. Do not add new libraries unless
    impossible otherwise.
 6. `AndroidManifest.xml` already declares permissions, the recording service and the
@@ -65,6 +67,33 @@ Rules for contracts:
   and never blocks writing.
 - API keys and the vault password live only in `SecretStore`; never log them, never put them
   in settings JSON, exports, or shared files.
+- Voiceprints (speaker embeddings, reference clips) are biometric: encrypted, under
+  `noBackupFilesDir`, never in the database, backups, exports or sync. Only names travel.
+
+## Speaker identification
+
+Runs after a recording, never live. `SpeakerPrefs.engine` picks the engine:
+
+- **DEVICE** (default): `RecordingEngine` calls `SpeakerService.onRecordingFinished` and
+  `speakers/work/DiarizationWorker` runs sherpa-onnx (pyannote segmentation 3.0 + WeSpeaker
+  ResNet34-LM embeddings) over windows of up to 5 minutes, checkpointing after each. The two
+  models (~32 MB) are downloaded once by `speakers/models/ModelDownloadWorker` from pinned
+  Hugging Face revisions and verified by size and SHA-256. Window voices are linked across
+  windows by embedding similarity (`ClusterLinker`), then matched to known people
+  (`PersonMatcher`, calibrated scores in `VoiceScores`).
+- **OPENAI**: `TranscriptionWorker` transcribes each 120 s segment with
+  gpt-4o-transcribe-diarize, sending up to four 2-10 s reference clips (voices already heard in
+  the recording, then known people from `SpeakerService.referencesFor`) so labels stay
+  consistent across segments (`speakers/cloud`).
+- **OFF**.
+
+Storage: `recording_speakers` (one row per voice and recording, linked to `people`),
+`speaker_turns` (who spoke when) and `transcript_segments.speakerLabel` + `speaker` (display
+name, the field exports, search, the vault and AI prompts read). `TurnAligner` labels transcript
+blocks by time overlap and splits long blocks at sentence boundaries. Naming, confirming,
+moving a block, merging voices and renaming people all go through `SpeakerService`, which
+rewrites names, re-indexes search and hands the transcript to sync. Voiceprints live in
+`speakers/voices/VoiceprintStore` (AES-256-GCM, Keystore key `inkwell.voices.v1`).
 
 ## Threading
 
