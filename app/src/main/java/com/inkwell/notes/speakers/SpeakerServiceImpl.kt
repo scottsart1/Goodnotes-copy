@@ -210,40 +210,43 @@ class SpeakerServiceImpl(private val graph: AppGraph) : SpeakerService {
 
     override suspend fun mergePeople(fromId: String, intoId: String) {
         if (fromId == intoId) return
-        val from = dao.person(fromId) ?: return
-        val into = dao.person(intoId) ?: return
-        val rows = dao.speakersOf(fromId)
-        // One voice-lock section, rows before files (as deletePerson): an enrollment of [from]
-        // finishing meanwhile re-checks the row under the lock and stores nothing.
-        val count = voiceLock.withLock {
-            val pa = withContext(Dispatchers.IO) { store.readPrint(intoId) }
-            val pb = withContext(Dispatchers.IO) { store.readPrint(fromId) }
-            // Keystore hiccup: merging now would overwrite a print we cannot read. Fail so the user
-            // sees it and can try again; nothing has changed yet.
-            if (pa is VoiceprintStore.Read.Unavailable || pb is VoiceprintStore.Read.Unavailable) {
-                throw IllegalStateException("Voiceprints are temporarily unreadable")
+        if (dao.person(fromId) == null || dao.person(intoId) == null) return
+        // One voice-lock section. Files of [intoId] first and unguarded: a failure (unreadable
+        // print, full disk) throws with nothing changed, so the user sees it and can retry. Then
+        // the rows, read inside the transaction so links made meanwhile move too. [fromId]'s
+        // files go last; an enrollment of [fromId] finishing meanwhile re-checks its row under
+        // this lock and stores nothing.
+        val (rows, count) = voiceLock.withLock {
+            withContext(Dispatchers.IO) {
+                val pa = store.readPrint(intoId)
+                val pb = store.readPrint(fromId)
+                if (pa is VoiceprintStore.Read.Unavailable || pb is VoiceprintStore.Read.Unavailable) {
+                    throw IllegalStateException("Voiceprints are temporarily unreadable")
+                }
+                var merged = pa.valueOrNull()?.vectors.orEmpty()
+                for (v in pb.valueOrNull()?.vectors.orEmpty()) merged = VoiceSamples.add(merged, v)
+                writePrint(intoId, merged)
+                val ra = store.readReference(intoId).valueOrNull()
+                val rb = store.readReference(fromId).valueOrNull()
+                if (rb != null && ReferencePolicy.shouldReplace(ra?.speechMs, ra?.wav?.let { ReferencePolicy.wavDurationMs(it.size) }, rb.speechMs, ReferencePolicy.wavDurationMs(rb.wav.size))) {
+                    store.writeReference(intoId, rb)
+                }
             }
-            graph.db.withTransaction {
-                dao.upsertSpeakers(rows.map { it.copy(personId = intoId) })
+            val moved = graph.db.withTransaction {
+                val from = dao.person(fromId) ?: return@withTransaction null
+                val into = dao.person(intoId) ?: return@withTransaction null
+                val current = dao.speakersOf(fromId)
+                dao.upsertSpeakers(current.map { it.copy(personId = intoId) })
                 dao.upsertPerson(into.copy(isMe = into.isMe || from.isMe, updatedAt = System.currentTimeMillis()))
                 dao.deletePerson(fromId)
                 if (from.isMe) dao.clearMeExcept(intoId)
-            }
+                current
+            } ?: return@withLock null
             withContext(Dispatchers.IO) {
-                var merged = pa.valueOrNull()?.vectors.orEmpty()
-                for (v in pb.valueOrNull()?.vectors.orEmpty()) merged = VoiceSamples.add(merged, v)
-                voiceData("Voiceprint") {
-                    writePrint(intoId, merged)
-                    val ra = store.readReference(intoId).valueOrNull()
-                    val rb = store.readReference(fromId).valueOrNull()
-                    if (rb != null && ReferencePolicy.shouldReplace(ra?.speechMs, ra?.wav?.let { ReferencePolicy.wavDurationMs(it.size) }, rb.speechMs, ReferencePolicy.wavDurationMs(rb.wav.size))) {
-                        store.writeReference(intoId, rb)
-                    }
-                }
                 store.deletePerson(fromId)
-                sampleCount(intoId)
+                moved to sampleCount(intoId)
             }
-        }
+        } ?: return
         dao.setVoiceSamples(intoId, count, System.currentTimeMillis())
         rewriteNames(rows.map { it.recordingId }.toSet())
     }
