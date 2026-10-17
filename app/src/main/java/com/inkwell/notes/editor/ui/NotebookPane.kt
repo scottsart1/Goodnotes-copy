@@ -1,6 +1,7 @@
 package com.inkwell.notes.editor.ui
 
 import android.Manifest
+import android.content.ActivityNotFoundException
 import android.content.pm.PackageManager
 import android.os.Build
 import android.view.ViewGroup
@@ -53,6 +54,8 @@ import com.inkwell.notes.core.model.AiTask
 import com.inkwell.notes.core.model.DocKind
 import com.inkwell.notes.core.model.ToolbarPosition
 import com.inkwell.notes.editor.NotebookController
+import com.inkwell.notes.editor.logic.MicPermissions
+import com.inkwell.notes.editor.logic.MicRequestOutcome
 import com.inkwell.notes.editor.logic.Throttler
 import com.inkwell.notes.editor.ui.selection.SelectionMenu
 import com.inkwell.notes.editor.ui.toolbar.ToolOptionsActions
@@ -93,22 +96,25 @@ fun NotebookPane(
     val takePicture = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { actions.onPhotoTaken(it) }
     val openPdf = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> uri?.let { actions.insertPdf(it) } }
     val micPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { result ->
-        if (result[Manifest.permission.RECORD_AUDIO] == true) {
-            actions.startRecording()
-        } else {
-            val activity = context.findActivity()
-            val permanent = activity != null && !activity.shouldShowRequestPermissionRationale(Manifest.permission.RECORD_AUDIO)
-            ui.dialog = PaneDialog.MicRationale(permanent)
+        // An empty result means the prompt was cancelled (another prompt was showing): not a denial.
+        val activity = context.findActivity()
+        val micNow = ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+        val rationale = activity?.shouldShowRequestPermissionRationale(Manifest.permission.RECORD_AUDIO) ?: true
+        when (val outcome = MicPermissions.outcome(result, micNow, rationale)) {
+            MicRequestOutcome.Granted -> actions.startRecording()
+            is MicRequestOutcome.Denied -> ui.dialog = PaneDialog.MicRationale(outcome.permanently)
+            MicRequestOutcome.Cancelled -> Unit
         }
     }
     val requestMic = {
-        val perms = buildList {
-            add(Manifest.permission.RECORD_AUDIO)
-            if (Build.VERSION.SDK_INT >= 33 && ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
-                add(Manifest.permission.POST_NOTIFICATIONS)
-            }
+        val hasNotifications = Build.VERSION.SDK_INT < 33 ||
+            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
+        val perms = MicPermissions.toRequest(Build.VERSION.SDK_INT, hasNotifications)
+        try {
+            micPermission.launch(perms.toTypedArray())
+        } catch (e: ActivityNotFoundException) {
+            ui.dialog = PaneDialog.MicRationale(permanentlyDenied = true)
         }
-        micPermission.launch(perms.toTypedArray())
     }
     actions = remember(controller) {
         PaneActions(
@@ -152,6 +158,8 @@ fun NotebookPane(
     LaunchedEffect(controller, settings.recording.highlightDuringPlayback) {
         val throttle = Throttler(150)
         var highlighting = false
+        // A restart (the setting changed) must not leave the previous effect's highlight behind.
+        controller.canvas.setPlaybackHighlight(null, 0)
         graph.playback.state.collect { st ->
             val rec = st.recording
             val active = settings.recording.highlightDuringPlayback && st.playing && rec != null && rec.documentId == docId

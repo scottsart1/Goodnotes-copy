@@ -61,6 +61,8 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.inkwell.notes.R
 import com.inkwell.notes.app.AppGraph
+import com.inkwell.notes.editor.logic.MicPermissions
+import com.inkwell.notes.editor.logic.MicRequestOutcome
 import com.inkwell.notes.editor.ui.dialogs.MicRationaleDialog
 import com.inkwell.notes.ui.theme.Dimens
 import com.inkwell.notes.ui.theme.Inkwell
@@ -158,18 +160,18 @@ fun MicPermissionEffect(audio: BoardAudio) {
     val context = LocalContext.current
     val launcher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { result ->
         // An empty result means the request was cancelled (e.g. another prompt was showing).
-        if (result.isEmpty()) return@rememberLauncherForActivityResult
-        val granted = result[Manifest.permission.RECORD_AUDIO] == true || hasPermission(context, Manifest.permission.RECORD_AUDIO)
         val activity = context.findActivity()
-        val permanent = !granted && activity != null && !activity.shouldShowRequestPermissionRationale(Manifest.permission.RECORD_AUDIO)
-        audio.onMicResult(granted, permanent)
+        val rationale = activity?.shouldShowRequestPermissionRationale(Manifest.permission.RECORD_AUDIO) ?: true
+        when (val outcome = MicPermissions.outcome(result, hasPermission(context, Manifest.permission.RECORD_AUDIO), rationale)) {
+            MicRequestOutcome.Granted -> audio.onMicResult(granted = true, permanentlyDenied = false)
+            is MicRequestOutcome.Denied -> audio.onMicResult(granted = false, permanentlyDenied = outcome.permanently)
+            MicRequestOutcome.Cancelled -> Unit
+        }
     }
     LaunchedEffect(audio) {
         audio.micRequests.collect {
-            val perms = buildList {
-                add(Manifest.permission.RECORD_AUDIO)
-                if (Build.VERSION.SDK_INT >= 33 && !hasPermission(context, Manifest.permission.POST_NOTIFICATIONS)) add(Manifest.permission.POST_NOTIFICATIONS)
-            }
+            val hasNotifications = Build.VERSION.SDK_INT < 33 || hasPermission(context, Manifest.permission.POST_NOTIFICATIONS)
+            val perms = MicPermissions.toRequest(Build.VERSION.SDK_INT, hasNotifications)
             try {
                 launcher.launch(perms.toTypedArray())
             } catch (e: ActivityNotFoundException) {

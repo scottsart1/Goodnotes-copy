@@ -45,4 +45,12 @@ object AnchorLocator {
         }
         return closest
     }
+
+    /**
+     * Playback position whose highlight window ([windowMs] before it) covers [hit] when it was
+     * found for [positionMs]: the position itself when the hit lies in its window, else the
+     * hit's own moment (the closest notes lie outside the window, before or after it).
+     */
+    fun highlightPosition(hit: AnchorHit, positionMs: Long, windowMs: Long = 4_000): Long =
+        if (positionMs - hit.offsetMs in 0..windowMs) positionMs else hit.offsetMs
 }
