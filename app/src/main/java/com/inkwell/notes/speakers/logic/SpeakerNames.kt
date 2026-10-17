@@ -29,6 +29,8 @@ object SpeakerNames {
     /**
      * A typed name made safe to store: whitespace collapsed, control and invisible format
      * characters removed, at most [MAX_NAME_LENGTH] characters. Null when nothing is left.
+     * The zero-width joiner and non-joiner stay: they shape letters in Persian, Arabic and
+     * Indic names and hold emoji sequences together.
      */
     fun clean(name: String?): String? {
         if (name == null) return null
@@ -38,6 +40,7 @@ object SpeakerNames {
             val type = Character.getType(ch)
             when {
                 ch.isWhitespace() || Character.isSpaceChar(ch) -> space = true
+                ch == ZWNJ || ch == ZWJ -> if (sb.isNotEmpty() && !space) sb.append(ch)
                 type == Character.CONTROL.toInt() || type == Character.FORMAT.toInt() -> Unit
                 else -> {
                     if (space && sb.isNotEmpty()) sb.append(' ')
@@ -46,15 +49,18 @@ object SpeakerNames {
                 }
             }
         }
-        var s = sb.toString()
+        var s = sb.toString().trimEnd(ZWNJ, ZWJ)
         if (s.length > MAX_NAME_LENGTH) {
             var cut = MAX_NAME_LENGTH
             // Never split a surrogate pair.
             if (Character.isHighSurrogate(s[cut - 1])) cut--
-            s = s.substring(0, cut).trimEnd()
+            s = s.substring(0, cut).trimEnd().trimEnd(ZWNJ, ZWJ)
         }
         return s.ifEmpty { null }
     }
+
+    private const val ZWNJ = '‌'
+    private const val ZWJ = '‍'
 }
 
 /** Stable colours for people and voices (indices into the speaker palette). Pure. */

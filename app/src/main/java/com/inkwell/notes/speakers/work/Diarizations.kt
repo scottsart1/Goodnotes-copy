@@ -65,6 +65,10 @@ internal object Diarizations {
 
     fun errorOf(info: WorkInfo?): String? =
         if (info?.state == WorkInfo.State.FAILED) info.outputData.getString(KEY_ERROR) else null
+
+    /** True when the job ended without analysing anything, to wait for the model download. */
+    fun waitingOf(info: WorkInfo?): Boolean =
+        info?.state == WorkInfo.State.SUCCEEDED && info.outputData.getBoolean(KEY_WAITING, false)
 }
 
 /**

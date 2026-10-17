@@ -8,7 +8,9 @@ import com.inkwell.notes.speakers.SpeakerModelState
 object SpeakerPhases {
     /**
      * A live job wins; then waiting for the models (failed when their download failed); then a
-     * stored result; then how the last job ended.
+     * stored result; then how the last job ended. A job that ended only to wait for the models
+     * ([jobWaiting]) analysed nothing: once the recording no longer waits (cancelled, or queued
+     * again) it is not "done".
      */
     fun of(
         job: WorkInfo.State?,
@@ -17,13 +19,14 @@ object SpeakerPhases {
         hasResult: Boolean,
         waitingForModels: Boolean,
         modelState: SpeakerModelState,
+        jobWaiting: Boolean = false,
     ): DiarizationPhase = when {
         job == WorkInfo.State.RUNNING -> progress?.let { DiarizationPhase.Running(it.first, it.second) } ?: DiarizationPhase.Running(0, 0)
         job == WorkInfo.State.ENQUEUED || job == WorkInfo.State.BLOCKED -> DiarizationPhase.Queued
         waitingForModels && modelState is SpeakerModelState.Failed -> DiarizationPhase.Failed(modelState.message)
         waitingForModels -> DiarizationPhase.WaitingForModels
         hasResult -> DiarizationPhase.Done
-        job == WorkInfo.State.SUCCEEDED -> DiarizationPhase.Done
+        job == WorkInfo.State.SUCCEEDED && !jobWaiting -> DiarizationPhase.Done
         job == WorkInfo.State.FAILED -> DiarizationPhase.Failed(jobError)
         else -> DiarizationPhase.None
     }
