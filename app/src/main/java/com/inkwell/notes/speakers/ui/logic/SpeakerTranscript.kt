@@ -4,6 +4,7 @@ import com.inkwell.notes.audio.logic.TranscriptFilter
 import com.inkwell.notes.core.model.RecordingSpeaker
 import com.inkwell.notes.core.model.SpeakerTurn
 import com.inkwell.notes.core.model.TranscriptSegment
+import com.inkwell.notes.speakers.logic.NamingRules
 import java.util.Locale
 
 /**
@@ -200,5 +201,7 @@ object SpeakerTranscript {
     }
 
     /** Voices of this recording nobody has named yet. */
-    fun unnamedCount(speakers: List<RecordingSpeaker>): Int = speakers.count { it.personId == null }
+    /** Voices still to name, counted exactly as SpeakerService.needsNaming counts them. */
+    fun unnamedCount(speakers: List<RecordingSpeaker>): Int =
+        NamingRules.countToName(speakers.map { NamingRules.Voice(it.personId, it.confirmed, it.speechMs) })
 }

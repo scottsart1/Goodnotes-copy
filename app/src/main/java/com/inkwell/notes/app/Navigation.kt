@@ -92,7 +92,8 @@ private class NavControllerNavigator(
     }
 
     override fun openDocumentById(docId: String, pageIndex: Int?) {
-        scope.launch { graph.library.getDocument(docId)?.let { openDocument(it, pageIndex) } }
+        // Links and notifications can outlive a document's move to the trash: open only live ones.
+        scope.launch { graph.library.getDocument(docId)?.takeIf { it.trashedAt == null }?.let { openDocument(it, pageIndex) } }
     }
 
     override fun openSplit(leftDocId: String, rightDocId: String) {

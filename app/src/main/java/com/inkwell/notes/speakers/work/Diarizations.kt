@@ -51,6 +51,11 @@ internal object Diarizations {
         WorkManager.getInstance(context).cancelUniqueWork(uniqueName(recordingId))
     }
 
+    /** Cancels every queued or running identification (the on-device engine was switched off). */
+    fun cancelAll(context: Context) {
+        WorkManager.getInstance(context).cancelAllWorkByTag(TAG)
+    }
+
     fun observe(context: Context, recordingId: String): Flow<WorkInfo?> =
         WorkManager.getInstance(context).getWorkInfosForUniqueWorkFlow(uniqueName(recordingId))
             // After a REPLACE the cancelled job can still be listed next to the new one.
@@ -93,6 +98,8 @@ internal class AwaitingModels(context: Context) {
     fun add(docId: String, recordingId: String) = update { list -> list.filterNot { it.recordingId == recordingId } + Entry(docId, recordingId) }
 
     fun remove(recordingId: String) = update { list -> list.filterNot { it.recordingId == recordingId } }
+
+    fun clear() = update { emptyList() }
 
     /** Takes every waiting entry out of the list (they are about to be queued). */
     fun drain(): List<Entry> {

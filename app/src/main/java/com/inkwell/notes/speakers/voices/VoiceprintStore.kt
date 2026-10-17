@@ -96,9 +96,17 @@ internal class VoiceprintStore(context: Context) {
         recFile(WORK_DIR, recordingId).delete()
     }
 
-    /** Recording ids with per-recording voice data (for removing data of deleted recordings). */
+    /**
+     * Recording ids with per-recording voice data (for removing data of deleted recordings).
+     * Leftovers of an interrupted atomic write (anything but a finished print) are deleted here.
+     */
+    @Synchronized
     fun recordingIds(): Set<String> =
-        listOf(REC_DIR, WORK_DIR).flatMap { d -> File(root, d).listFiles()?.map { it.name.removeSuffix(PRINT) }.orEmpty() }.toSet()
+        listOf(REC_DIR, WORK_DIR).flatMap { d ->
+            File(root, d).listFiles().orEmpty().mapNotNull { f ->
+                if (f.isFile && f.name.endsWith(PRINT)) f.name.removeSuffix(PRINT) else { f.delete(); null }
+            }
+        }.toSet()
 
     // ------------------------------------------------------------------ everything
 

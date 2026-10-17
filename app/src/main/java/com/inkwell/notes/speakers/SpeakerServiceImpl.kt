@@ -94,6 +94,18 @@ class SpeakerServiceImpl(private val graph: AppGraph) : SpeakerService {
             }
         }
         graph.appScope.launch(Dispatchers.IO) {
+            // Identification queued for the on-device engine would only fail once it is switched
+            // off (and recordings waiting for the models would be queued again on download).
+            graph.settings.settings.map { it.speakers.engine }.distinctUntilChanged().collect { engine ->
+                if (engine != SpeakerEngine.DEVICE) {
+                    runCatching {
+                        awaiting.clear()
+                        Diarizations.cancelAll(graph.context)
+                    }.onFailure { Log.w(TAG, "Cancelling device identification failed", it) }
+                }
+            }
+        }
+        graph.appScope.launch(Dispatchers.IO) {
             delay(PRUNE_DELAY_MS)
             runCatching { pruneDeletedRecordings() }.onFailure { Log.w(TAG, "Pruning voice data failed", it) }
         }
@@ -118,6 +130,10 @@ class SpeakerServiceImpl(private val graph: AppGraph) : SpeakerService {
     internal suspend fun onModelsReady() = withContext(Dispatchers.IO) {
         models.changed()
         if (!models.present()) return@withContext
+        if (graph.settings.current.speakers.engine != SpeakerEngine.DEVICE) {
+            awaiting.clear()
+            return@withContext
+        }
         for (e in awaiting.drain()) {
             runCatching { Diarizations.enqueue(graph.context, e.docId, e.recordingId, replace = false) }
                 .onFailure { Log.w(TAG, "Could not queue a waiting recording", it) }
@@ -221,8 +237,11 @@ class SpeakerServiceImpl(private val graph: AppGraph) : SpeakerService {
 
     override suspend fun deletePerson(personId: String) {
         voiceLock.withLock { withContext(Dispatchers.IO) { store.deletePerson(personId) } }
-        // recording_speakers.personId is set to null by the foreign key; names in transcripts stay.
+        val affected = dao.speakersOf(personId).mapTo(LinkedHashSet()) { it.recordingId }
+        // recording_speakers.personId is set to null by the foreign key; their voices read
+        // "Speaker N" again everywhere (transcript, search, exports, vault), not only in the panel.
         dao.deletePerson(personId)
+        rewriteNames(affected)
     }
 
     override suspend fun deleteAllVoiceprints() {

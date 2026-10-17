@@ -106,16 +106,25 @@ interface SpeakerService {
     /** Moves every label and voiceprint sample of [fromId] onto [intoId], then deletes [fromId]. */
     suspend fun mergePeople(fromId: String, intoId: String)
 
-    /** Forgets a person and their voiceprint. Names already written into transcripts stay. */
+    /**
+     * Forgets a person and their voiceprint. Their voices become unnamed ("Speaker N") again in
+     * every recording, so transcripts, search, exports and the vault agree with the panel.
+     */
     suspend fun deletePerson(personId: String)
 
-    /** Forgets every voiceprint and reference clip. People and names in transcripts stay. */
+    /**
+     * Forgets every voiceprint and reference clip, including the per-recording voice data kept
+     * for naming later (voices named afterwards then label their recording but are not
+     * remembered). People and names in transcripts stay.
+     */
     suspend fun deleteAllVoiceprints()
 
     /**
      * Enrolls [personId]'s voice from a clip recorded for that purpose ("Record my voice").
      * [audio] is any file the platform decoder reads (m4a, wav). Returns false when the clip
-     * holds too little speech.
+     * holds too little speech, and also when nothing can be stored: voices are not remembered,
+     * the person no longer exists, or the on-device models are missing or fail verification (the
+     * download is then queued). Callers check [modelState] and SpeakerPrefs.rememberVoices first.
      */
     suspend fun enroll(personId: String, audio: File): Boolean
 
