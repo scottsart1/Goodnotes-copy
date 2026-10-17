@@ -101,6 +101,12 @@ class SpeakerUiBugsTest {
         assertEquals("Priya", SpeakerTranscript.voice(gone, names["S1"]).name)
         assertEquals("Speaker 3", SpeakerTranscript.voice(unnamed, names["S3"]).name)
         assertEquals("a stored name never overrides a living person", "Tom", SpeakerTranscript.voice(named, "Thomas").name)
+
+        // Filtering to that voice and jumping between its blocks still work by label.
+        val only = SpeakerTranscript.rows(segs, "", byLabel, onlyKey = "S1")
+        assertEquals(listOf(0, 3), only.map { it.match.index })
+        assertEquals(listOf(true, true), only.map { it.startsGroup })
+        assertEquals(listOf(0L, 3_000L), SpeakerTranscript.blockStarts("S1", segs, byLabel, emptyList()).toList())
     }
 
     // ------------------------------------------------------------------ naming sheet
