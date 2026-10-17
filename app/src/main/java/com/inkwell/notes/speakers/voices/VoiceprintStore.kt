@@ -76,6 +76,17 @@ internal class VoiceprintStore(context: Context) {
         personFile(personId, REF).delete()
     }
 
+    /** Sanitised ids of people with a print or reference clip on disk. */
+    @Synchronized
+    fun personIds(): Set<String> =
+        root.listFiles().orEmpty().filter { it.isFile }.mapNotNull { f ->
+            when {
+                f.name.endsWith(PRINT) -> f.name.removeSuffix(PRINT)
+                f.name.endsWith(REF) -> f.name.removeSuffix(REF)
+                else -> null
+            }
+        }.toSet()
+
     // ------------------------------------------------------------------ recordings
 
     fun readRecording(recordingId: String): Read<Voiceprint> = readVoiceprint(recFile(REC_DIR, recordingId), "rec/${FileStore.safe(recordingId)}")
@@ -85,6 +96,12 @@ internal class VoiceprintStore(context: Context) {
 
     fun deleteRecording(recordingId: String) {
         recFile(REC_DIR, recordingId).delete()
+    }
+
+    /** Deletes every in-progress window embedding (the on-device engine was switched off). */
+    @Synchronized
+    fun deleteAllWork() {
+        File(root, WORK_DIR).deleteRecursively()
     }
 
     fun readWork(recordingId: String): Read<Voiceprint> = readVoiceprint(recFile(WORK_DIR, recordingId), "work/${FileStore.safe(recordingId)}")

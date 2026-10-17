@@ -19,6 +19,7 @@ import com.inkwell.notes.core.model.SpeakerEngine
 import com.inkwell.notes.core.model.TranscriptStatus
 import com.inkwell.notes.core.storage.FileStore
 import com.inkwell.notes.core.storage.db.TranscriptSegmentEntity
+import com.inkwell.notes.speakers.SpeakerServiceImpl
 import com.inkwell.notes.speakers.cloud.CloudLabelMapper
 import com.inkwell.notes.speakers.cloud.CloudReferenceSource
 import com.inkwell.notes.speakers.cloud.CloudSpeakerState
@@ -133,7 +134,11 @@ class TranscriptionWorker(appContext: Context, params: WorkerParameters) : Corou
             if (plan.cloud) {
                 val total = durations.sumOf { it.coerceAtLeast(0) }.takeIf { it > 0 } ?: rec.durationMs
                 val result = CloudTurns.result(recordingId, segments, speakers.voices, total)
-                if (!hook("Saving speakers") { graph.speakers.saveDiarization(docId, result) }) {
+                if (hook("Saving speakers") { graph.speakers.saveDiarization(docId, result) }) {
+                    // Same "voices to name" notice the device engine posts (it applies the app-lock,
+                    // foreground and permission rules itself).
+                    hook("Naming notification") { (graph.speakers as? SpeakerServiceImpl)?.notifyIfNamesNeeded(docId, recordingId) }
+                } else {
                     note = applicationContext.getString(R.string.speakers_cloud_not_saved)
                 }
             } else {

@@ -101,6 +101,9 @@ class SpeakerServiceImpl(private val graph: AppGraph) : SpeakerService {
                     runCatching {
                         awaiting.clear()
                         Diarizations.cancelAll(graph.context)
+                        // A cancelled job that was only queued never runs its own cleanup: drop the
+                        // window embeddings of every unfinished analysis (it starts over if re-enabled).
+                        voiceLock.withLock { store.deleteAllWork() }
                     }.onFailure { Log.w(TAG, "Cancelling device identification failed", it) }
                 }
             }
@@ -211,8 +214,12 @@ class SpeakerServiceImpl(private val graph: AppGraph) : SpeakerService {
         val into = dao.person(intoId) ?: return
         val count = voiceLock.withLock {
             withContext(Dispatchers.IO) {
-                val a = store.readPrint(intoId).valueOrNull()?.vectors.orEmpty()
-                val b = store.readPrint(fromId).valueOrNull()?.vectors.orEmpty()
+                val pa = store.readPrint(intoId)
+                val pb = store.readPrint(fromId)
+                // Keystore hiccup: merging now would overwrite a print we cannot read. Try again later.
+                if (pa is VoiceprintStore.Read.Unavailable || pb is VoiceprintStore.Read.Unavailable) return@withContext null
+                val a = pa.valueOrNull()?.vectors.orEmpty()
+                val b = pb.valueOrNull()?.vectors.orEmpty()
                 var merged = a
                 for (v in b) merged = VoiceSamples.add(merged, v)
                 writePrint(intoId, merged)
@@ -224,6 +231,9 @@ class SpeakerServiceImpl(private val graph: AppGraph) : SpeakerService {
                 store.deletePerson(fromId)
                 sampleCount(intoId)
             }
+        } ?: run {
+            Log.w(TAG, "Merging people postponed: voiceprints temporarily unreadable")
+            return
         }
         val rows = dao.speakersOf(fromId)
         graph.db.withTransaction {
@@ -236,11 +246,13 @@ class SpeakerServiceImpl(private val graph: AppGraph) : SpeakerService {
     }
 
     override suspend fun deletePerson(personId: String) {
-        voiceLock.withLock { withContext(Dispatchers.IO) { store.deletePerson(personId) } }
         val affected = dao.speakersOf(personId).mapTo(LinkedHashSet()) { it.recordingId }
         // recording_speakers.personId is set to null by the foreign key; their voices read
         // "Speaker N" again everywhere (transcript, search, exports, vault), not only in the panel.
+        // The row goes first: enrollment re-checks it under the voice lock, so a job finishing
+        // concurrently cannot write a voiceprint for this person after the files are deleted.
         dao.deletePerson(personId)
+        voiceLock.withLock { withContext(Dispatchers.IO) { store.deletePerson(personId) } }
         rewriteNames(affected)
     }
 
@@ -292,13 +304,18 @@ class SpeakerServiceImpl(private val graph: AppGraph) : SpeakerService {
             ReferenceClip(SampleWindows.speechIn(turns, "S1", w), WavWriter.encode(samples.copyOfRange(a, b)), tag)
         }
         val count = voiceLock.withLock {
+            // Deleted meanwhile: store nothing for them.
+            if (dao.person(personId) == null) return@withLock null
             withContext(Dispatchers.IO) {
-                val current = store.readPrint(personId).valueOrNull()?.vectors.orEmpty()
+                val read = store.readPrint(personId)
+                // Keystore hiccup: writing now would replace the samples we cannot read.
+                if (read is VoiceprintStore.Read.Unavailable) return@withContext null
+                val current = read.valueOrNull()?.vectors.orEmpty()
                 writePrint(personId, VoiceSamples.add(current, VoiceVector(tag, speech.toFloat(), embedding)))
                 if (clip != null) maybeReplaceReference(personId, clip)
                 sampleCount(personId)
             }
-        }
+        } ?: return false
         dao.setVoiceSamples(person.id, count, System.currentTimeMillis())
         return true
     }
@@ -379,9 +396,11 @@ class SpeakerServiceImpl(private val graph: AppGraph) : SpeakerService {
             val keepConfidence = confirmOnly && previous == personId
             val updated = row.copy(personId = personId, confirmed = true, confidence = if (keepConfidence) row.confidence else null)
             dao.upsertSpeakers(listOf(updated))
-            if (previous != null && previous != personId) unenroll(previous, recordingId, label)
-            if (prefs.rememberVoices && row.engine != MANUAL_ENGINE) enrollFromRecording(person, recordingId, updated)
             dao.setSegmentNames(recordingId, label, person.name)
+            voiceData("Voiceprint") {
+                if (previous != null && previous != personId) unenroll(previous, recordingId, label)
+                if (prefs.rememberVoices && row.engine != MANUAL_ENGINE) enrollFromRecording(person, recordingId, updated)
+            }
             recordingDoc(recordingId)
         } ?: return
         reindex(docId, recordingId)
@@ -393,8 +412,8 @@ class SpeakerServiceImpl(private val graph: AppGraph) : SpeakerService {
             val row = dao.speakers(recordingId).firstOrNull { it.label == label } ?: return@withRecording null
             val previous = row.personId ?: return@withRecording null
             dao.upsertSpeakers(listOf(row.copy(personId = null, confirmed = false, confidence = null)))
-            unenroll(previous, recordingId, label)
             dao.setSegmentNames(recordingId, label, SpeakerNames.unnamed(label))
+            voiceData("Voiceprint") { unenroll(previous, recordingId, label) }
             recordingDoc(recordingId)
         } ?: return
         reindex(docId, recordingId)
@@ -446,7 +465,7 @@ class SpeakerServiceImpl(private val graph: AppGraph) : SpeakerService {
                 dao.upsertSpeakers(listOf(merged))
             }
             // The user says both are one voice: their centroids become one.
-            voiceLock.withLock {
+            voiceData("Recording voices") { voiceLock.withLock {
                 withContext(Dispatchers.IO) {
                     val rec = store.readRecording(recordingId).valueOrNull()
                     if (rec != null) {
@@ -463,11 +482,13 @@ class SpeakerServiceImpl(private val graph: AppGraph) : SpeakerService {
                         store.writeRecording(recordingId, rec.copy(vectors = rest + listOfNotNull(combined)))
                     }
                 }
-            }
-            from.personId?.let { unenroll(it, recordingId, fromLabel) }
+            } }
             val person = merged.personId?.let { dao.person(it) }
-            if (person != null && merged.confirmed && prefs.rememberVoices && merged.engine != MANUAL_ENGINE) {
-                enrollFromRecording(person, recordingId, merged)
+            voiceData("Voiceprint") {
+                from.personId?.let { unenroll(it, recordingId, fromLabel) }
+                if (person != null && merged.confirmed && prefs.rememberVoices && merged.engine != MANUAL_ENGINE) {
+                    enrollFromRecording(person, recordingId, merged)
+                }
             }
             refreshRows(recordingId, turns)
             dao.setSegmentNames(recordingId, intoLabel, SpeakerNames.display(intoLabel, person?.name))
@@ -533,26 +554,37 @@ class SpeakerServiceImpl(private val graph: AppGraph) : SpeakerService {
                 dao.replaceTurns(recordingId, SpeakerRecords.turnEntities(recordingId, turns))
             }
 
-            voiceLock.withLock {
-                withContext(Dispatchers.IO) {
-                    val centroids = result.speakers.mapNotNull { s -> s.centroid?.let { VoiceVector(s.label, s.speechMs.toFloat(), VectorMath.normalize(it)) } }
-                    if (device && remember && centroids.isNotEmpty()) {
-                        store.writeRecording(recordingId, Voiceprint(SpeakerModelSpecs.EMBEDDING_MODEL_ID, centroids.first().vector.size, centroids))
-                    } else {
-                        store.deleteRecording(recordingId)
+            // The transcript follows the rows just committed, whatever happens to the voice files below.
+            val labelled = labelTranscriptLocked(recordingId, keepExistingLabels = !device)
+            voiceData("Recording voices") {
+                voiceLock.withLock {
+                    withContext(Dispatchers.IO) {
+                        // Centroids are keyed by this result's labels. A cloud result has none, and the
+                        // labels of an earlier device analysis no longer apply to its voices.
+                        val centroids = result.speakers.mapNotNull { s -> s.centroid?.let { VoiceVector(s.label, s.speechMs.toFloat(), VectorMath.normalize(it)) } }
+                        if (device && remember && centroids.isNotEmpty()) {
+                            store.writeRecording(recordingId, Voiceprint(SpeakerModelSpecs.EMBEDDING_MODEL_ID, centroids.first().vector.size, centroids))
+                        } else {
+                            store.deleteRecording(recordingId)
+                        }
                     }
                 }
             }
-            if (remember) {
-                // Samples from an earlier analysis of this recording are replaced by this one's.
-                for (pid in oldRows.mapNotNull { it.personId }.distinct()) unenroll(pid, recordingId, label = null)
+            if (remember) voiceData("Voiceprint") {
+                // A device result replaces this recording's earlier samples with its own. A cloud result
+                // carries no voice data, so people still linked keep what this recording gave them and
+                // only people whose link disappeared lose it.
+                val kept = rows.filter { it.confirmed }.mapNotNullTo(HashSet()) { it.personId }
+                for (pid in oldRows.mapNotNull { it.personId }.distinct()) {
+                    if (device || pid !in kept) unenroll(pid, recordingId, label = null)
+                }
                 for (r in rows) {
                     if (r.personId == null || !r.confirmed) continue
                     val p = people.firstOrNull { it.id == r.personId } ?: continue
                     enrollFromRecording(p, recordingId, r)
                 }
             }
-            labelTranscriptLocked(recordingId, keepExistingLabels = !device)
+            labelled
         }
         reindex(docId, recordingId, transcriptChanged = changed)
     }
@@ -702,16 +734,22 @@ class SpeakerServiceImpl(private val graph: AppGraph) : SpeakerService {
         val wantsClip = ReferencePolicy.shouldReplace(stored?.speechMs, stored?.wav?.let { ReferencePolicy.wavDurationMs(it.size) }, speech, window.durationMs)
         val wav = if (wantsClip) clipOf(recordingId, row) else null
         val count = voiceLock.withLock {
+            // Deleted meanwhile: store nothing for them.
+            if (dao.person(person.id) == null) return@withLock null
             withContext(Dispatchers.IO) {
                 val centroid = store.readRecording(recordingId).valueOrNull()?.vectors?.firstOrNull { it.tag == row.label }
                 if (centroid != null) {
-                    val current = store.readPrint(person.id).valueOrNull()?.vectors.orEmpty()
-                    writePrint(person.id, VoiceSamples.add(current, VoiceVector(tag, centroid.weight, centroid.vector)))
+                    val read = store.readPrint(person.id)
+                    // Keystore hiccup: keep the stored print rather than replace it with one sample.
+                    if (read !is VoiceprintStore.Read.Unavailable) {
+                        val current = read.valueOrNull()?.vectors.orEmpty()
+                        writePrint(person.id, VoiceSamples.add(current, VoiceVector(tag, centroid.weight, centroid.vector)))
+                    }
                 }
                 if (wav != null) maybeReplaceReference(person.id, ReferenceClip(speech, wav, tag))
                 sampleCount(person.id)
             }
-        }
+        } ?: return
         dao.setVoiceSamples(person.id, count, System.currentTimeMillis())
     }
 
@@ -784,10 +822,10 @@ class SpeakerServiceImpl(private val graph: AppGraph) : SpeakerService {
         val r = SpeakerRecords.refresh(rows, turns, labels, total)
         if (r.upserts.isNotEmpty()) dao.upsertSpeakers(r.upserts)
         for (label in r.deletes) {
-            rows.firstOrNull { it.label == label }?.personId?.let { unenroll(it, recordingId, label) }
+            rows.firstOrNull { it.label == label }?.personId?.let { pid -> voiceData("Voiceprint") { unenroll(pid, recordingId, label) } }
             dao.deleteSpeaker(recordingId, label)
         }
-        if (r.deletes.isNotEmpty()) {
+        if (r.deletes.isNotEmpty()) voiceData("Recording voices") {
             voiceLock.withLock {
                 withContext(Dispatchers.IO) {
                     store.readRecording(recordingId).valueOrNull()?.let { rec ->
@@ -805,15 +843,33 @@ class SpeakerServiceImpl(private val graph: AppGraph) : SpeakerService {
     private suspend fun <T> withRecording(recordingId: String, block: suspend () -> T): T =
         recordingLocks.computeIfAbsent(recordingId) { Mutex() }.withLock { block() }
 
-    /** Removes voice data of recordings that no longer exist (deleted with their document). */
+    /**
+     * Voice files are best effort: a full disk or a Keystore hiccup must never leave the speaker
+     * rows, transcript, search index, exports and vault out of step. Logs carry no voice data.
+     */
+    private suspend inline fun voiceData(what: String, block: () -> Unit) {
+        try {
+            block()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Log.w(TAG, "$what not stored: ${e.javaClass.simpleName}")
+        }
+    }
+
+    /** Removes voice data of recordings and people that no longer exist (deleted elsewhere). */
     private suspend fun pruneDeletedRecordings() {
         // Files are named by the sanitised id, so compare sanitised ids.
         val existing = dao.allRecordingIds().map { FileStore.safe(it) }.toSet()
+        val people = dao.people().map { FileStore.safe(it.id) }.toSet()
         voiceLock.withLock {
-            for (name in store.recordingIds()) {
-                if (name in existing) continue
-                store.deleteRecording(name)
-                store.deleteWork(name)
+            withContext(Dispatchers.IO) {
+                for (name in store.recordingIds()) {
+                    if (name in existing) continue
+                    store.deleteRecording(name)
+                    store.deleteWork(name)
+                }
+                for (name in store.personIds()) if (name !in people) store.deletePerson(name)
             }
         }
     }

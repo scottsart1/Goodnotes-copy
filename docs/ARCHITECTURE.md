@@ -76,7 +76,7 @@ Runs after a recording, never live. `SpeakerPrefs.engine` picks the engine:
 
 - **DEVICE** (default): `RecordingEngine` calls `SpeakerService.onRecordingFinished` and
   `speakers/work/DiarizationWorker` runs sherpa-onnx (pyannote segmentation 3.0 + WeSpeaker
-  ResNet34-LM embeddings) over windows of up to 10 minutes, checkpointing after each. The two
+  ResNet34-LM embeddings) over windows of up to 5 minutes, checkpointing after each. The two
   models (~32 MB) are downloaded once by `speakers/models/ModelDownloadWorker` from pinned
   Hugging Face revisions and verified by size and SHA-256. Window voices are linked across
   windows by embedding similarity (`ClusterLinker`), then matched to known people

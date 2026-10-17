@@ -75,6 +75,7 @@ import com.inkwell.notes.speakers.ui.logic.SpeakerNumbers
 import com.inkwell.notes.speakers.ui.logic.SpeakerTranscript
 import com.inkwell.notes.ui.theme.Inkwell
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.catch
@@ -124,21 +125,21 @@ internal class NamingViewModel(private val graph: AppGraph, val recordingId: Str
         .map<List<RecordingSpeaker>, List<RecordingSpeaker>?> { SpeakerTranscript.inOrder(it) }
         .catch { emit(emptyList()) }
         .flowOn(Dispatchers.IO)
-        .stateIn(viewModelScope, SharingStarted.Eagerly, null)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_MS), null)
 
     val people: StateFlow<List<Person>> = graph.speakers.people()
         .catch { emit(emptyList()) }
         .flowOn(Dispatchers.IO)
-        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_MS), emptyList())
 
     val recording: StateFlow<Recording?> = graph.db.recordings().observe(recordingId)
         .map { it?.toModel() }
         .catch { emit(null) }
         .flowOn(Dispatchers.IO)
-        .stateIn(viewModelScope, SharingStarted.Eagerly, null)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_MS), null)
 
     val prefs: StateFlow<SpeakerPrefs> = graph.settings.settings.map { it.speakers }.distinctUntilChanged()
-        .stateIn(viewModelScope, SharingStarted.Eagerly, graph.settings.current.speakers)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_MS), graph.settings.current.speakers)
 
     var drafts by mutableStateOf(restore())
         private set
@@ -153,17 +154,23 @@ internal class NamingViewModel(private val graph: AppGraph, val recordingId: Str
 
     private val editor = SpeakerEditor(graph) { error = graph.context.getString(R.string.spk_action_failed) }
 
-    init {
-        viewModelScope.launch {
-            combine(speakers.filterNotNull(), people) { s, p -> s to p.firstOrNull { it.isMe }?.id }.collect { (s, meId) ->
-                drafts = NamingPlan.merge(drafts, s, meId)
-                persist()
-            }
-        }
-    }
+    /**
+     * Follows voices arriving or changing while the sheet is open. Only while it is open: the view
+     * model outlives the sheet (it is scoped to the screen), and a closed sheet must not keep
+     * observing the database.
+     */
+    private var follow: Job? = null
 
     /** The sheet opened: start from the stored names unless it is coming back after process death. */
     fun begin() {
+        if (follow == null) {
+            follow = viewModelScope.launch {
+                combine(speakers.filterNotNull(), people) { s, p -> s to p.firstOrNull { it.isMe }?.id }.collect { (s, meId) ->
+                    drafts = NamingPlan.merge(drafts, s, meId)
+                    persist()
+                }
+            }
+        }
         if (handle.get<Boolean>(KEY_OPEN) == true) return
         handle[KEY_OPEN] = true
         drafts = NamingPlan.initial(speakers.value.orEmpty(), people.value.firstOrNull { it.isMe }?.id)
@@ -173,6 +180,8 @@ internal class NamingViewModel(private val graph: AppGraph, val recordingId: Str
 
     /** The sheet closed: drop unsaved edits and stop a sample. */
     fun end() {
+        follow?.cancel()
+        follow = null
         sample.stop()
         handle[KEY_OPEN] = false
         handle.remove<String>(KEY_DRAFTS)
@@ -274,6 +283,8 @@ internal class NamingViewModel(private val graph: AppGraph, val recordingId: Str
     }
 
     private companion object {
+        /** Keep observing briefly after the sheet stops collecting (rotation), then let go. */
+        const val STOP_MS = 5_000L
         const val KEY_OPEN = "open"
         const val KEY_DRAFTS = "drafts"
         val SERIALIZER = MapSerializer(String.serializer(), NamingDraft.serializer())

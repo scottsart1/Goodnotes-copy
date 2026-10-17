@@ -5,6 +5,7 @@ import android.os.SystemClock
 import android.util.Log
 import androidx.work.CoroutineWorker
 import androidx.work.WorkInfo
+import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import androidx.work.workDataOf
 import com.inkwell.notes.R
@@ -36,7 +37,7 @@ import java.io.File
 
 /**
  * Works out who spoke when in one recording, on the device (engine DEVICE), after it was
- * recorded. The timeline is cut into windows of up to ten minutes of consecutive segments;
+ * recorded. The timeline is cut into windows of up to five minutes of consecutive segments;
  * each window is decoded, diarized and embedded on a background-priority thread, then
  * checkpointed (turns in speakers.partial.json next to the audio, window embeddings only in
  * the encrypted voice store), so a stopped job resumes at the next window. Finally the
@@ -120,7 +121,16 @@ class DiarizationWorker(appContext: Context, params: WorkerParameters) : Corouti
             // Cancelled by the user (or replaced): nothing resumes this run, so its temporary
             // voice data must not stay behind. A system stop keeps the checkpoint to resume from.
             if (stopReason == WorkInfo.STOP_REASON_CANCELLED_BY_APP) {
-                withContext(NonCancellable) { runCatching { discard(service, checkpointFile, recordingId) } }
+                withContext(NonCancellable) {
+                    // Replaced ("Try again"): the newer run of this recording now owns the checkpoint
+                    // and window embeddings, and cleans them up itself.
+                    val newerRun = runCatching {
+                        WorkManager.getInstance(applicationContext)
+                            .getWorkInfosForUniqueWork(Diarizations.uniqueName(recordingId)).get()
+                            .any { it.id != id && !it.state.isFinished }
+                    }.getOrDefault(false)
+                    if (!newerRun) runCatching { discard(service, checkpointFile, recordingId) }
+                }
             }
             throw e
         } catch (e: LinkageError) {
@@ -185,6 +195,8 @@ class DiarizationWorker(appContext: Context, params: WorkerParameters) : Corouti
 
     /** Progress in segments (pieces) done; throttled, callable from the engine thread. */
     private fun report(windows: List<AnalysisWindow>, windowsDone: Int, fraction: Float, force: Boolean) {
+        // A stopped run still finishing its native pass must not overwrite its replacement's progress.
+        if (isStopped) return
         val now = SystemClock.elapsedRealtime()
         if (!force && now - lastReport < PROGRESS_MS) return
         lastReport = now

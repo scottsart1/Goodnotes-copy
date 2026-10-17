@@ -23,8 +23,12 @@ data class AnalysisWindow(
 
 /** Maps recording-timeline ranges onto segment files. Pure. */
 object AudioPlan {
-    /** At most this much audio is decoded and diarized at once (~38 MB of 16 kHz floats). */
-    const val MAX_WINDOW_MS = 10L * 60 * 1000
+    /**
+     * At most this much audio is decoded and diarized at once (~19 MB of 16 kHz floats). The
+     * native pass cannot be interrupted, so this also bounds the work lost when the system stops
+     * the job (WorkManager's 10-minute limit); voices are linked across windows afterwards.
+     */
+    const val MAX_WINDOW_MS = 5L * 60 * 1000
 
     /**
      * Consecutive windows of whole segments, each at most [maxWindowMs] (a longer segment is

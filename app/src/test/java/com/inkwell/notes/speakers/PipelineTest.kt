@@ -19,6 +19,8 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class PipelineTest {
+    private val TEN_MINUTES = 10L * 60 * 1000
+
     /**
      * Fake models over synthetic audio: each sample's value encodes who is speaking (person
      * k speaks at amplitude k/10, 0 is silence). Diarization reports runs of one value with a
@@ -155,7 +157,7 @@ class PipelineTest {
 
     @Test
     fun progressCountsPieces() {
-        val windows = AudioPlan.windows(listOf(120_000L, 120_000L, 120_000L, 120_000L, 120_000L, 120_000L), List(6) { true })
+        val windows = AudioPlan.windows(listOf(120_000L, 120_000L, 120_000L, 120_000L, 120_000L, 120_000L), List(6) { true }, maxWindowMs = TEN_MINUTES)
         assertEquals(2, windows.size)
         assertEquals(0 to 6, DiarizationAssembler.progress(windows, 0, 0f))
         assertEquals(2 to 6, DiarizationAssembler.progress(windows, 0, 0.5f))
@@ -166,10 +168,16 @@ class PipelineTest {
     @Test
     fun windowsPackWholeSegmentsAndSkipHoles() {
         val d = listOf(120_000L, 120_000L, 120_000L, 120_000L, 120_000L, 120_000L, 30_000L)
-        val w = AudioPlan.windows(d, List(d.size) { true })
+        val w = AudioPlan.windows(d, List(d.size) { true }, maxWindowMs = TEN_MINUTES)
         assertEquals(listOf(5, 2), w.map { it.pieces.size })
         assertEquals(600_000L, w[1].globalStartMs)
-        assertTrue(w.all { it.durationMs <= AudioPlan.MAX_WINDOW_MS })
+        assertTrue(w.all { it.durationMs <= TEN_MINUTES })
+
+        // The default window keeps the uninterruptible native pass short: two 120 s segments.
+        val short = AudioPlan.windows(d, List(d.size) { true })
+        assertEquals(listOf(2, 2, 3), short.map { it.pieces.size })
+        assertEquals(listOf(0L, 240_000L, 480_000L), short.map { it.globalStartMs })
+        assertTrue(short.all { it.durationMs <= AudioPlan.MAX_WINDOW_MS })
 
         val holes = AudioPlan.windows(listOf(60_000L, 60_000L, 0L, 60_000L), listOf(true, false, true, true))
         assertEquals(listOf(0L, 120_000L), holes.map { it.globalStartMs })
@@ -178,7 +186,7 @@ class PipelineTest {
 
     @Test
     fun longSegmentsAreCutIntoEqualWindows() {
-        val w = AudioPlan.windows(listOf(30_000L, 1_500_000L), listOf(true, true))
+        val w = AudioPlan.windows(listOf(30_000L, 1_500_000L), listOf(true, true), maxWindowMs = TEN_MINUTES)
         assertEquals(4, w.size)
         assertEquals(30_000L, w[1].globalStartMs)
         assertEquals(listOf(500_000L, 500_000L, 500_000L), w.drop(1).map { it.durationMs })
