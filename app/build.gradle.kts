@@ -14,8 +14,8 @@ android {
         applicationId = "com.inkwell.notes"
         minSdk = 29
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0.0"
+        versionCode = 2
+        versionName = "1.1.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables { useSupportLibrary = true }
         ndk {
@@ -71,6 +71,11 @@ android {
                 "org/bouncycastle/x509/**",
             )
         }
+        jniLibs {
+            // sherpa-onnx ships C and C++ API libraries next to its JNI library; only the JNI
+            // library (and onnxruntime, which it links) is loaded.
+            excludes += setOf("**/libsherpa-onnx-c-api.so", "**/libsherpa-onnx-cxx-api.so")
+        }
     }
 
     testOptions {
@@ -94,6 +99,8 @@ kotlin {
 
 ksp {
     arg("room.generateKotlin", "true")
+    // Exported schemas let unit tests check hand-written migrations against Room's own SQL.
+    arg("room.schemaLocation", "$projectDir/schemas")
 }
 
 dependencies {
@@ -139,6 +146,7 @@ dependencies {
     implementation(libs.mlkit.text.recognition)
     implementation(libs.mlkit.digital.ink)
     implementation(libs.mlkit.document.scanner)
+    implementation(libs.sherpa.onnx)
 
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)

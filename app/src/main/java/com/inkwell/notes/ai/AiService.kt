@@ -10,6 +10,7 @@ import com.inkwell.notes.core.model.AiResult
 import com.inkwell.notes.core.model.AiTask
 import com.inkwell.notes.core.model.ModelRef
 import com.inkwell.notes.core.model.Transcript
+import com.inkwell.notes.speakers.SpeakerReference
 import kotlinx.coroutines.flow.Flow
 import java.io.File
 
@@ -51,6 +52,25 @@ interface AiService {
 
     /** Transcribes audio segments (in order) with the TRANSCRIPTION model. Null if unavailable. */
     suspend fun transcribe(recordingId: String, segments: List<File>, segmentDurationsMs: List<Long>, language: String? = null): Transcript?
+
+    /** True when speakers can be labelled in the cloud: AI on and an OpenAI key (gpt-4o-transcribe-diarize). */
+    fun canDiarize(): Boolean = false
+
+    /**
+     * Transcribes one audio file with speaker labels (OpenAI gpt-4o-transcribe-diarize,
+     * diarized_json). Each segment's speaker is the provider's label: the name of one of
+     * [references] when the voice matched it, otherwise "A", "B", ... (local to this file).
+     * Timestamps are shifted by [offsetMs] and clamped to [durationMs]. Null when unavailable;
+     * throws AiException on failure.
+     */
+    suspend fun transcribeDiarized(
+        recordingId: String,
+        file: File,
+        durationMs: Long,
+        offsetMs: Long,
+        references: List<SpeakerReference>,
+        language: String? = null,
+    ): Transcript? = null
 
     /** Embeddings for semantic search; null if no embedding model is configured. */
     suspend fun embed(texts: List<String>): List<FloatArray>?

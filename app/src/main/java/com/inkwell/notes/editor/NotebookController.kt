@@ -304,6 +304,7 @@ class NotebookController(
             ItemType.SHAPE -> c.shapes.firstOrNull { it.id == ref.itemId }?.audio
             ItemType.TEXT -> c.texts.firstOrNull { it.id == ref.itemId }?.audio
             ItemType.IMAGE -> c.images.firstOrNull { it.id == ref.itemId }?.audio
+            ItemType.STICKY -> c.stickies.firstOrNull { it.id == ref.itemId }?.audio
             else -> null
         }
     }

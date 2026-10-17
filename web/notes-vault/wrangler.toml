@@ -3,7 +3,9 @@
 name = "notes-vault"
 main = "src/index.ts"
 compatibility_date = "2026-08-01"
-workers_dev = true
+# Only reachable through yourpitbox.com/notes/<link>; no workers.dev or preview URLs.
+workers_dev = false
+preview_urls = false
 # The page embeds the Markdown renderer's source (Function#toString); keep bundled
 # functions free of name-preserving helper calls.
 keep_names = false

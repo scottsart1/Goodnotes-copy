@@ -12,7 +12,6 @@ import com.inkwell.notes.core.storage.db.DocumentEntity
 import com.inkwell.notes.core.storage.db.OutlineEntity
 import com.inkwell.notes.core.storage.db.PageEntity
 import com.inkwell.notes.core.storage.db.RecordingEntity
-import com.inkwell.notes.core.storage.db.TranscriptSegmentEntity
 import com.inkwell.notes.export.format.TextRow
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -128,9 +127,7 @@ internal class PackageImporter(private val graph: AppGraph) {
                 for ((pr, rec) in recordings) {
                     graph.db.recordings().upsert(RecordingEntity.from(rec))
                     if (pr.transcript.isNotEmpty()) {
-                        graph.db.transcripts().insertAll(pr.transcript.map {
-                            TranscriptSegmentEntity(recordingId = rec.id, startMs = it.startMs, endMs = it.endMs, text = it.text, speaker = it.speaker, source = pr.transcriptSource ?: "import")
-                        })
+                        graph.db.transcripts().insertAll(PackagedTranscripts.entities(rec.id, pr.transcript, pr.transcriptSource))
                     }
                 }
             }

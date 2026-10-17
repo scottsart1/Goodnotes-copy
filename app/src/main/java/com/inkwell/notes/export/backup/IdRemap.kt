@@ -50,13 +50,14 @@ class IdRemap(
     fun content(c: PageContent): PageContent {
         fun anchor(a: AudioAnchor?): AudioAnchor? = a?.let { old -> recordings[old.recordingId]?.let { AudioAnchor(it, old.offsetMs) } }
         if (c.strokes.none { it.audio != null } && c.shapes.none { it.audio != null } &&
-            c.texts.none { it.audio != null } && c.images.none { it.audio != null }
+            c.texts.none { it.audio != null } && c.images.none { it.audio != null } && c.stickies.none { it.audio != null }
         ) return c
         return c.copy(
             strokes = c.strokes.map { if (it.audio == null) it else it.copy(audio = anchor(it.audio)) },
             shapes = c.shapes.map { if (it.audio == null) it else it.copy(audio = anchor(it.audio)) },
             texts = c.texts.map { if (it.audio == null) it else it.copy(audio = anchor(it.audio)) },
             images = c.images.map { if (it.audio == null) it else it.copy(audio = anchor(it.audio)) },
+            stickies = c.stickies.map { if (it.audio == null) it else it.copy(audio = anchor(it.audio)) },
         )
     }
 

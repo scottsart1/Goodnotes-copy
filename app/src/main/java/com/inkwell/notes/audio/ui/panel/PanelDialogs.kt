@@ -30,10 +30,19 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.DialogProperties
 import com.inkwell.notes.R
+import com.inkwell.notes.ai.ui.Markdown
 import com.inkwell.notes.audio.logic.AudioText
 import com.inkwell.notes.audio.logic.MarkdownBlocks
 import com.inkwell.notes.core.model.BlockType
+import com.inkwell.notes.speakers.ui.ChangeSpeakerDialog
+import com.inkwell.notes.speakers.ui.MergeVoiceDialog
+import com.inkwell.notes.speakers.ui.NameVoiceDialog
+import com.inkwell.notes.speakers.ui.NamingSheet
+import com.inkwell.notes.speakers.ui.logic.BlockMove
+import com.inkwell.notes.speakers.ui.logic.SpeakerEdits
 import com.inkwell.notes.ui.theme.Inkwell
+import androidx.compose.runtime.getValue
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
@@ -43,7 +52,7 @@ import androidx.compose.ui.text.AnnotatedString
 
 /** All dialogs of the panel, driven by the view model. */
 @Composable
-internal fun PanelDialogs(vm: RecordingsViewModel) {
+internal fun PanelDialogs(vm: RecordingsViewModel, onInsert: ((String) -> Unit)? = null) {
     vm.pendingDelete?.let { rec ->
         AudioConfirmDialog(
             title = stringResource(R.string.audio_delete_title),
@@ -59,10 +68,13 @@ internal fun PanelDialogs(vm: RecordingsViewModel) {
         when (c) {
             is Consent.Transcribe -> AudioConfirmDialog(
                 title = stringResource(R.string.audio_send_audio_title, provider),
-                body = stringResource(
-                    R.string.audio_send_audio_body, c.minutes, provider,
-                    c.cost?.let { stringResource(R.string.audio_estimate_sentence, it) }.orEmpty(),
-                ).trim(),
+                body = listOf(
+                    stringResource(
+                        R.string.audio_send_audio_body, c.minutes, provider,
+                        c.cost?.let { stringResource(R.string.audio_estimate_sentence, it) }.orEmpty(),
+                    ).trim(),
+                    if (c.voiceClips) stringResource(R.string.spk_consent_clips) else "",
+                ).filter { it.isNotEmpty() }.joinToString(" "),
                 confirm = stringResource(R.string.audio_send),
                 offerDontAskAgain = true,
                 onConfirm = { vm.acceptConsent(it) },
@@ -91,11 +103,49 @@ internal fun PanelDialogs(vm: RecordingsViewModel) {
             onDismiss = { vm.dismissLarge() },
         )
     }
-    vm.aiResult?.let { AiResultDialog(vm, it) }
+    vm.aiResult?.let { AiResultDialog(vm, it, onInsert) }
+    vm.namingFor?.let { id -> NamingSheet(id, onClose = { vm.namingFor = null }) }
+    vm.speakerDialog?.let { SpeakerDialogHost(vm, it) }
 }
 
 @Composable
-private fun AiResultDialog(vm: RecordingsViewModel, r: AiResultState) {
+private fun SpeakerDialogHost(vm: RecordingsViewModel, d: SpeakerDialog) {
+    val people by vm.people.collectAsStateWithLifecycle()
+    val speakers by vm.speakers.collectAsStateWithLifecycle()
+    val dismiss = { vm.speakerDialog = null }
+    when (d) {
+        is SpeakerDialog.Name -> {
+            // Follow the stored voice (it may have been renamed or merged meanwhile).
+            val s = speakers.firstOrNull { it.label == d.speaker.label && it.recordingId == d.speaker.recordingId } ?: d.speaker
+            NameVoiceDialog(
+                speaker = s,
+                people = people,
+                onPick = { vm.assignVoice(s, it) },
+                onName = { vm.nameVoice(s, it) },
+                onDismiss = dismiss,
+            )
+        }
+        is SpeakerDialog.Merge -> MergeVoiceDialog(
+            from = d.speaker,
+            targets = SpeakerEdits.mergeTargets(speakers, d.speaker.label),
+            onMerge = { vm.mergeVoice(d.speaker, it) },
+            onDismiss = dismiss,
+        )
+        is SpeakerDialog.Block -> ChangeSpeakerDialog(
+            timeLabel = AudioText.clock(d.segment.startMs),
+            currentLabel = d.segment.speakerLabel,
+            speakers = speakers,
+            people = people,
+            onVoice = { vm.moveBlock(d.recordingId, d.segment, BlockMove.ToVoice(it.label)) },
+            onPerson = { vm.moveBlock(d.recordingId, d.segment, SpeakerEdits.moveToPerson(speakers, it)) },
+            onName = { vm.moveBlock(d.recordingId, d.segment, SpeakerEdits.moveToName(speakers, people, it)) },
+            onDismiss = dismiss,
+        )
+    }
+}
+
+@Composable
+private fun AiResultDialog(vm: RecordingsViewModel, r: AiResultState, onInsert: ((String) -> Unit)?) {
     val c = Inkwell.colors
     val context = LocalContext.current
     val title = stringResource(actionLabelRes(r.action))
@@ -148,6 +198,12 @@ private fun AiResultDialog(vm: RecordingsViewModel, r: AiResultState) {
                 }
                 TextButton(enabled = canUse && !r.saving && r.savedTitle == null, onClick = { vm.saveAiAsTyped(title) }) {
                     Text(stringResource(R.string.audio_ai_save_typed), color = if (canUse && r.savedTitle == null) c.accent else c.inkMuted)
+                }
+                if (onInsert != null) {
+                    // Explicit only: the result goes into the document on this tap, never by itself.
+                    TextButton(enabled = canUse, onClick = { onInsert(Markdown.toPlainText(r.text)); vm.dismissAi() }) {
+                        Text(stringResource(R.string.audio_ai_insert), color = if (canUse) c.accent else c.inkMuted)
+                    }
                 }
             }
         },

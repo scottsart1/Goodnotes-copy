@@ -224,6 +224,9 @@ private val T = setOf(AiCapability.TEXT)
 
 /** Model facts for OpenAI ids, by catalogue entry or id pattern. */
 object OpenAiModels {
+    /** Transcribes and labels speakers in one pass (diarized_json, known speaker references). */
+    const val DIARIZE_MODEL = "gpt-4o-transcribe-diarize"
+
     private class Family(
         val pattern: Regex, val caps: Set<AiCapability>, val context: Int, val maxOut: Int,
         val inUsd: Double?, val outUsd: Double?,
@@ -266,6 +269,8 @@ object OpenAiModels {
         ModelSpec("whisper-1", "Whisper", setOf(AiCapability.AUDIO_TRANSCRIPTION), 0, 0, usdPerAudioMinute = 0.006),
         ModelSpec("gpt-4o-transcribe", "GPT-4o Transcribe", setOf(AiCapability.AUDIO_TRANSCRIPTION), 0, 0, usdPerAudioMinute = 0.006),
         ModelSpec("gpt-4o-mini-transcribe", "GPT-4o mini Transcribe", setOf(AiCapability.AUDIO_TRANSCRIPTION), 0, 0, usdPerAudioMinute = 0.003),
+        // Speaker-labelled transcription (speaker settings); never a plain transcription default.
+        ModelSpec(DIARIZE_MODEL, "GPT-4o Transcribe Diarize", setOf(AiCapability.AUDIO_TRANSCRIPTION), 0, 0, usdPerAudioMinute = 0.006),
         ModelSpec("text-embedding-3-small", "Embedding 3 small", setOf(AiCapability.EMBEDDINGS), 8_191, 0, 0.02, null),
         ModelSpec("text-embedding-3-large", "Embedding 3 large", setOf(AiCapability.EMBEDDINGS), 8_191, 0, 0.13, null),
     )
@@ -273,6 +278,9 @@ object OpenAiModels {
     private val byId = catalogue.associateBy { it.id }
 
     fun spec(id: String): ModelSpec = byId[id] ?: derive(id)
+
+    /** True for speaker-labelling transcription models (gpt-4o-transcribe-diarize and its snapshots). */
+    fun isDiarize(id: String): Boolean = id.lowercase().let { it.contains("transcribe") && it.contains("diarize") }
 
     /** Reasoning family (o-series, GPT-5 except the chat variant). */
     fun isReasoning(id: String): Boolean = spec(id).has(AiCapability.REASONING)
@@ -339,6 +347,14 @@ class OpenAiAdapter : OpenAiCompatibleAdapter() {
     override fun isListed(spec: ModelSpec, all: Collection<String>): Boolean =
         spec.capabilities.isNotEmpty() && !OpenAiModels.isSnapshotOfListed(spec.id, all)
 
+    /**
+     * Plain transcription defaults stay on models that give segment timestamps (whisper-1
+     * first); the diarize model is only used when speakers are labelled by OpenAI.
+     */
+    override fun defaultModel(capability: AiCapability, available: Collection<String>): String? =
+        if (capability != AiCapability.AUDIO_TRANSCRIPTION) super.defaultModel(capability, available)
+        else super.defaultModel(capability, available.filterNot { OpenAiModels.isDiarize(it) })
+
     override fun usesCompletionTokens(model: ModelSpec) = OpenAiModels.usesCompletionTokens(model.id)
 
     override fun systemRole(model: ModelSpec): String? {
@@ -360,13 +376,51 @@ class OpenAiAdapter : OpenAiCompatibleAdapter() {
             .addFormDataPart("model", model)
             .addFormDataPart("file", file.name, audioBody(file))
             .apply {
-                if (TranscriptionParser.supportsSegments(model)) {
-                    addFormDataPart("response_format", "verbose_json")
-                    addFormDataPart("timestamp_granularities[]", "segment")
-                } else {
-                    addFormDataPart("response_format", "json")
+                when {
+                    TranscriptionParser.supportsSegments(model) -> {
+                        addFormDataPart("response_format", "verbose_json")
+                        addFormDataPart("timestamp_granularities[]", "segment")
+                    }
+                    // Routed here by hand: diarized_json still has segment timestamps (labels are dropped
+                    // by TranscriptionParser), and the model rejects audio over 30 s without chunking.
+                    OpenAiModels.isDiarize(model) -> {
+                        addFormDataPart("response_format", "diarized_json")
+                        addFormDataPart("chunking_strategy", "auto")
+                    }
+                    else -> addFormDataPart("response_format", "json")
                 }
                 TranscriptionParser.isoLanguage(language)?.let { addFormDataPart("language", it) }
+            }
+            .build()
+        return Request.Builder().url("$baseUrl/audio/transcriptions")
+            .header("Authorization", "Bearer $apiKey")
+            .post(body)
+            .build()
+    }
+
+    /**
+     * Speaker-labelled transcription of one file (gpt-4o-transcribe-diarize). [references] go
+     * as parallel `known_speaker_names[]` / `known_speaker_references[]` arrays (WAV data URLs);
+     * they must already satisfy [DiarizeReferences]. The model rejects `prompt` and `logprobs`,
+     * so neither is ever sent.
+     */
+    fun diarizedTranscriptionRequest(
+        baseUrl: String,
+        apiKey: String,
+        file: File,
+        model: String,
+        language: String?,
+        references: List<DiarizeReference>,
+    ): Request {
+        val body = MultipartBody.Builder().setType(MultipartBody.FORM)
+            .addFormDataPart("model", model)
+            .addFormDataPart("file", file.name, audioBody(file))
+            .addFormDataPart("response_format", "diarized_json")
+            .addFormDataPart("chunking_strategy", "auto")
+            .apply {
+                TranscriptionParser.isoLanguage(language)?.let { addFormDataPart("language", it) }
+                for (r in references) addFormDataPart("known_speaker_names[]", r.name)
+                for (r in references) addFormDataPart("known_speaker_references[]", "data:audio/wav;base64," + base64(r.wav))
             }
             .build()
         return Request.Builder().url("$baseUrl/audio/transcriptions")

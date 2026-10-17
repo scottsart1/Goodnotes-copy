@@ -104,7 +104,7 @@ object FragmentOps {
         val shapes = c.shapes.map { it.copy(id = id(it.id), groupId = group(it.groupId), audio = audio(it.audio)) }
         val texts = c.texts.map { it.copy(id = id(it.id), groupId = group(it.groupId), audio = audio(it.audio)) }
         val images = c.images.map { it.copy(id = id(it.id), groupId = group(it.groupId), audio = audio(it.audio)) }
-        val stickies = c.stickies.map { it.copy(id = id(it.id), groupId = group(it.groupId)) }
+        val stickies = c.stickies.map { it.copy(id = id(it.id), groupId = group(it.groupId), audio = audio(it.audio)) }
         val connectors = c.connectors.map {
             it.copy(
                 id = id(it.id),
@@ -120,7 +120,8 @@ object FragmentOps {
 
     /** The earliest audio anchor among the items, or null. */
     fun firstAudioAnchor(c: PageContent): AudioAnchor? =
-        (c.strokes.mapNotNull { it.audio } + c.shapes.mapNotNull { it.audio } + c.texts.mapNotNull { it.audio } + c.images.mapNotNull { it.audio })
+        (c.strokes.mapNotNull { it.audio } + c.shapes.mapNotNull { it.audio } + c.texts.mapNotNull { it.audio } + c.images.mapNotNull { it.audio } +
+            c.stickies.mapNotNull { it.audio })
             .minByOrNull { it.offsetMs }
 
     /** Typed text of the fragment in reading order (top to bottom, then left to right). */

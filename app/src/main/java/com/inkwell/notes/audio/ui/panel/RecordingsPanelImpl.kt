@@ -64,7 +64,12 @@ import com.inkwell.notes.audio.logic.TranscriptFilter
 import com.inkwell.notes.audio.transcription.TranscriptPhase
 import com.inkwell.notes.audio.ui.dock.RecordingDot
 import com.inkwell.notes.core.model.Recording
+import com.inkwell.notes.core.model.RecordingSpeaker
 import com.inkwell.notes.core.model.RecordingStatus
+import com.inkwell.notes.core.model.SpeakerEngine
+import com.inkwell.notes.speakers.ui.logic.LaneGeometry
+import com.inkwell.notes.speakers.ui.logic.SpeakerLanes
+import com.inkwell.notes.speakers.ui.logic.SpeakerTranscript
 import com.inkwell.notes.ui.theme.Dimens
 import com.inkwell.notes.ui.theme.Inkwell
 import kotlinx.coroutines.delay
@@ -75,6 +80,7 @@ internal fun RecordingsPanelImpl(
     onShowNotesAt: (recordingId: String, positionMs: Long) -> Unit,
     onClose: () -> Unit,
     modifier: Modifier = Modifier,
+    onInsert: ((String) -> Unit)? = null,
 ) {
     val context = LocalContext.current
     val graph = remember(context) { AppGraph.get(context) }
@@ -98,7 +104,7 @@ internal fun RecordingsPanelImpl(
             }
         }
     }
-    PanelDialogs(vm)
+    PanelDialogs(vm, onInsert)
 }
 
 @Composable
@@ -147,6 +153,8 @@ private fun ListContent(vm: RecordingsViewModel, onClose: () -> Unit) {
     val recordings by vm.recordings.collectAsStateWithLifecycle()
     val loaded by vm.loaded.collectAsStateWithLifecycle()
     val live by rememberLive(vm)
+    val speakerPrefs by vm.speakerPrefs.collectAsStateWithLifecycle()
+    val askNames = speakerPrefs.engine != SpeakerEngine.OFF && speakerPrefs.askToName
     Column(Modifier.fillMaxSize()) {
         PanelHeader(stringResource(R.string.audio_panel_title), onClose)
         when {
@@ -159,10 +167,17 @@ private fun ListContent(vm: RecordingsViewModel, onClose: () -> Unit) {
             ) {
                 items(recordings, key = { it.id }) { rec ->
                     val active = live?.takeIf { it.recordingId == rec.id }
+                    val newVoices = if (askNames) {
+                        val flow = remember(rec.id) { vm.needsNamingOf(rec.id) }
+                        flow.collectAsStateWithLifecycle().value
+                    } else {
+                        false
+                    }
                     RecordingRow(
                         rec = rec,
                         liveElapsedMs = active?.elapsedMs,
                         livePaused = active?.paused == true,
+                        newVoices = newVoices && active == null,
                         renaming = vm.renamingId == rec.id,
                         exporting = vm.exportingId == rec.id,
                         onOpen = { vm.select(rec.id) },
@@ -213,13 +228,37 @@ private fun DetailContent(
     val waveform by vm.waveform.collectAsStateWithLifecycle()
     val availability by vm.availability.collectAsStateWithLifecycle()
     val transcript by vm.transcript.collectAsStateWithLifecycle()
-    val matches by vm.matches.collectAsStateWithLifecycle()
+    val rows by vm.rows.collectAsStateWithLifecycle()
     val query by vm.query.collectAsStateWithLifecycle()
     val work by vm.work.collectAsStateWithLifecycle()
+    val speakerPrefs by vm.speakerPrefs.collectAsStateWithLifecycle()
+    val speakers by vm.speakers.collectAsStateWithLifecycle()
+    val turns by vm.turns.collectAsStateWithLifecycle()
+    val shares by vm.shares.collectAsStateWithLifecycle()
+    val diarization by vm.diarization.collectAsStateWithLifecycle()
+    val models by vm.modelState.collectAsStateWithLifecycle()
+    val speakerFilter by vm.speakerFilter.collectAsStateWithLifecycle()
+    val speakerNote by vm.speakerNote.collectAsStateWithLifecycle()
+    val needsNaming by vm.needsNaming.collectAsStateWithLifecycle()
+    val storedNames by vm.storedNames.collectAsStateWithLifecycle()
     val active = live?.takeIf { it.recordingId == rec.id }
     val phase = TranscriptPhase.of(rec.transcriptStatus, work)
     val loaded = playback.recording?.id == rec.id
     val activeIndex = if (loaded) TranscriptFilter.activeIndex(transcript, playback.positionMs) else -1
+    val speakerState = SpeakerSectionState(speakerPrefs, speakers, shares, diarization, models, speakerFilter, speakerNote, storedNames)
+    // Lanes share the waveform's timeline; rebuilt only when turns, voices or the duration change.
+    val laneDuration = (if (loaded && playback.durationMs > 0) playback.durationMs else rec.durationMs).coerceAtLeast(0)
+    val lanes = remember(turns, speakers, laneDuration, speakerState.enabled) {
+        if (!speakerState.enabled) LaneGeometry.EMPTY
+        else {
+            val colors = speakers.associate { it.label to it.colorIndex }
+            SpeakerLanes.build(turns, laneDuration, { label -> colors[label] ?: ((SpeakerTranscript.labelNumber(label) ?: 1) - 1) })
+        }
+    }
+    val lanesDescription = lanesDescription(speakers, shares, storedNames)
+    val unnamed = SpeakerTranscript.unnamedCount(speakers)
+    val hasSpeakerNames = remember(transcript) { transcript.any { !it.speaker.isNullOrBlank() } }
+    val showBanner = active == null && needsNaming && unnamed > 0 && speakerState.enabled && speakerPrefs.askToName
 
     Column(Modifier.fillMaxSize()) {
         if (vm.renamingId == rec.id) {
@@ -256,9 +295,15 @@ private fun DetailContent(
                     onSkip = { vm.skip(rec, it) },
                     onSpeed = { vm.setSpeed(it) },
                     onShowNotes = { onShowNotesAt(rec.id, vm.positionFor(rec)) },
+                    lanes = lanes,
+                    lanesDescription = lanesDescription,
+                    focusLabel = speakerFilter.takeIf { speakerState.enabled },
                 )
             }
             Column(Modifier.fillMaxSize()) {
+                if (showBanner) {
+                    NamingBanner(unnamed, onName = { vm.namingFor = rec.id }, modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 12.dp))
+                }
                 if (active == null && fixedPlayer) {
                     Box(Modifier.padding(start = 16.dp, end = 16.dp, top = 16.dp)) { player() }
                 }
@@ -278,25 +323,41 @@ private fun DetailContent(
                         item(key = "live") { LiveCard(active) }
                     } else {
                         if (!fixedPlayer) item(key = "player") { player() }
+                        speakerItems(vm, rec, speakerState)
                         transcriptItems(
                             vm = vm,
                             rec = rec,
                             phase = phase,
                             availability = availability,
                             hasTranscript = transcript.isNotEmpty(),
-                            matches = matches,
+                            rows = rows,
                             query = query,
                             activeIndex = activeIndex,
                             onSegment = { index ->
                                 if (vm.pickingPassage) vm.runAction(TranscriptAction.EXPLAIN, index)
                                 else transcript.getOrNull(index)?.let { vm.seek(rec, it.startMs, play = true) }
                             },
+                            speakersEnabled = speakerState.enabled,
+                            filtered = speakerState.enabled && speakerFilter != null,
+                            hasSpeakerNames = hasSpeakerNames,
+                            onChangeSpeaker = { vm.changeSpeaker(rec, it) },
                         )
                     }
                 }
             }
         }
     }
+}
+
+/** "Who spoke when. Priya 45%, Speaker 2 30%, ..." for the speaker lanes. */
+@Composable
+private fun lanesDescription(speakers: List<RecordingSpeaker>, shares: Map<String, Int>, storedNames: Map<String, String>): String {
+    val small = stringResource(R.string.spk_share_small)
+    val parts = speakers.map { s ->
+        val share = shares[s.label]?.let { if (it == 0) small else stringResource(R.string.spk_share, it) }.orEmpty()
+        stringResource(R.string.spk_lanes_entry, SpeakerTranscript.voice(s, storedNames[s.label]).name, share).trim()
+    }
+    return stringResource(R.string.spk_lanes_cd, parts.joinToString(", "))
 }
 
 @Composable

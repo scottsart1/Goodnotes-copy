@@ -15,6 +15,10 @@ dependencyResolutionManagement {
         google()
         maven("https://maven-central.storage-download.googleapis.com/maven2/")
         mavenCentral()
+        // sherpa-onnx (on-device speaker diarization) is published only through JitPack.
+        maven("https://jitpack.io") {
+            content { includeGroup("com.github.k2-fsa.sherpa-onnx") }
+        }
     }
 }
 

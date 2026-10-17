@@ -17,6 +17,7 @@ import androidx.compose.material.icons.outlined.DeleteOutline
 import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material.icons.outlined.MoreHoriz
 import androidx.compose.material.icons.outlined.Palette
+import androidx.compose.material.icons.outlined.PlayArrow
 import androidx.compose.material.icons.outlined.SelectAll
 import androidx.compose.material.icons.outlined.TextFields
 import androidx.compose.material.icons.automirrored.outlined.StickyNote2
@@ -66,6 +67,8 @@ class SelectionActions(
     val onUngroup: () -> Unit,
     val onSendToNotebook: () -> Unit,
     val onAskAi: () -> Unit,
+    /** Set when the selection was written during a recording: plays it from that moment. */
+    val onPlayFromHere: (() -> Unit)? = null,
 )
 
 /** Context pill for a selection, placed above it (or below when there is no room). */
@@ -112,6 +115,9 @@ fun SelectionBar(selection: InkSelection, actions: SelectionActions, modifier: M
                             }
                         }
                     }
+                }
+                actions.onPlayFromHere?.let { play ->
+                    KitIconButton(Icons.Outlined.PlayArrow, stringResource(R.string.wb_audio_play_from_here), play)
                 }
                 KitIconButton(Icons.Outlined.AutoAwesome, stringResource(R.string.wb_ai), actions.onAskAi)
                 Box {

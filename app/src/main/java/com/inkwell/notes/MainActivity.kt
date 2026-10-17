@@ -62,6 +62,13 @@ class MainActivity : AppCompatActivity() {
 
     private fun handleIntent(intent: Intent?) {
         intent ?: return
+        if (intent.action == ACTION_OPEN_DOCUMENT) {
+            // From our own notifications ("voices to name"). The activity is exported, so the id
+            // is validated; opening still waits behind the app lock like any navigation.
+            val docId = OpenDocumentIntent.docId(intent.getStringExtra(EXTRA_DOC_ID)) ?: return
+            pendingNavigation.post { it.openDocumentById(docId) }
+            return
+        }
         val graph = AppGraph.get(this)
         val uris: List<Uri> = when (intent.action) {
             Intent.ACTION_VIEW -> listOfNotNull(intent.data)
@@ -90,4 +97,25 @@ class MainActivity : AppCompatActivity() {
     @Suppress("DEPRECATION")
     private fun Intent.parcelableArrayListExtra(name: String): List<Uri> =
         (if (Build.VERSION.SDK_INT >= 33) getParcelableArrayListExtra(name, Uri::class.java) else getParcelableArrayListExtra(name)) ?: emptyList()
+
+    companion object {
+        /** Opens the document whose id is in [EXTRA_DOC_ID]. */
+        const val ACTION_OPEN_DOCUMENT = "com.inkwell.notes.OPEN_DOCUMENT"
+        const val EXTRA_DOC_ID = "docId"
+    }
+}
+
+/**
+ * Validation of the extras of [MainActivity.ACTION_OPEN_DOCUMENT]. The activity is exported
+ * (launcher, share targets), so any app can send the action: the id is used only to look a
+ * document up, never as a path or a query fragment, and must look like one of our ids.
+ */
+internal object OpenDocumentIntent {
+    const val MAX_ID_LENGTH = 128
+
+    /** The document id to open, or null when the extra is missing or is not an id this app creates. */
+    fun docId(extra: String?): String? = extra?.takeIf(::isValidDocId)
+
+    fun isValidDocId(id: String): Boolean =
+        id.length in 1..MAX_ID_LENGTH && id.all { it in 'a'..'z' || it in 'A'..'Z' || it in '0'..'9' || it == '-' || it == '_' }
 }

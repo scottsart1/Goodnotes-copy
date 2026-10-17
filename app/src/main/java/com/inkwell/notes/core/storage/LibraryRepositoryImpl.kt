@@ -428,18 +428,24 @@ class LibraryRepositoryImpl internal constructor(
     override suspend fun deletePermanently(id: String) {
         // Journaled first: if the process dies after the rows are gone, the folder is still removed later.
         docFiles.markPendingDelete(id)
-        val existed = db.withTransaction {
-            if (db.documents().get(id) == null) return@withTransaction false
+        // Read inside the transaction: once the row is gone the cascade has taken the recordings
+        // with it, and the speaker service keeps voice data per recording outside the database.
+        val recordingIds: List<String>? = db.withTransaction {
+            if (db.documents().get(id) == null) return@withTransaction null
+            val recordings = db.recordings().forDocument(id).map { it.id }
             db.chat().threadsForDocument(id).forEach { db.chat().deleteThread(it) }
             db.textIndex().deleteDocument(id)
             db.embeddings().deleteDocument(id)
-            // Cascades to pages, outline, recordings and their transcript segments.
+            // Cascades to pages, outline, recordings and their transcript segments and speakers.
             db.documents().delete(id)
-            true
+            recordings
         }
         docFiles.deleteDocument(id)
         docFiles.clearPendingDelete(id)
-        if (existed) hooks.documentDeleted(id)
+        if (recordingIds != null) {
+            if (recordingIds.isNotEmpty()) hooks.recordingsDeleted(id, recordingIds)
+            hooks.documentDeleted(id)
+        }
     }
 
     override suspend fun emptyTrash() {

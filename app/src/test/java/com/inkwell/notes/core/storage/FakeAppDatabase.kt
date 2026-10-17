@@ -316,4 +316,5 @@ class FakeAppDatabase : AppDatabase() {
     override fun chat(): ChatDao = chatDao
     override fun syncQueue(): SyncQueueDao = throw UnsupportedOperationException("not needed in tests")
     override fun reusableElements(): ReusableElementDao = throw UnsupportedOperationException("not needed in tests")
+    override fun speakers(): com.inkwell.notes.core.storage.db.SpeakerDao = throw UnsupportedOperationException("not needed in tests")
 }

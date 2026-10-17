@@ -20,9 +20,12 @@ import androidx.room.RoomDatabase
         ChatMessageEntity::class,
         SyncQueueEntity::class,
         ReusableElementEntity::class,
+        PersonEntity::class,
+        RecordingSpeakerEntity::class,
+        SpeakerTurnEntity::class,
     ],
-    version = 1,
-    exportSchema = false,
+    version = 2,
+    exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {
     abstract fun folders(): FolderDao
@@ -37,12 +40,15 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun chat(): ChatDao
     abstract fun syncQueue(): SyncQueueDao
     abstract fun reusableElements(): ReusableElementDao
+    abstract fun speakers(): SpeakerDao
 
     companion object {
         fun create(context: Context): AppDatabase =
             Room.databaseBuilder(context, AppDatabase::class.java, "inkwell.db")
                 // WAL keeps writes durable and readers unblocked while ink autosaves.
                 .setJournalMode(JournalMode.WRITE_AHEAD_LOGGING)
+                // Never destructive: installed builds hold the user's notes.
+                .addMigrations(*Migrations.ALL)
                 .build()
     }
 }

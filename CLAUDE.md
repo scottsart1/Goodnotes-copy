@@ -32,6 +32,7 @@ so it is unit-testable without Android.
 | `library` | Home library, folders, trash | `LibraryScreen.kt` |
 | `ai` | Providers, routing, usage/cost, chat panel, AI settings | `AiService.kt`, `ui/AiUi.kt` |
 | `audio` | Recording service, playback, edge-docked recorder, transcripts | `AudioContracts.kt`, `ui/AudioUi.kt`, `RecordingService.kt` |
+| `speakers` | Who spoke when (on-device sherpa-onnx or OpenAI diarize), people, voiceprints, naming | `SpeakerContracts.kt` |
 | `ocr` + `search` | ML Kit OCR + handwriting recognition, FTS index, indexing pipeline, search screen | `ocr/OcrContracts.kt`, `search/SearchScreen.kt` |
 | `pdf` | Import, render, text extraction, merge/split/extract, scanning | `PdfService.kt` |
 | `export` | Export formats, thumbnails, backup, sync to folder / notes vault, storage settings UI | `ExportContracts.kt`, `ui/ExportUi.kt` |
@@ -49,7 +50,9 @@ Rules for contracts:
 3. Get collaborators lazily from the graph (`graph.library`, `graph.ai`, ...). Never construct
    another feature's implementation yourself.
 4. `AppDatabase` (entities + DAOs) is shared. You may add queries to the DAO of your own
-   feature; adding columns/entities is allowed only if essential (keep `version = 1`).
+   feature; adding columns/entities is allowed only if essential. Installed builds hold user
+   data: a schema change bumps `version` and adds a non-destructive `Migration` in
+   `db/Migrations.kt` whose SQL matches `app/schemas/` (checked by `MigrationSchemaTest`).
 5. `app/build.gradle.kts` already declares every dependency. Do not add new libraries unless
    impossible otherwise.
 6. `AndroidManifest.xml` already declares permissions, the recording service and the
@@ -65,6 +68,8 @@ Rules for contracts:
   and never blocks writing.
 - API keys and the vault password live only in `SecretStore`; never log them, never put them
   in settings JSON, exports, or shared files.
+- Voiceprints (speaker embeddings, reference clips) are biometric: encrypted, under
+  `noBackupFilesDir`, never in the database, backups, exports or sync. Only names travel.
 
 ## Threading
 

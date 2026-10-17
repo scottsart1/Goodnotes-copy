@@ -4,6 +4,8 @@
 -dontwarn com.gemalto.jp2.**
 -dontwarn org.bouncycastle.**
 -keep class com.tom_roush.pdfbox.** { *; }
+# sherpa-onnx's JNI code looks its Kotlin classes and fields up by name.
+-keep class com.k2fsa.sherpa.onnx.** { *; }
 -keepclassmembers class com.inkwell.notes.** {
     *** Companion;
     kotlinx.serialization.KSerializer serializer(...);

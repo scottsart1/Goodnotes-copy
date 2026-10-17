@@ -187,6 +187,7 @@ internal class CanvasEditor(private val e: InkEngine) {
         val item = StickyItem(
             id = e.newId(), x = c.x - size / 2f, y = c.y - size / 2f, width = size, height = size,
             color = color ?: e.toolState.stickyColor, z = e.nextZ(i), createdAt = System.currentTimeMillis(),
+            audio = e.audioAnchor(),
         )
         e.commitNewItems(i, listOf(item), "Add sticky")
         return ItemRef(h.id, item.id, ItemType.STICKY)

@@ -309,6 +309,8 @@ class PaneActions(
                 messages.show(str(R.string.editor_no_notes_at_time))
             } else {
                 val b = hit.bounds
+                // The closest notes may lie outside the window around the position: highlight what is revealed.
+                canvas.setPlaybackHighlight(recordingId, AnchorLocator.highlightPosition(hit, positionMs))
                 canvas.revealOnPage(hit.pageIndex, b.centerX, b.centerY, RectF(b.left, b.top, b.right, b.bottom))
             }
         }
