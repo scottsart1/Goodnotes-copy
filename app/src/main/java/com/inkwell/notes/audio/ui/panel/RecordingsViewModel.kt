@@ -225,6 +225,14 @@ internal class RecordingsViewModel(private val graph: AppGraph, val docId: Strin
         .flowOn(Dispatchers.Default)
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyMap())
 
+    /**
+     * Real names the transcript still holds for voices whose person was deleted, so the chips
+     * say what the blocks, exports and search say (see SpeakerTranscript.storedNames).
+     */
+    val storedNames: StateFlow<Map<String, String>> = combine(transcript, speakers) { segs, s -> SpeakerTranscript.storedNames(segs, s.associateBy { it.label }) }
+        .flowOn(Dispatchers.Default)
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyMap())
+
     private val speakerEditor = SpeakerEditor(graph) { message = context.getString(R.string.spk_action_failed) }
 
     private val namingFlows = HashMap<String, StateFlow<Boolean>>()
@@ -330,7 +338,7 @@ internal class RecordingsViewModel(private val graph: AppGraph, val docId: Strin
         val key = speakerFilter.value ?: return
         val starts = SpeakerTranscript.blockStarts(key, transcript.value, speakers.value.associateBy { it.label }, turns.value)
         if (starts.isEmpty()) {
-            val name = speakers.value.firstOrNull { it.label == key }?.displayName ?: key
+            val name = storedNames.value[key] ?: speakers.value.firstOrNull { it.label == key }?.displayName ?: key
             message = context.getString(R.string.spk_no_blocks, name)
             return
         }

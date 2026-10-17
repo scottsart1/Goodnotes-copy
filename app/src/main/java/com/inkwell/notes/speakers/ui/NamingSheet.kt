@@ -44,8 +44,10 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -67,6 +69,7 @@ import com.inkwell.notes.core.model.Recording
 import com.inkwell.notes.core.model.RecordingSpeaker
 import com.inkwell.notes.core.model.SpeakerPrefs
 import com.inkwell.notes.speakers.ui.logic.NamingDraft
+import com.inkwell.notes.speakers.ui.logic.NamingOp
 import com.inkwell.notes.speakers.ui.logic.NamingPlan
 import com.inkwell.notes.speakers.ui.logic.SpeakerNumbers
 import com.inkwell.notes.speakers.ui.logic.SpeakerTranscript
@@ -142,6 +145,9 @@ internal class NamingViewModel(private val graph: AppGraph, val recordingId: Str
     var saving by mutableStateOf(false)
         private set
     var error by mutableStateOf<String?>(null)
+    /** Voices ticked "This is me" without a name; "Done" asks for one instead of dropping the tick. */
+    var invalid by mutableStateOf<Set<String>>(emptySet())
+        private set
 
     val sample = SamplePlayer(graph, viewModelScope)
 
@@ -172,13 +178,14 @@ internal class NamingViewModel(private val graph: AppGraph, val recordingId: Str
         handle.remove<String>(KEY_DRAFTS)
         drafts = emptyMap()
         error = null
+        invalid = emptySet()
     }
 
     fun edit(label: String, text: String) = update(NamingPlan.edit(drafts, label, text, people.value))
 
     fun pick(label: String, person: Person) = update(NamingPlan.pick(drafts, label, person))
 
-    fun toggleMe(label: String, on: Boolean) = update(NamingPlan.toggleMe(drafts, label, on))
+    fun toggleMe(label: String, on: Boolean) = update(NamingPlan.toggleMe(drafts, label, on, people.value.firstOrNull { it.isMe }))
 
     /** Accepts an automatic match right away. */
     fun confirm(s: RecordingSpeaker) {
@@ -198,8 +205,35 @@ internal class NamingViewModel(private val graph: AppGraph, val recordingId: Str
 
     fun done(onClosed: () -> Unit) {
         if (saving) return
+        val list = speakers.value.orEmpty()
+        val missing = NamingPlan.missingNames(list, drafts)
+        if (missing.isNotEmpty()) {
+            invalid = missing
+            return
+        }
+        apply(NamingPlan.operations(list, drafts), onClosed)
+    }
+
+    /** Whether the secondary action saves anything before dismissing ("Save, skip the rest"). */
+    val hasChanges: Boolean get() = NamingPlan.hasChanges(speakers.value.orEmpty(), drafts)
+
+    /**
+     * "Skip" / "Save, skip the rest": names the user already entered are saved, only the voices
+     * left untouched are dismissed. A "This is me" tick without a name still needs one.
+     */
+    fun skip(onClosed: () -> Unit) {
+        if (saving) return
+        val list = speakers.value.orEmpty()
+        val missing = NamingPlan.missingNames(list, drafts)
+        if (missing.isNotEmpty()) {
+            invalid = missing
+            return
+        }
+        apply(NamingPlan.skipOperations(list, drafts), onClosed)
+    }
+
+    private fun apply(ops: List<NamingOp>, onClosed: () -> Unit) {
         sample.stop()
-        val ops = NamingPlan.operations(speakers.value.orEmpty(), drafts)
         if (ops.isEmpty()) {
             onClosed()
             return
@@ -219,14 +253,9 @@ internal class NamingViewModel(private val graph: AppGraph, val recordingId: Str
         )
     }
 
-    fun skip(onClosed: () -> Unit) {
-        sample.stop()
-        editor.run { dismissNaming(recordingId) }
-        onClosed()
-    }
-
     private fun update(next: Map<String, NamingDraft>) {
         drafts = next
+        invalid = emptySet()
         persist()
     }
 
@@ -322,6 +351,7 @@ private fun NamingContent(vm: NamingViewModel, close: () -> Unit) {
                                 s = s,
                                 draft = vm.drafts[s.label] ?: NamingDraft(),
                                 people = people,
+                                nameError = if (s.label in vm.invalid) stringResource(R.string.spk_enter_your_name) else null,
                                 playing = playing == s.label,
                                 canPlay = recording != null,
                                 onPlay = { vm.playSample(s) },
@@ -344,7 +374,14 @@ private fun NamingContent(vm: NamingViewModel, close: () -> Unit) {
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                if (unnamed) AudioSecondaryButton(stringResource(R.string.spk_skip), onClick = { vm.skip(::finish) }, enabled = !vm.saving)
+                if (unnamed) {
+                    // Typed names are saved by this button too; only the untouched voices are skipped.
+                    AudioSecondaryButton(
+                        stringResource(if (vm.hasChanges) R.string.spk_save_skip_rest else R.string.spk_skip),
+                        onClick = { vm.skip(::finish) },
+                        enabled = !vm.saving && list != null,
+                    )
+                }
                 Spacer(Modifier.weight(1f))
                 AudioPrimaryButton(
                     stringResource(if (vm.saving) R.string.spk_saving else R.string.spk_done),
@@ -374,6 +411,7 @@ private fun VoiceRow(
     s: RecordingSpeaker,
     draft: NamingDraft,
     people: List<Person>,
+    nameError: String?,
     playing: Boolean,
     canPlay: Boolean,
     onPlay: () -> Unit,
@@ -425,6 +463,14 @@ private fun VoiceRow(
                 pickedId = draft.personId,
                 modifier = Modifier.padding(end = 12.dp),
             )
+            if (nameError != null) {
+                Text(
+                    nameError,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = c.danger,
+                    modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+                )
+            }
             MeToggle(checked = draft.isMe, onChange = onMe)
         }
     }

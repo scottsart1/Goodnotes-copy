@@ -52,18 +52,24 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.DialogProperties
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.inkwell.notes.R
 import com.inkwell.notes.app.AppGraph
 import com.inkwell.notes.audio.RecordingState
 import com.inkwell.notes.audio.logic.LevelMeter
 import com.inkwell.notes.core.model.Person
+import com.inkwell.notes.speakers.SpeakerModelState
 import com.inkwell.notes.speakers.ui.logic.EnrollmentLogic
+import com.inkwell.notes.speakers.ui.logic.EnrollmentLogic.Gate
 import com.inkwell.notes.speakers.ui.logic.EnrollmentLogic.Phase
 import com.inkwell.notes.speakers.ui.logic.EnrollmentLogic.Reason
+import com.inkwell.notes.speakers.ui.logic.SpeakerNumbers
+import com.inkwell.notes.speakers.ui.logic.SpeakerStatusLogic
 import com.inkwell.notes.ui.theme.Inkwell
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -72,8 +78,10 @@ private val R8 = RoundedCornerShape(8.dp)
 
 /**
  * "Record a voice sample": about 15 s of the person reading a short paragraph, turned into a
- * voiceprint by graph.speakers.enroll. Never records while a document recording runs; the
- * temporary audio file is deleted whatever happens.
+ * voiceprint by graph.speakers.enroll. Recording starts only once the on-device models are
+ * downloaded and voices are remembered (enroll stores nothing otherwise; the dialog offers the
+ * download first). Never records while a document recording runs; the temporary audio file is
+ * deleted whatever happens.
  */
 @Composable
 fun EnrollmentDialog(person: Person, onDismiss: () -> Unit) {
@@ -83,6 +91,9 @@ fun EnrollmentDialog(person: Person, onDismiss: () -> Unit) {
     val recorder = remember { VoiceSampleRecorder(context.applicationContext) }
     var phase by remember { mutableStateOf<Phase>(Phase.Ready) }
     var startedAt by remember { mutableStateOf(0L) }
+    val models by graph.speakers.modelState.collectAsStateWithLifecycle()
+    val prefs by remember(graph) { graph.settings.settings.map { it.speakers } }.collectAsStateWithLifecycle(graph.settings.current.speakers)
+    val gate = EnrollmentLogic.gate(models, prefs.rememberVoices)
 
     DisposableEffect(recorder) {
         VoiceSampleRecorder.sweep(context.applicationContext)
@@ -90,17 +101,22 @@ fun EnrollmentDialog(person: Person, onDismiss: () -> Unit) {
     }
 
     fun finish() {
+        // The countdown and the Finish button can both call this; only the first stop counts.
+        if (phase !is Phase.Recording) return
         val file = recorder.stop()
         if (file == null) {
             phase = Phase.TooLittleSpeech
             return
         }
         phase = Phase.Saving
+        // What held when the clip was taken decides what a "false" from enroll means.
+        val gateNow = EnrollmentLogic.gate(graph.speakers.modelState.value, graph.settings.current.speakers.rememberVoices)
         // On the app scope: the voiceprint is made (and the clip deleted) even if the dialog closes.
         graph.appScope.launch(Dispatchers.Main.immediate) {
             phase = try {
                 val ok = withContext(Dispatchers.IO) { graph.speakers.enroll(person.id, file) }
-                if (ok) Phase.Saved else Phase.TooLittleSpeech
+                val exists = ok || withContext(Dispatchers.IO) { runCatching { graph.speakers.person(person.id) != null }.getOrDefault(true) }
+                EnrollmentLogic.afterEnroll(ok, gateNow, exists)
             } catch (e: CancellationException) {
                 throw e
             } catch (t: Throwable) {
@@ -116,6 +132,17 @@ fun EnrollmentDialog(person: Person, onDismiss: () -> Unit) {
         if (graph.recording.state.value is RecordingState.Active) {
             phase = Phase.Failed(Reason.DOCUMENT_RECORDING)
             return
+        }
+        when (gate) {
+            Gate.VoicesOff -> {
+                phase = Phase.Failed(Reason.VOICES_OFF)
+                return
+            }
+            is Gate.NeedsModels -> {
+                phase = Phase.Failed(Reason.MODELS_MISSING)
+                return
+            }
+            Gate.Ready -> Unit
         }
         phase = try {
             recorder.start()
@@ -136,6 +163,13 @@ fun EnrollmentDialog(person: Person, onDismiss: () -> Unit) {
     fun requestStart() {
         val granted = ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
         if (granted) begin() else runCatching { permission.launch(Manifest.permission.RECORD_AUDIO) }.onFailure { phase = Phase.Failed(Reason.PERMISSION) }
+    }
+
+    fun fetchModels() {
+        graph.appScope.launch {
+            runCatching { graph.speakers.downloadModels() }
+                .onFailure { Log.w("Speakers", "Could not queue the model download: ${it.javaClass.simpleName}") }
+        }
     }
 
     val recording = phase is Phase.Recording
@@ -180,6 +214,7 @@ fun EnrollmentDialog(person: Person, onDismiss: () -> Unit) {
                         Text(stringResource(R.string.spk_enroll_saving), style = MaterialTheme.typography.bodyMedium, color = c.inkMuted)
                     }
                     else -> {
+                        if (p !is Phase.Recording) GateNote(gate)
                         Text(stringResource(R.string.spk_enroll_body), style = MaterialTheme.typography.bodyMedium, color = c.inkMuted)
                         Text(
                             stringResource(R.string.spk_enroll_paragraph),
@@ -190,14 +225,16 @@ fun EnrollmentDialog(person: Person, onDismiss: () -> Unit) {
                         if (p is Phase.Recording) RecordingMeter(p)
                         val problem = when (p) {
                             Phase.TooLittleSpeech -> stringResource(R.string.spk_enroll_too_little)
-                            is Phase.Failed -> stringResource(
-                                when (p.reason) {
-                                    Reason.MIC_BUSY -> R.string.spk_enroll_mic_busy
-                                    Reason.DOCUMENT_RECORDING -> R.string.spk_enroll_doc_recording
-                                    Reason.PERMISSION -> R.string.spk_enroll_permission
-                                    Reason.SAVE_FAILED -> R.string.spk_enroll_failed
-                                },
-                            )
+                            is Phase.Failed -> when (p.reason) {
+                                Reason.MIC_BUSY -> stringResource(R.string.spk_enroll_mic_busy)
+                                Reason.DOCUMENT_RECORDING -> stringResource(R.string.spk_enroll_doc_recording)
+                                Reason.PERMISSION -> stringResource(R.string.spk_enroll_permission)
+                                Reason.SAVE_FAILED -> stringResource(R.string.spk_enroll_failed)
+                                // The gate note above already explains these two while they hold.
+                                Reason.MODELS_MISSING -> if (gate is Gate.NeedsModels) null else stringResource(R.string.spk_enroll_needs_models, SpeakerStatusLogic.MODEL_DOWNLOAD_MB)
+                                Reason.VOICES_OFF -> if (gate is Gate.VoicesOff) null else stringResource(R.string.spk_enroll_voices_off)
+                                Reason.PERSON_GONE -> stringResource(R.string.spk_enroll_person_gone)
+                            }
                             else -> null
                         }
                         if (problem != null) {
@@ -224,11 +261,23 @@ fun EnrollmentDialog(person: Person, onDismiss: () -> Unit) {
                 Phase.Saved -> TextButton(onClick = onDismiss) {
                     Text(stringResource(R.string.spk_done), color = c.accent, style = MaterialTheme.typography.labelLarge)
                 }
-                Phase.Ready -> TextButton(onClick = { requestStart() }) {
-                    Text(stringResource(R.string.spk_enroll_start), color = c.accent, style = MaterialTheme.typography.labelLarge)
-                }
-                else -> TextButton(onClick = { requestStart() }) {
-                    Text(stringResource(R.string.spk_try_again), color = c.accent, style = MaterialTheme.typography.labelLarge)
+                // Before recording: settle the preconditions first (the model download), then start.
+                else -> when {
+                    EnrollmentLogic.offersDownload(gate) -> TextButton(onClick = { fetchModels() }) {
+                        Text(
+                            stringResource(R.string.spk_enroll_download_models, SpeakerStatusLogic.MODEL_DOWNLOAD_MB),
+                            color = c.accent,
+                            style = MaterialTheme.typography.labelLarge,
+                        )
+                    }
+                    !EnrollmentLogic.canStart(gate) -> Unit
+                    p is Phase.Failed && p.reason == Reason.PERSON_GONE -> Unit
+                    p is Phase.Ready -> TextButton(onClick = { requestStart() }) {
+                        Text(stringResource(R.string.spk_enroll_start), color = c.accent, style = MaterialTheme.typography.labelLarge)
+                    }
+                    else -> TextButton(onClick = { requestStart() }) {
+                        Text(stringResource(R.string.spk_try_again), color = c.accent, style = MaterialTheme.typography.labelLarge)
+                    }
                 }
             }
         },
@@ -241,6 +290,51 @@ fun EnrollmentDialog(person: Person, onDismiss: () -> Unit) {
             }
         },
     )
+}
+
+/** Why recording can't start yet: the models to download (with progress), or voices not remembered. */
+@Composable
+private fun GateNote(gate: Gate) {
+    val c = Inkwell.colors
+    when (gate) {
+        Gate.Ready -> Unit
+        Gate.VoicesOff -> Text(
+            stringResource(R.string.spk_enroll_voices_off),
+            style = MaterialTheme.typography.bodyMedium,
+            color = c.danger,
+            modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+        )
+        is Gate.NeedsModels -> Column(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite }) {
+            when (val m = gate.models) {
+                is SpeakerModelState.Downloading -> {
+                    val done = SpeakerNumbers.megabytes(m.bytesDone).toInt()
+                    val total = SpeakerNumbers.megabytes(m.bytesTotal).toInt()
+                    Text(
+                        if (m.bytesTotal > 0) stringResource(R.string.spk_models_downloading, done, total)
+                        else stringResource(R.string.spk_models_downloading_unknown, done),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = c.ink,
+                    )
+                    val fraction = SpeakerNumbers.fraction(m.bytesDone, m.bytesTotal)
+                    if (fraction != null) {
+                        LinearProgressIndicator(progress = { fraction }, modifier = Modifier.fillMaxWidth(), color = c.accent, trackColor = c.surfaceAlt)
+                    } else {
+                        LinearProgressIndicator(Modifier.fillMaxWidth(), color = c.accent, trackColor = c.surfaceAlt)
+                    }
+                }
+                is SpeakerModelState.Failed -> Text(
+                    stringResource(R.string.spk_enroll_models_failed, m.message),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = c.danger,
+                )
+                else -> Text(
+                    stringResource(R.string.spk_enroll_needs_models, SpeakerStatusLogic.MODEL_DOWNLOAD_MB),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = c.ink,
+                )
+            }
+        }
+    }
 }
 
 @Composable

@@ -195,7 +195,8 @@ internal fun SpeakersContent(s: AppSettings, actions: SettingsActions, openSecti
         )
     }
 
-    if (prefs.engine == SpeakerEngine.DEVICE) {
+    // The models make voiceprints too, so the row shows whenever a voice sample can be recorded.
+    if (SpeakerPrefsLogic.showModels(prefs)) {
         SettingsGroup(stringResource(R.string.spk_set_models)) {
             ModelsRow(models, actions, onDelete = { dialog = VoicesDialog.DeleteModels })
             RowDivider()
@@ -268,7 +269,8 @@ internal fun SpeakersContent(s: AppSettings, actions: SettingsActions, openSecti
     SettingsGroup(stringResource(R.string.spk_set_people), description = stringResource(R.string.spk_set_people_desc)) {
         val list = people
         val hasMe = list.orEmpty().any { it.isMe }
-        if (!hasMe && prefs.rememberVoices && prefs.engine != SpeakerEngine.OFF) {
+        val canEnroll = SpeakerPrefsLogic.canEnroll(prefs)
+        if (!hasMe && canEnroll) {
             ActionRow(
                 title = stringResource(R.string.spk_set_record_me),
                 subtitle = stringResource(R.string.spk_set_record_me_sub),
@@ -290,7 +292,7 @@ internal fun SpeakersContent(s: AppSettings, actions: SettingsActions, openSecti
                 PersonRow(
                     p = p,
                     canMerge = list.size > 1,
-                    canRecord = prefs.rememberVoices,
+                    canRecord = canEnroll,
                     onRename = { dialog = VoicesDialog.Rename(p) },
                     onToggleMe = { actions.background(failed) { graph.speakers.setMe(if (p.isMe) null else p.id) } },
                     onMerge = { dialog = VoicesDialog.Merge(p) },

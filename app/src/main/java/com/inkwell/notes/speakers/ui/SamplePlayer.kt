@@ -1,6 +1,7 @@
 package com.inkwell.notes.speakers.ui
 
 import com.inkwell.notes.app.AppGraph
+import com.inkwell.notes.audio.PlaybackController
 import com.inkwell.notes.core.model.Recording
 import com.inkwell.notes.speakers.ui.logic.SampleLogic
 import kotlinx.coroutines.CoroutineScope
@@ -17,7 +18,9 @@ import kotlinx.coroutines.withTimeoutOrNull
  * the recording if needed, plays [start, end) at normal speed, pauses at the end, and puts the
  * player back where it was (recording, position, speed). Main thread only.
  */
-internal class SamplePlayer(private val graph: AppGraph, private val scope: CoroutineScope) {
+internal class SamplePlayer(private val playback: PlaybackController, private val scope: CoroutineScope) {
+    constructor(graph: AppGraph, scope: CoroutineScope) : this(graph.playback, scope)
+
     private data class Before(val recording: Recording?, val positionMs: Long, val speed: Float)
 
     private val _playing = MutableStateFlow<String?>(null)
@@ -34,7 +37,6 @@ internal class SamplePlayer(private val graph: AppGraph, private val scope: Coro
             return
         }
         stop()
-        val playback = graph.playback
         val s = playback.state.value
         before = Before(s.recording, s.positionMs, s.speed)
         val (start, end) = SampleLogic.bounds(startMs, endMs, recording.durationMs)
@@ -72,7 +74,6 @@ internal class SamplePlayer(private val graph: AppGraph, private val scope: Coro
         val b = before
         before = null
         if (verdict == SampleLogic.Verdict.RELEASE || b == null) return
-        val playback = graph.playback
         playback.pause()
         val prev = b.recording
         when {

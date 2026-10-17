@@ -78,6 +78,8 @@ internal data class SpeakerSectionState(
     val models: SpeakerModelState,
     val filter: String?,
     val note: String?,
+    /** Names the transcript still holds for voices whose person was deleted (label to name). */
+    val storedNames: Map<String, String> = emptyMap(),
 ) {
     val enabled: Boolean get() = prefs.engine != SpeakerEngine.OFF
 }
@@ -238,6 +240,7 @@ private fun SpeakerChips(vm: RecordingsViewModel, rec: Recording, s: SpeakerSect
                 SpeakerChip(
                     vm = vm,
                     s = sp,
+                    storedName = s.storedNames[sp.label],
                     share = s.shares[sp.label],
                     selected = s.filter == sp.label,
                     canMerge = s.speakers.size > 1,
@@ -245,15 +248,15 @@ private fun SpeakerChips(vm: RecordingsViewModel, rec: Recording, s: SpeakerSect
             }
         }
         val only = s.filter?.let { f -> s.speakers.firstOrNull { it.label == f } }
-        if (only != null) FilterBar(vm, rec, only)
+        if (only != null) FilterBar(vm, rec, only, s.storedNames[only.label])
     }
 }
 
 @Composable
-private fun SpeakerChip(vm: RecordingsViewModel, s: RecordingSpeaker, share: Int?, selected: Boolean, canMerge: Boolean) {
+private fun SpeakerChip(vm: RecordingsViewModel, s: RecordingSpeaker, storedName: String?, share: Int?, selected: Boolean, canMerge: Boolean) {
     val c = Inkwell.colors
     var menu by remember { mutableStateOf(false) }
-    val voice = SpeakerTranscript.voice(s)
+    val voice = SpeakerTranscript.voice(s, storedName)
     val name = voiceName(voice)
     val shareText = share?.let { if (it == 0) stringResource(R.string.spk_share_small) else stringResource(R.string.spk_share, it) }
     val description = voiceDescription(voice).let { d -> if (shareText != null) stringResource(R.string.spk_chip_cd, d, shareText) else d }
@@ -343,9 +346,10 @@ private fun MenuItem(label: String, icon: ImageVector, onClick: () -> Unit) {
 
 /** "Only Priya" with previous / next passage of that voice and "Show everyone". */
 @Composable
-private fun FilterBar(vm: RecordingsViewModel, rec: Recording, s: RecordingSpeaker) {
+private fun FilterBar(vm: RecordingsViewModel, rec: Recording, s: RecordingSpeaker, storedName: String?) {
     val c = Inkwell.colors
-    val name = s.displayName
+    val voice = SpeakerTranscript.voice(s, storedName)
+    val name = voice.name
     Row(
         Modifier.fillMaxWidth().clip(R8).background(c.surfaceAlt).padding(start = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -353,7 +357,7 @@ private fun FilterBar(vm: RecordingsViewModel, rec: Recording, s: RecordingSpeak
         SpeakerDot(s.colorIndex, size = 8.dp)
         Spacer(Modifier.width(8.dp))
         Text(
-            stringResource(R.string.spk_filter_label, voiceName(s)),
+            stringResource(R.string.spk_filter_label, voiceName(voice)),
             style = MaterialTheme.typography.labelLarge,
             color = c.ink,
             maxLines = 1,

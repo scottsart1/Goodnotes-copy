@@ -32,21 +32,49 @@ object SpeakerTranscript {
 
     private const val NAME_KEY = "name:"
     private val NUMBERED_LABEL = Regex("^S(\\d+)$")
+    /** The generic "Speaker N" a block carries while its voice is unnamed (see SpeakerNames.unnamed). */
+    private val GENERIC_NAME = Regex("^Speaker \\d+$")
 
     fun isTentative(s: RecordingSpeaker): Boolean = s.personId != null && !s.confirmed
 
-    fun voice(s: RecordingSpeaker): Voice =
-        Voice(s.label, s.label, s.displayName.trim().ifEmpty { s.label }, s.colorIndex, isTentative(s), s.confidence)
+    /**
+     * The voice as the panel shows it. [storedName] is a real name written into the transcript
+     * for a voice that has no person any more (the person was deleted): transcripts, exports,
+     * search and the vault keep that name, so the panel shows it too instead of "Speaker N".
+     */
+    fun voice(s: RecordingSpeaker, storedName: String? = null): Voice {
+        val stored = storedName?.trim()?.takeIf { s.personId == null && it.isNotEmpty() && !GENERIC_NAME.matches(it) }
+        return Voice(s.label, s.label, stored ?: s.displayName.trim().ifEmpty { s.label }, s.colorIndex, isTentative(s), s.confidence)
+    }
 
     /**
-     * The voice of [segment]: its recording speaker when the label is known, otherwise the name
-     * stored on the block (older transcripts, or a label whose speaker row is gone), else null.
+     * The voice of [segment]: its recording speaker when the label is known (falling back to the
+     * block's stored name while that voice has no person), otherwise the name stored on the block
+     * (older transcripts, or a label whose speaker row is gone), else null.
      */
     fun voiceOf(segment: TranscriptSegment, byLabel: Map<String, RecordingSpeaker>): Voice? {
         val label = segment.speakerLabel?.trim()?.takeIf { it.isNotEmpty() }
-        label?.let { byLabel[it] }?.let { return voice(it) }
+        label?.let { byLabel[it] }?.let { return voice(it, segment.speaker) }
         val name = segment.speaker?.trim()?.takeIf { it.isNotEmpty() } ?: return null
         return Voice(label ?: NAME_KEY + name.lowercase(Locale.ROOT), label, name, null, tentative = false, confidence = null)
+    }
+
+    /**
+     * Label to the real name the transcript still holds for voices without a person (deleted
+     * people), so chips and the filter bar say what the blocks say. Voices with a person, and
+     * blocks carrying only the generic "Speaker N", are not included.
+     */
+    fun storedNames(segments: List<TranscriptSegment>, byLabel: Map<String, RecordingSpeaker>): Map<String, String> {
+        val out = LinkedHashMap<String, String>()
+        for (s in segments) {
+            val label = s.speakerLabel?.trim()?.takeIf { it.isNotEmpty() } ?: continue
+            if (label in out) continue
+            val row = byLabel[label] ?: continue
+            if (row.personId != null) continue
+            val name = s.speaker?.trim()?.takeIf { it.isNotEmpty() && !GENERIC_NAME.matches(it) } ?: continue
+            out[label] = name
+        }
+        return out
     }
 
     /**
