@@ -13,8 +13,13 @@
         <exclude domain="sharedpref" />
     </cloud-backup>
     <device-transfer>
+        <!-- On Android 12+ some makers' device-to-device transfer ignores allowBackup="false", and
+             excluding "root" does not cover files/ or databases/ (they are their own domains):
+             notes, settings and the Room database (people's names, transcripts) stay out too. -->
         <exclude domain="root" />
         <exclude domain="root" path="no_backup/" />
+        <exclude domain="file" />
+        <exclude domain="database" />
         <exclude domain="sharedpref" />
     </device-transfer>
 </data-extraction-rules>

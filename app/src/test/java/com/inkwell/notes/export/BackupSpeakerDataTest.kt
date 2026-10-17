@@ -96,9 +96,11 @@ class BackupSpeakerDataTest {
             }
         }
         walk(tree)
-        for (word in listOf("embedding", "vector", "centroid", "voiceprint", "clip", "wav", "personId", "voiceSamples", "confidence")) {
+        for (word in listOf("embedding", "vector", "centroid", "voiceprint", "clip", "personId", "voiceSamples", "confidence")) {
             assertTrue("manifest key mentions $word: ${keys.filter { it.contains(word, ignoreCase = true) }}", keys.none { it.contains(word, ignoreCase = true) })
         }
+        // The amplitude envelope (waveformPath) is a display aid, not audio; no WAV reference clip travels.
+        assertTrue(keys.none { it.equals("wav", ignoreCase = true) || it.contains("reference", ignoreCase = true) })
         // Only the display name and the within-recording label travel.
         val segmentKeys = tree.jsonObject["recordings"]!!.let { it as JsonArray }[0].jsonObject["transcript"]!!.let { it as JsonArray }[0].jsonObject.keys
         assertEquals(setOf("startMs", "endMs", "text", "speaker", "speakerLabel"), segmentKeys)

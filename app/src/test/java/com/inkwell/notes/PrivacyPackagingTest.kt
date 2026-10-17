@@ -14,7 +14,7 @@ import org.w3c.dom.Element
  * the working directory) so a careless edit fails here instead of on the tablet.
  */
 class PrivacyPackagingTest {
-    private fun xml(path: String) = DocumentBuilderFactory.newInstance().newDocumentBuilder().parse(File(path)).documentElement
+    private fun xml(path: String) = DocumentBuilderFactory.newInstance().apply { isNamespaceAware = true }.newDocumentBuilder().parse(File(path)).documentElement
 
     private fun Element.children(tag: String): List<Element> {
         val out = ArrayList<Element>()

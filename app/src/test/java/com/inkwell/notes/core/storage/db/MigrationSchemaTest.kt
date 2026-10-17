@@ -148,6 +148,15 @@ class MigrationSchemaTest {
         assertTrue("the migration never drops or recreates a table", Migrations.V2_STATEMENTS.none { it.contains("DROP", ignoreCase = true) })
     }
 
+    @Test
+    fun migrationsFormAnUnbrokenChainToTheCurrentVersion() {
+        val current = schema(2)["version"]!!.jsonPrimitive.int
+        val steps = Migrations.ALL.map { it.startVersion to it.endVersion }.sortedBy { it.first }
+        assertEquals(listOf(1 to 2), steps)
+        assertEquals("every version up to the current one is reachable", current, steps.last().second)
+        for (i in 1 until steps.size) assertEquals(steps[i - 1].second, steps[i].first)
+    }
+
     // ------------------------------------------------------------------ cascades
 
     @Test
