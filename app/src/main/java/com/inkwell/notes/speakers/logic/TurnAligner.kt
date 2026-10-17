@@ -165,6 +165,8 @@ object TurnAligner {
 
     /** A cut at character [at] that never splits a surrogate pair; null when impossible. */
     private fun charCut(text: String, at: Int): Int? {
+        // One character (a lone "好" or "♪" over a long stretch) cannot be cut in two.
+        if (text.length < 2) return null
         var c = at.coerceIn(1, text.length - 1)
         if (Character.isLowSurrogate(text[c]) && Character.isHighSurrogate(text[c - 1])) c++
         return c.takeIf { it in 1 until text.length && text.substring(0, it).isNotBlank() && text.substring(it).isNotBlank() }

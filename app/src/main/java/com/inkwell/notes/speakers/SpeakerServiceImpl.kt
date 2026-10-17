@@ -39,6 +39,7 @@ import com.inkwell.notes.speakers.models.SpeakerModels
 import com.inkwell.notes.speakers.voices.VoiceprintStore
 import com.inkwell.notes.speakers.voices.valueOrNull
 import com.inkwell.notes.speakers.work.AwaitingModels
+import com.inkwell.notes.speakers.work.DiarizationWorker
 import com.inkwell.notes.speakers.work.Diarizations
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -301,7 +302,10 @@ class SpeakerServiceImpl(private val graph: AppGraph) : SpeakerService {
             flow { emitAll(awaiting.ids) }.flowOn(Dispatchers.IO).map { recordingId in it }.distinctUntilChanged(),
             models.state,
         ) { info, hasTurns, waiting, modelState ->
-            SpeakerPhases.of(info?.state, Diarizations.progressOf(info), Diarizations.errorOf(info), hasTurns, waiting, modelState)
+            SpeakerPhases.of(
+                info?.state, Diarizations.progressOf(info), Diarizations.errorOf(info), hasTurns, waiting, modelState,
+                jobWaiting = Diarizations.waitingOf(info),
+            )
         }.distinctUntilChanged()
 
     override suspend fun identify(docId: String, recordingId: String, replace: Boolean) {
@@ -320,6 +324,15 @@ class SpeakerServiceImpl(private val graph: AppGraph) : SpeakerService {
     override suspend fun cancel(recordingId: String) {
         Diarizations.cancel(graph.context, recordingId)
         withContext(Dispatchers.IO) { awaiting.remove(recordingId) }
+        // A cancelled analysis is not resumed: its window embeddings (temporary voice data, kept
+        // even when voices are not remembered) and the checkpoint go now, not with the recording.
+        val docId = runCatching { recordingDoc(recordingId) }.getOrNull()
+        voiceLock.withLock {
+            withContext(Dispatchers.IO) {
+                store.deleteWork(recordingId)
+                if (docId != null) DiarizationWorker.checkpointFile(graph.files, docId, recordingId).delete()
+            }
+        }
     }
 
     override suspend fun nameSpeaker(recordingId: String, label: String, name: String, isMe: Boolean): Person {

@@ -4,6 +4,7 @@ import android.content.Context
 import android.os.SystemClock
 import android.util.Log
 import androidx.work.CoroutineWorker
+import androidx.work.WorkInfo
 import androidx.work.WorkerParameters
 import androidx.work.workDataOf
 import com.inkwell.notes.R
@@ -75,7 +76,7 @@ class DiarizationWorker(appContext: Context, params: WorkerParameters) : Corouti
         if (windows.isEmpty()) return failure(R.string.speaker_engine_error_no_audio)
 
         val paths = files.map { it.absolutePath }
-        val checkpointFile = File(graph.files.audioDir(docId, recordingId), CHECKPOINT)
+        val checkpointFile = checkpointFile(graph.files, docId, recordingId)
         // Window embeddings are checkpointed even when voices are not remembered: they are
         // temporary (encrypted, deleted when the job ends), and without them a recording that
         // takes longer than one job run to analyse would start over forever.
@@ -116,6 +117,11 @@ class DiarizationWorker(appContext: Context, params: WorkerParameters) : Corouti
                 report(windows, w.index + 1, 0f, force = true)
             }
         } catch (e: CancellationException) {
+            // Cancelled by the user (or replaced): nothing resumes this run, so its temporary
+            // voice data must not stay behind. A system stop keeps the checkpoint to resume from.
+            if (stopReason == WorkInfo.STOP_REASON_CANCELLED_BY_APP) {
+                withContext(NonCancellable) { runCatching { discard(service, checkpointFile, recordingId) } }
+            }
             throw e
         } catch (e: LinkageError) {
             // The native library could not load (unsupported CPU or a broken install).
@@ -241,10 +247,14 @@ class DiarizationWorker(appContext: Context, params: WorkerParameters) : Corouti
         service.store.deleteWork(recordingId)
     }
 
-    private companion object {
-        const val TAG = "Diarization"
-        const val CHECKPOINT = "speakers.partial.json"
-        const val MAX_ATTEMPTS = 3
-        const val PROGRESS_MS = 500L
+    internal companion object {
+        private const val TAG = "Diarization"
+        private const val CHECKPOINT = "speakers.partial.json"
+        private const val MAX_ATTEMPTS = 3
+        private const val PROGRESS_MS = 500L
+
+        /** The checkpoint of [recordingId]'s identification (turns only; no voice data). */
+        fun checkpointFile(files: FileStore, docId: String, recordingId: String): File =
+            File(files.audioDir(docId, recordingId), CHECKPOINT)
     }
 }
