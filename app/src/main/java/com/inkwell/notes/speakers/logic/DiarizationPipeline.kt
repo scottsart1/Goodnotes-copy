@@ -55,15 +55,19 @@ data class DiarizationCheckpoint(
     val windowsDone: Int = 0,
     val turns: List<LocalTurn> = emptyList(),
     val voices: List<LocalVoiceInfo> = emptyList(),
+    /** Window length of the plan [windowsDone] counts in; another plan means other windows. */
+    val windowMs: Long = AudioPlan.MAX_WINDOW_MS,
 ) {
-    fun matches(modelId: String, files: List<String>, durations: List<Long>, windows: Int): Boolean =
-        version == VERSION && this.modelId == modelId && this.files == files && this.durations == durations && windowsDone in 0..windows
+    fun matches(modelId: String, files: List<String>, durations: List<Long>, windows: Int, windowMs: Long = AudioPlan.MAX_WINDOW_MS): Boolean =
+        version == VERSION && this.windowMs == windowMs && this.modelId == modelId && this.files == files &&
+            this.durations == durations && windowsDone in 0..windows
 
     /** True when [embeddings] holds every embedding the voices claim to have. */
     fun consistentWith(embeddings: Set<String>): Boolean = voices.filter { it.hasEmbedding }.all { it.id in embeddings }
 
     companion object {
-        const val VERSION = 1
+        /** 2: windows of [AudioPlan.MAX_WINDOW_MS] (5 min) instead of 10, and [windowMs] recorded. */
+        const val VERSION = 2
         private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
 
         fun encode(c: DiarizationCheckpoint): String = json.encodeToString(serializer(), c)

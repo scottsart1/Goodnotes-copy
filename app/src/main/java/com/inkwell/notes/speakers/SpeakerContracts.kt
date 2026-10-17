@@ -103,7 +103,10 @@ interface SpeakerService {
     /** Marks [personId] as the tablet's owner (null: nobody). */
     suspend fun setMe(personId: String?)
 
-    /** Moves every label and voiceprint sample of [fromId] onto [intoId], then deletes [fromId]. */
+    /**
+     * Moves every label and voiceprint sample of [fromId] onto [intoId], then deletes [fromId].
+     * Throws, changing nothing, while stored voiceprints are temporarily unreadable (Keystore).
+     */
     suspend fun mergePeople(fromId: String, intoId: String)
 
     /**

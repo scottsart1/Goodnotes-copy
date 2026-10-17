@@ -76,14 +76,17 @@ internal class VoiceprintStore(context: Context) {
         personFile(personId, REF).delete()
     }
 
-    /** Sanitised ids of people with a print or reference clip on disk. */
+    /**
+     * Sanitised ids of people with a print or reference clip on disk. Leftovers of an interrupted
+     * atomic write (any other file here) are deleted, as for per-recording data.
+     */
     @Synchronized
     fun personIds(): Set<String> =
         root.listFiles().orEmpty().filter { it.isFile }.mapNotNull { f ->
             when {
                 f.name.endsWith(PRINT) -> f.name.removeSuffix(PRINT)
                 f.name.endsWith(REF) -> f.name.removeSuffix(REF)
-                else -> null
+                else -> { f.delete(); null }
             }
         }.toSet()
 
