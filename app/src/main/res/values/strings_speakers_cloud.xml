@@ -6,8 +6,4 @@
     <!-- Non-fatal notes after a transcription (job output "speakerNote") -->
     <string name="speakers_cloud_unavailable">Transcribed without speaker names: OpenAI speaker labelling is unavailable. Check the OpenAI key and the monthly limit in Settings, AI providers.</string>
     <string name="speakers_cloud_not_saved">The transcript is ready, but its speakers could not be saved. Transcribe again to label them.</string>
-
-    <!-- Consent and cost line when speakers are labelled by OpenAI -->
-    <string name="speakers_cloud_estimate">%1$d min of audio · est. %2$s with %3$s, including speaker labels (estimate, not a bill)</string>
-    <string name="speakers_cloud_consent_note">Short voice clips of people you have named are sent with the audio so OpenAI can recognise them. Their voiceprints stay on this tablet.</string>
 </resources>

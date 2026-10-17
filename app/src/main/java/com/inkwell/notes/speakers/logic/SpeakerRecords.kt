@@ -81,7 +81,21 @@ object SpeakerRecords {
                 }
             }
         }
-        return if (sameContent(sorted, next)) null else next.map { it.copy(rowId = 0) }
+        val distinct = distinctStarts(next)
+        return if (sameContent(sorted, distinct)) null else distinct.map { it.copy(rowId = 0) }
+    }
+
+    /**
+     * Splitting can round two pieces onto one start; blocks are addressed by start, so keep them
+     * strictly increasing in reading order (the order of [rows] is kept as is).
+     */
+    private fun distinctStarts(rows: List<TranscriptSegmentEntity>): List<TranscriptSegmentEntity> {
+        var prev = Long.MIN_VALUE
+        return rows.map { r ->
+            val start = if (prev != Long.MIN_VALUE && r.startMs <= prev) prev + 1 else r.startMs
+            prev = start
+            if (start == r.startMs) r else r.copy(startMs = start, endMs = maxOf(r.endMs, start))
+        }
     }
 
     private fun sameContent(a: List<TranscriptSegmentEntity>, b: List<TranscriptSegmentEntity>): Boolean =

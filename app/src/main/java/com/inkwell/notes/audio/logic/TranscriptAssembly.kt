@@ -45,6 +45,20 @@ object TranscriptAssembly {
             p.copy(startMs = offsetMs + s, endMs = offsetMs + e, text = p.text.trim())
         }
 
+    /**
+     * Start times made strictly increasing: a block that starts at or before the previous one
+     * moves to 1 ms after it. Blocks are addressed by their start on the timeline (moving one to
+     * another speaker, seeking), so two blocks must never share one. Order and text are kept.
+     */
+    fun distinctStarts(segments: List<TranscriptSegment>): List<TranscriptSegment> {
+        var prev = Long.MIN_VALUE
+        return segments.sortedBy { it.startMs }.map { s ->
+            val start = if (prev != Long.MIN_VALUE && s.startMs <= prev) prev + 1 else s.startMs
+            prev = start
+            if (start == s.startMs) s else s.copy(startMs = start, endMs = maxOf(s.endMs, start))
+        }
+    }
+
     /** Fraction done for progress display. */
     fun progress(done: Int, total: Int): Float = if (total <= 0) 0f else (done.toFloat() / total).coerceIn(0f, 1f)
 }

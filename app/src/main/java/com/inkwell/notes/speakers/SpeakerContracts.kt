@@ -172,8 +172,9 @@ interface SpeakerService {
     suspend fun saveDiarization(docId: String, result: DiarizationResult)
 
     /**
-     * Up to [max] voices for a cloud diarization request on [recordingId]: voices already heard
-     * in this recording first, then the owner and people from recent recordings of [docId].
+     * Up to [max] known people for a cloud diarization request on [recordingId]: people already
+     * labelled in this recording first, then the owner and people from recent recordings of
+     * [docId]. Unnamed voices are not included (the caller cuts its own clips for those).
      */
     suspend fun referencesFor(docId: String, recordingId: String, max: Int = 4): List<SpeakerReference>
 

@@ -546,15 +546,18 @@ class SpeakerServiceImpl(private val graph: AppGraph) : SpeakerService {
         val byId = people.associateBy { it.id }
         val withClip = withContext(Dispatchers.IO) { people.filter { store.hasReference(it.id) }.map { it.id }.toSet() }
 
-        // Voices already heard in this recording, in label order.
+        // People already heard in this recording, in label order. Unnamed voices are skipped: the
+        // cloud transcription cuts its own clips for voices it hears, so a slot spent on one would
+        // only crowd out a known person.
         val rows = dao.speakers(recordingId).sortedWith(compareBy<RecordingSpeakerEntity> { SpeakerNames.number(it.label) ?: Int.MAX_VALUE }.thenBy { it.label })
         for (r in rows) {
             if (out.size >= max) break
-            val p = r.personId?.let { byId[it] }
-            val stored = if (p != null && p.id in withClip) personClip(p.id) else null
+            val p = r.personId?.let { byId[it] } ?: continue
+            if (p.id in usedPeople) continue
+            val stored = if (p.id in withClip) personClip(p.id) else null
             val wav = stored ?: clipOf(recordingId, r) ?: continue
-            out += SpeakerReference(name = p?.name ?: r.label, personId = p?.id, wav = wav)
-            p?.let { usedPeople += it.id }
+            out += SpeakerReference(name = p.name, personId = p.id, wav = wav)
+            usedPeople += p.id
         }
 
         // Then the owner, people from recent recordings of the document, everyone else.

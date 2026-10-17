@@ -119,7 +119,7 @@ class TranscriptionWorker(appContext: Context, params: WorkerParameters) : Corou
             }
 
             val source = checkpoint.source ?: "openai"
-            val segments = checkpoint.segments.sortedBy { it.startMs }
+            val segments = TranscriptAssembly.distinctStarts(checkpoint.segments)
             graph.db.transcripts().replace(
                 recordingId,
                 segments.map {
