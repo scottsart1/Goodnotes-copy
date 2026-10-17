@@ -4,6 +4,7 @@ import android.app.Application
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import com.inkwell.notes.app.AppGraph
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 class InkwellApp : Application() {
@@ -14,6 +15,13 @@ class InkwellApp : Application() {
         graph.appScope.launch {
             runCatching { graph.recording.recoverInterrupted() }
             runCatching { graph.naming.schedule() }
+        }
+        graph.appScope.launch {
+            // Well after startup: creating the speaker service makes it prune the encrypted voice
+            // data of recordings that no longer exist (documents deleted while the process was
+            // dead, or before the delete path told it), even when no screen touches speakers.
+            delay(SPEAKER_PRUNE_DELAY_MS)
+            runCatching { graph.speakers }
         }
     }
 
@@ -33,5 +41,7 @@ class InkwellApp : Application() {
     companion object {
         const val CHANNEL_RECORDING = "recording"
         const val CHANNEL_SYNC = "sync"
+        /** Startup stays quick; the prune itself is disk work on the speaker service's own scope. */
+        private const val SPEAKER_PRUNE_DELAY_MS = 20_000L
     }
 }

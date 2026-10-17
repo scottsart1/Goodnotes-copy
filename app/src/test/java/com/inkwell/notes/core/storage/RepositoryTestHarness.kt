@@ -16,6 +16,8 @@ class RecordingHooks : LibraryHooks {
     val needIndexing = ArrayList<Pair<String, List<String>>>()
     val coverChanged = ArrayList<String>()
     val deleted = ArrayList<String>()
+    /** Recording ids whose voice data the speaker service was told to remove, in call order. */
+    val recordingsDeleted = ArrayList<String>()
     var pdfPng: ByteArray? = null
     val pdfRenders = ArrayList<Triple<String, Int, Pair<Int, Int>>>()
 
@@ -24,6 +26,7 @@ class RecordingHooks : LibraryHooks {
     override fun pagesNeedIndexing(docId: String, pageIds: List<String>) { needIndexing += docId to pageIds }
     override fun coverChanged(docId: String) { coverChanged += docId }
     override fun documentDeleted(docId: String) { deleted += docId }
+    override fun recordingsDeleted(docId: String, recordingIds: List<String>) { recordingsDeleted += recordingIds }
     override suspend fun renderPdfPagePng(docId: String, pdfPageIndex: Int, widthPx: Int, heightPx: Int): ByteArray? {
         pdfRenders += Triple(docId, pdfPageIndex, widthPx to heightPx)
         return pdfPng
