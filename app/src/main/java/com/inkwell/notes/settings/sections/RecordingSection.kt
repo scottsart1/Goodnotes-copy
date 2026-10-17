@@ -110,21 +110,15 @@ internal fun RecordingSection(s: AppSettings, actions: SettingsActions, openSect
             )
         }
 
-        val speakers = SettingsCatalog.speakers
-        if (speakers != null) {
-            SettingsGroup("Speakers") {
-                ActionRow(
-                    title = speakers.title,
-                    subtitle = SettingsCatalog.SPEAKERS_SUMMARY,
-                    actionLabel = "Open",
-                    onAction = { openSection(speakers) },
-                )
-            }
+        SettingsGroup("Speakers") {
+            ActionRow(
+                title = SettingsSection.SPEAKERS.title,
+                subtitle = SettingsCatalog.SPEAKERS_SUMMARY,
+                actionLabel = "Open",
+                onAction = { openSection(SettingsSection.SPEAKERS) },
+            )
         }
 
         Note("Changes apply to the next recording. A recording in progress keeps its settings.")
-
-        // Until "Voices & speakers" has its own entry in the section list, it lives here.
-        if (speakers == null) SpeakersContent(s, actions, openSection, title = stringResource(R.string.spk_settings_title))
     }
 }

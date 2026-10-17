@@ -9,19 +9,18 @@ import org.junit.Test
 
 class SpeakersCatalogTest {
     @Test
-    fun voicesAndSpeakersSitsUnderCaptureAfterRecordingWhenDeclared() {
-        val speakers = SettingsCatalog.speakers ?: return // The navigation enum doesn't declare it yet.
+    fun voicesAndSpeakersSitsUnderCaptureAfterRecording() {
         val capture = SettingsCatalog.groups.first { it.title == "Capture" }.sections
-        assertEquals(capture.indexOf(SettingsSection.RECORDING) + 1, capture.indexOf(speakers))
-        assertEquals(Icons.Outlined.RecordVoiceOver, SettingsCatalog.icon(speakers))
-        assertEquals(SettingsCatalog.SPEAKERS_SUMMARY, SettingsCatalog.summary(speakers))
-        assertEquals(1, SettingsCatalog.groups.flatMap { it.sections }.count { it == speakers })
+        assertEquals(capture.indexOf(SettingsSection.RECORDING) + 1, capture.indexOf(SettingsSection.SPEAKERS))
+        assertEquals(Icons.Outlined.RecordVoiceOver, SettingsCatalog.icon(SettingsSection.SPEAKERS))
+        assertEquals(SettingsCatalog.SPEAKERS_SUMMARY, SettingsCatalog.summary(SettingsSection.SPEAKERS))
+        assertTrue(SettingsCatalog.SPEAKERS_SUMMARY.isNotBlank())
     }
 
     @Test
-    fun theLookupMatchesTheEnumName() {
-        val declared = SettingsSection.entries.any { it.name == SettingsCatalog.SPEAKERS_NAME }
-        assertEquals(declared, SettingsCatalog.speakers != null)
-        assertTrue(SettingsCatalog.SPEAKERS_SUMMARY.isNotBlank())
+    fun everySectionIsListedExactlyOnce() {
+        val listed = SettingsCatalog.groups.flatMap { it.sections }
+        assertEquals(SettingsSection.entries.toSet(), listed.toSet())
+        assertEquals(listed.size, listed.toSet().size)
     }
 }

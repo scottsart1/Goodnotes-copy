@@ -12,6 +12,7 @@ data class LicenseEntry(
 object Licenses {
     const val APACHE_2 = "Apache License 2.0"
     const val OFL = "SIL Open Font License 1.1"
+    const val MIT = "MIT License"
     const val GOOGLE_APIS = "Google APIs Terms of Service and ML Kit Terms"
 
     private const val APACHE_URL = "https://www.apache.org/licenses/LICENSE-2.0"
@@ -25,6 +26,10 @@ object Licenses {
         LicenseEntry("PdfBox-Android", "PDF reading and writing (Apache PDFBox port)", APACHE_2, APACHE_URL),
         LicenseEntry("Media3 ExoPlayer", "Audio playback", APACHE_2, APACHE_URL),
         LicenseEntry("ML Kit", "Text recognition, digital ink recognition, document scanner", GOOGLE_APIS, "https://developers.google.com/ml-kit/terms"),
+        LicenseEntry("sherpa-onnx", "On-device speaker diarization (k2-fsa)", APACHE_2, "https://github.com/k2-fsa/sherpa-onnx"),
+        LicenseEntry("ONNX Runtime", "Model inference, bundled with sherpa-onnx", MIT, "https://github.com/microsoft/onnxruntime"),
+        LicenseEntry("pyannote segmentation 3.0", "Speaker-change model, downloaded on first use", MIT, "https://huggingface.co/pyannote/segmentation-3.0"),
+        LicenseEntry("WeSpeaker ResNet34-LM", "Speaker embedding model (VoxCeleb), downloaded on first use", APACHE_2, "https://github.com/wenet-e2e/wespeaker"),
         LicenseEntry("Figtree", "Typeface by Erik Kennedy", OFL, "https://openfontlicense.org"),
     )
 }

@@ -502,6 +502,7 @@ private fun BoardSidePanel(
             onShowNotesAt = onShowNotesAt,
             onClose = onClose,
             modifier = modifier,
+            onInsert = { controller.ops.insertAiText(it) },
         )
         null -> Unit
     }

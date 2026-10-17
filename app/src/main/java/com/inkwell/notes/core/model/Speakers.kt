@@ -30,7 +30,11 @@ data class SpeakerPrefs(
      * still label the current recording, but nothing about the voice is stored.
      */
     val rememberVoices: Boolean = true,
-    /** Cosine similarity (0..1) a voice needs to be labelled with a known person automatically. */
+    /**
+     * Similarity (0..1) a voice needs to be labelled with a known person automatically. This is
+     * the calibrated score of speakers/logic/VoiceScores (raw cosine 0.6..1.0 mapped to 0..1),
+     * so the default 0.55 means a raw cosine of 0.82.
+     */
     val matchThreshold: Float = 0.55f,
     /** Expected number of speakers in a recording; 0 = detect automatically. */
     val expectedSpeakers: Int = 0,

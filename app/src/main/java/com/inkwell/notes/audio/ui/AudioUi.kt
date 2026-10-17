@@ -23,6 +23,8 @@ fun RecordingDock(docId: String, modifier: Modifier = Modifier) {
  * Recordings of a document: list, rename, export, waveform playback with speed, transcript
  * with search, "jump to notes written here" ([onShowNotesAt]) and transcription.
  * A 420dp side panel on tablets (or the slot it is given), full width on phones.
+ * [onInsert], when given, adds an "Insert" button to finished AI results (summaries, action
+ * items...) that places the text into the document; it is only ever called on that tap.
  */
 @Composable
 fun RecordingsPanel(
@@ -30,6 +32,7 @@ fun RecordingsPanel(
     onShowNotesAt: (recordingId: String, positionMs: Long) -> Unit,
     onClose: () -> Unit,
     modifier: Modifier = Modifier,
+    onInsert: ((String) -> Unit)? = null,
 ) {
-    RecordingsPanelImpl(docId, onShowNotesAt, onClose, modifier)
+    RecordingsPanelImpl(docId, onShowNotesAt, onClose, modifier, onInsert)
 }

@@ -64,6 +64,10 @@ object BoardAnchors {
             val a = i.audio ?: continue
             out += AnchoredItem(a, rotated(Box(i.x, i.y, i.x + i.width, i.y + i.height), i.rotation), i.createdAt)
         }
+        for (n in content.stickies) {
+            val a = n.audio ?: continue
+            out += AnchoredItem(a, Box(n.x, n.y, n.x + n.width, n.y + n.height), n.createdAt)
+        }
         return out
     }
 

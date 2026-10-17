@@ -120,6 +120,7 @@
     <string name="audio_ai_large_body">This request is %1$s (est. %2$s, an estimate, not a bill). Send it?</string>
     <string name="audio_ai_working">Working</string>
     <string name="audio_ai_copy">Copy</string>
+    <string name="audio_ai_insert">Insert</string>
     <string name="audio_ai_copied">Copied to clipboard</string>
     <string name="audio_ai_save_typed">Save as typed document</string>
     <string name="audio_ai_saved">Saved as %1$s</string>

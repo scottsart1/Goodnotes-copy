@@ -223,7 +223,8 @@ class BoardAudio(private val c: WhiteboardController) {
             ItemType.SHAPE -> content.shapes.firstOrNull { it.id == ref.itemId }?.audio
             ItemType.TEXT -> content.texts.firstOrNull { it.id == ref.itemId }?.audio
             ItemType.IMAGE -> content.images.firstOrNull { it.id == ref.itemId }?.audio
-            ItemType.STICKY, ItemType.CONNECTOR -> null
+            ItemType.STICKY -> content.stickies.firstOrNull { it.id == ref.itemId }?.audio
+            ItemType.CONNECTOR -> null
         }
     }
 

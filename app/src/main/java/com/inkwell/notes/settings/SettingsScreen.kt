@@ -284,7 +284,7 @@ private fun SectionDetail(
                             SettingsSection.STORAGE -> HostedSection { StorageSettingsContent(it) }
                             SettingsSection.PRIVACY -> PrivacySection(settings, actions)
                             SettingsSection.ABOUT -> AboutSection(actions, openSection)
-                            else -> if (section == SettingsCatalog.speakers) SpeakersSection(settings, actions, openSection) else GeneralSection(settings, actions)
+                            SettingsSection.SPEAKERS -> SpeakersSection(settings, actions, openSection)
                         }
                     }
                 }

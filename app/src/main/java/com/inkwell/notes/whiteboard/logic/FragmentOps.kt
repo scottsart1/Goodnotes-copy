@@ -70,13 +70,14 @@ object FragmentOps {
      */
     fun withoutAudio(f: PageContent): PageContent {
         if (f.strokes.none { it.audio != null } && f.shapes.none { it.audio != null } &&
-            f.texts.none { it.audio != null } && f.images.none { it.audio != null }
+            f.texts.none { it.audio != null } && f.images.none { it.audio != null } && f.stickies.none { it.audio != null }
         ) return f
         return f.copy(
             strokes = f.strokes.map { if (it.audio == null) it else it.copy(audio = null) },
             shapes = f.shapes.map { if (it.audio == null) it else it.copy(audio = null) },
             texts = f.texts.map { if (it.audio == null) it else it.copy(audio = null) },
             images = f.images.map { if (it.audio == null) it else it.copy(audio = null) },
+            stickies = f.stickies.map { if (it.audio == null) it else it.copy(audio = null) },
         )
     }
 

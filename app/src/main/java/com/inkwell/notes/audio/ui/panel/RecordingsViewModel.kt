@@ -295,10 +295,12 @@ internal class RecordingsViewModel(private val graph: AppGraph, val docId: Strin
         val ai = runCatching { graph.ai }.getOrNull() ?: return AiAvailability()
         val transcribe = runCatching { ai.isAvailable(AiTask.TRANSCRIPTION) }.getOrDefault(false)
         val summarize = runCatching { ai.isAvailable(AiTask.SUMMARIZE) }.getOrDefault(false)
-        val model = if (transcribe) runCatching { ai.modelFor(AiTask.TRANSCRIPTION) }.getOrNull() else null
+        val impl = ai as? AiServiceImpl
+        // The model the job will really use: OpenAI's diarize model when it labels speakers.
+        val model = if (transcribe) runCatching { impl?.transcriptionJobModel() ?: ai.modelFor(AiTask.TRANSCRIPTION) }.getOrNull() else null
         val name = model?.let { runCatching { ai.modelInfo(it)?.displayName }.getOrNull() ?: it.modelId }
         // Speech-to-text is billed per audio minute; the price table lives in the AI engine.
-        val perMinute = model?.let { ref -> runCatching { (ai as? AiServiceImpl)?.engine?.models?.spec(ref)?.usdPerAudioMinute }.getOrNull() }
+        val perMinute = model?.let { ref -> runCatching { impl?.usdPerAudioMinute(ref) }.getOrNull() }
         val cloudSpeakers = transcribe && graph.settings.current.speakers.engine == SpeakerEngine.OPENAI &&
             runCatching { ai.canDiarize() }.getOrDefault(false)
         return AiAvailability(graph.settings.current.ai.enabled, transcribe, summarize, model, name, perMinute, cloudSpeakers)

@@ -22,6 +22,7 @@ import com.inkwell.notes.ocr.text.OcrScaling
 import com.inkwell.notes.ocr.text.ReadingOrder
 import com.inkwell.notes.ocr.text.TextSplitter
 import com.inkwell.notes.ocr.text.TypedText
+import com.inkwell.notes.search.TranscriptSearchText
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -148,7 +149,8 @@ internal class PageIndexer(private val graph: AppGraph) {
         for (r in recordings) {
             val segments = withContext(Dispatchers.IO) { db.transcripts().forRecording(r.id) }
             if (segments.isEmpty()) continue
-            writer.replaceTranscript(docId, r.id, segments.map { it.toModel() }, segments.first().source)
+            // Same text as SearchIndexImpl.replaceTranscript ("Name: text"), so a rebuild keeps people searchable.
+            writer.replaceTranscript(docId, r.id, TranscriptSearchText.forIndex(segments.map { it.toModel() }), segments.first().source)
         }
     }
 

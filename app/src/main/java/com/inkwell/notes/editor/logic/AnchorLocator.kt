@@ -14,7 +14,8 @@ object AnchorLocator {
         c.strokes.mapNotNull { s -> s.audio?.let { it to FragmentOps.strokeBounds(s.points, s.width / 2f) } } +
             c.shapes.mapNotNull { s -> s.audio?.let { it to FragmentOps.pairBounds(s.points, s.strokeWidth / 2f) } } +
             c.texts.mapNotNull { t -> t.audio?.let { it to Bounds(t.x, t.y, t.x + t.width, t.y + t.height) } } +
-            c.images.mapNotNull { i -> i.audio?.let { it to Bounds(i.x, i.y, i.x + i.width, i.y + i.height) } }
+            c.images.mapNotNull { i -> i.audio?.let { it to Bounds(i.x, i.y, i.x + i.width, i.y + i.height) } } +
+            c.stickies.mapNotNull { n -> n.audio?.let { it to Bounds(n.x, n.y, n.x + n.width, n.y + n.height) } }
 
     /**
      * The first page (lowest index) holding items of [recordingId] anchored within [windowMs]

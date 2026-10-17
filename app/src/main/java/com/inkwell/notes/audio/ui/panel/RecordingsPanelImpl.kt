@@ -80,6 +80,7 @@ internal fun RecordingsPanelImpl(
     onShowNotesAt: (recordingId: String, positionMs: Long) -> Unit,
     onClose: () -> Unit,
     modifier: Modifier = Modifier,
+    onInsert: ((String) -> Unit)? = null,
 ) {
     val context = LocalContext.current
     val graph = remember(context) { AppGraph.get(context) }
@@ -103,7 +104,7 @@ internal fun RecordingsPanelImpl(
             }
         }
     }
-    PanelDialogs(vm)
+    PanelDialogs(vm, onInsert)
 }
 
 @Composable

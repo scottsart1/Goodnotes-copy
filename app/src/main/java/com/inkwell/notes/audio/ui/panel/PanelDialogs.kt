@@ -30,6 +30,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.DialogProperties
 import com.inkwell.notes.R
+import com.inkwell.notes.ai.ui.Markdown
 import com.inkwell.notes.audio.logic.AudioText
 import com.inkwell.notes.audio.logic.MarkdownBlocks
 import com.inkwell.notes.core.model.BlockType
@@ -51,7 +52,7 @@ import androidx.compose.ui.text.AnnotatedString
 
 /** All dialogs of the panel, driven by the view model. */
 @Composable
-internal fun PanelDialogs(vm: RecordingsViewModel) {
+internal fun PanelDialogs(vm: RecordingsViewModel, onInsert: ((String) -> Unit)? = null) {
     vm.pendingDelete?.let { rec ->
         AudioConfirmDialog(
             title = stringResource(R.string.audio_delete_title),
@@ -102,7 +103,7 @@ internal fun PanelDialogs(vm: RecordingsViewModel) {
             onDismiss = { vm.dismissLarge() },
         )
     }
-    vm.aiResult?.let { AiResultDialog(vm, it) }
+    vm.aiResult?.let { AiResultDialog(vm, it, onInsert) }
     vm.namingFor?.let { id -> NamingSheet(id, onClose = { vm.namingFor = null }) }
     vm.speakerDialog?.let { SpeakerDialogHost(vm, it) }
 }
@@ -144,7 +145,7 @@ private fun SpeakerDialogHost(vm: RecordingsViewModel, d: SpeakerDialog) {
 }
 
 @Composable
-private fun AiResultDialog(vm: RecordingsViewModel, r: AiResultState) {
+private fun AiResultDialog(vm: RecordingsViewModel, r: AiResultState, onInsert: ((String) -> Unit)?) {
     val c = Inkwell.colors
     val context = LocalContext.current
     val title = stringResource(actionLabelRes(r.action))
@@ -197,6 +198,12 @@ private fun AiResultDialog(vm: RecordingsViewModel, r: AiResultState) {
                 }
                 TextButton(enabled = canUse && !r.saving && r.savedTitle == null, onClick = { vm.saveAiAsTyped(title) }) {
                     Text(stringResource(R.string.audio_ai_save_typed), color = if (canUse && r.savedTitle == null) c.accent else c.inkMuted)
+                }
+                if (onInsert != null) {
+                    // Explicit only: the result goes into the document on this tap, never by itself.
+                    TextButton(enabled = canUse, onClick = { onInsert(Markdown.toPlainText(r.text)); vm.dismissAi() }) {
+                        Text(stringResource(R.string.audio_ai_insert), color = if (canUse) c.accent else c.inkMuted)
+                    }
                 }
             }
         },

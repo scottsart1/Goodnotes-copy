@@ -31,6 +31,7 @@ enum class SettingsSection(val title: String) {
     NAMING("File naming"),
     PAPER("Paper & templates"),
     RECORDING("Recording"),
+    SPEAKERS("Voices & speakers"),
     OCR("Recognition & OCR"),
     AI("AI providers"),
     USAGE("AI usage & cost"),
