@@ -33,6 +33,14 @@ internal interface LibraryHooks {
     /** The document and its files are gone. */
     fun documentDeleted(docId: String)
 
+    /**
+     * Recordings of a deleted document are gone from the database (rows and audio cascade or
+     * are removed with the folder), so what other features keep about them outside the
+     * database must go too: the speaker service's encrypted per-recording voice data, its
+     * queued identification job, its model wait and its "voices to name" notification.
+     */
+    fun recordingsDeleted(docId: String, recordingIds: List<String>) {}
+
     /** PNG of a source-PDF page, for copying a PDF page into a document with another PDF. */
     suspend fun renderPdfPagePng(docId: String, pdfPageIndex: Int, widthPx: Int, heightPx: Int): ByteArray?
 }
@@ -76,6 +84,19 @@ internal object GraphLibraryHooks : LibraryHooks {
         it.pdf.close(docId)
         it.sync.onDocumentDeleted(docId)
         it.search.removeDocument(docId)
+    }
+
+    override fun recordingsDeleted(docId: String, recordingIds: List<String>) = dispatch("forget recordings") { g ->
+        // Each recording on its own: one failure must not keep the others' voice data around.
+        for (id in recordingIds) {
+            try {
+                g.speakers.onRecordingDeleted(id)
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.w(TAG, "forget recording failed: ${e.javaClass.simpleName}")
+            }
+        }
     }
 
     override suspend fun renderPdfPagePng(docId: String, pdfPageIndex: Int, widthPx: Int, heightPx: Int): ByteArray? {
