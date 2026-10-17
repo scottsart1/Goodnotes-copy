@@ -10,7 +10,6 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.core.content.ContextCompat
 import com.inkwell.notes.R
-import com.inkwell.notes.audio.RecordingState
 import com.inkwell.notes.core.model.AudioAnchor
 import com.inkwell.notes.core.model.ToolType
 import com.inkwell.notes.ink.ItemRef
@@ -67,19 +66,11 @@ class BoardAudio(private val c: WhiteboardController) {
     private var observing = false
     private var lastTapped: Pair<String, Long>? = null
 
-    /** Starts following recording errors and playback. Idempotent; runs until the controller's scope ends. */
+    /** Starts following playback. Idempotent; runs until the controller's scope ends. */
     fun observe() {
         if (observing) return
         observing = true
-        c.scope.launch {
-            // Report errors that happen while the board is open, not a stale one from before.
-            val initial = graph.recording.state.value
-            graph.recording.state.collect { st ->
-                if (st is RecordingState.Error && st !== initial && st.message.isNotBlank()) {
-                    c.messages.tryEmit(UiMessage(R.string.wb_audio_message, listOf(st.message), long = true))
-                }
-            }
-        }
+        // Recording errors are reported by the RecordingDock overlay (DockErrorToast), once.
         c.scope.launch {
             val enabled = graph.settings.settings.map { it.recording.highlightDuringPlayback }.distinctUntilChanged()
             combine(graph.playback.state, enabled) { st, on -> st to on }.collect { (st, on) ->

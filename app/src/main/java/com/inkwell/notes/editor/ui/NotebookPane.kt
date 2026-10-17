@@ -175,12 +175,7 @@ fun NotebookPane(
             }
         }
     }
-    // Report recording errors that happen while this pane is open (not stale ones).
-    val initialRecState = remember { graph.recording.state.value }
-    LaunchedEffect(recState) {
-        val err = recState as? RecordingState.Error ?: return@LaunchedEffect
-        if (err !== initialRecState) controller.messages.show(err.message, long = true)
-    }
+    // Recording errors are reported by the RecordingDock overlay (DockErrorToast), once.
     // Wrong kind (e.g. a stale link to a whiteboard): open it in its own screen instead.
     val doc = controller.doc
     LaunchedEffect(doc?.kind) {

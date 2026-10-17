@@ -20,7 +20,6 @@
     <string name="wb_audio_elsewhere_action">Stop and record here</string>
 
     <string name="wb_audio_start_failed">Recording couldn\'t start.</string>
-    <string name="wb_audio_message">%1$s</string>
 
     <string name="wb_audio_no_notes_at_time">No notes were written on the board at that moment.</string>
     <string name="wb_audio_show_nearest">Show nearest</string>
