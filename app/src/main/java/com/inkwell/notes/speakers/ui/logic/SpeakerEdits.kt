@@ -34,7 +34,9 @@ object SpeakerEdits {
     fun moveToName(speakers: List<RecordingSpeaker>, people: List<Person>, name: String): BlockMove? {
         val clean = NameSuggestions.clean(name)
         if (clean.isEmpty()) return null
-        speakers.firstOrNull { it.personId != null && NameSuggestions.clean(it.displayName).equals(clean, ignoreCase = true) }
+        // A voice of this recording already called that: a person's name, or the generic
+        // "Speaker 2" of an unnamed voice (which must not become a person called "Speaker 2").
+        speakers.firstOrNull { NameSuggestions.clean(it.displayName).equals(clean, ignoreCase = true) }
             ?.let { return BlockMove.ToVoice(it.label) }
         NameSuggestions.exact(people, clean)?.let { return moveToPerson(speakers, it) }
         return BlockMove.ToNewName(SpeakerTranscript.nextFreeLabel(speakers.map { it.label }), clean)

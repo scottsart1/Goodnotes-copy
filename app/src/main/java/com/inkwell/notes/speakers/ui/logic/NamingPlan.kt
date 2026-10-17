@@ -82,8 +82,12 @@ object NamingPlan {
         return if (person.isMe) toggleMe(next, label, true) else next
     }
 
-    /** "This is me" on [label] (switching it off on every other voice). */
-    fun toggleMe(drafts: Map<String, NamingDraft>, label: String, on: Boolean): Map<String, NamingDraft> {
+    /**
+     * "This is me" on [label] (switching it off on every other voice). Ticking it on an empty
+     * field fills in the [owner]'s existing name, so the voice is saved as them rather than
+     * silently dropped for lack of a name.
+     */
+    fun toggleMe(drafts: Map<String, NamingDraft>, label: String, on: Boolean, owner: Person? = null): Map<String, NamingDraft> {
         val out = LinkedHashMap<String, NamingDraft>()
         for ((k, v) in drafts) {
             out[k] = when {
@@ -93,8 +97,34 @@ object NamingPlan {
             }
         }
         if (label !in out) out[label] = NamingDraft(isMe = on, touched = true)
+        if (on && owner != null) {
+            val d = out.getValue(label)
+            if (NameSuggestions.clean(d.text).isEmpty() && d.personId == null) out[label] = d.copy(text = owner.name, personId = owner.id)
+        }
         return out
     }
+
+    /**
+     * Voices ticked "This is me" that have no name to save (nothing typed, nobody picked, no
+     * person on the voice yet): "Done" must ask for the name instead of ignoring the tick.
+     */
+    fun missingNames(speakers: List<RecordingSpeaker>, drafts: Map<String, NamingDraft>): Set<String> {
+        val out = LinkedHashSet<String>()
+        for (s in speakers) {
+            val d = drafts[s.label] ?: continue
+            val nameless = d.touched && d.isMe && d.personId == null && NameSuggestions.clean(d.text).isEmpty()
+            if (nameless && (s.personId == null || !s.confirmed)) out += s.label
+        }
+        return out
+    }
+
+    /**
+     * The secondary action ("Skip" / "Save, skip the rest"): everything the user entered is
+     * saved exactly as "Done" would, and the recording is dismissed so the app stops asking
+     * about the voices left unnamed. Typed names are never discarded by skipping.
+     */
+    fun skipOperations(speakers: List<RecordingSpeaker>, drafts: Map<String, NamingDraft>): List<NamingOp> =
+        operations(speakers, drafts).filter { it != NamingOp.Dismiss } + NamingOp.Dismiss
 
     /**
      * The service calls for "Done": names first, then owner changes, then [NamingOp.Dismiss] when

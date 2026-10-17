@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Naming sheet -->
+    <string name="spk_save_skip_rest">Save, skip the rest</string>
+    <string name="spk_enter_your_name">Enter your name</string>
+
+    <!-- Enrollment ("Record a voice sample") preconditions -->
+    <string name="spk_enroll_needs_models">Recognising voices needs the voice models, a one-time download of about %1$d MB. After that it works offline.</string>
+    <string name="spk_enroll_download_models">Download voice models (%1$d MB)</string>
+    <string name="spk_enroll_models_downloading">Downloading the voice models…</string>
+    <string name="spk_enroll_models_failed">The voice models couldn\'t be downloaded. %1$s</string>
+    <string name="spk_enroll_voices_off">Remember voices is off, so no voiceprint can be stored. Turn it on in Voices &amp; speakers first.</string>
+    <string name="spk_enroll_person_gone">This person was deleted.</string>
+</resources>

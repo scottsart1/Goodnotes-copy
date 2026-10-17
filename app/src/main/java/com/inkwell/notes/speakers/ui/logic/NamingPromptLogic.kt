@@ -1,5 +1,7 @@
 package com.inkwell.notes.speakers.ui.logic
 
+import com.inkwell.notes.core.model.Recording
+import com.inkwell.notes.core.model.RecordingStatus
 import com.inkwell.notes.core.model.SpeakerEngine
 import com.inkwell.notes.core.model.SpeakerPrefs
 import kotlin.math.roundToInt
@@ -23,6 +25,28 @@ object NamingPromptLogic {
         dismissed: Boolean,
         prefs: SpeakerPrefs,
     ): Boolean = candidate != null && !recordingActive && needsNaming && !dismissed && prefs.askToName && prefs.engine != SpeakerEngine.OFF
+
+    /** How long after a recording ended the dock still offers to name its voices. */
+    const val RECENT_MS = 24 * 60 * 60 * 1000L
+
+    /**
+     * Finished recordings of a document that ended within [windowMs] of [nowMs], most recent
+     * first. Derived from stored rows (not from a live stop seen on screen), so the offer also
+     * appears after leaving the board before identification finished, after process death, and
+     * when the "voices to name" notification opens the document.
+     */
+    fun recent(recordings: List<Recording>, nowMs: Long, windowMs: Long = RECENT_MS): List<String> =
+        recordings
+            .filter { it.status == RecordingStatus.COMPLETE || it.status == RecordingStatus.INTERRUPTED }
+            .mapNotNull { r -> r.endedAt?.let { end -> r.id to end } }
+            // A clock set back makes an end time "in the future": still recent, never stale.
+            .filter { (_, end) -> nowMs - end <= windowMs }
+            .sortedByDescending { it.second }
+            .map { it.first }
+
+    /** The recording to ask about: the most recent of [recent] that needs naming and was not dismissed. */
+    fun pick(recent: List<String>, needsNaming: Map<String, Boolean>, dismissed: Set<String>): String? =
+        recent.firstOrNull { needsNaming[it] == true && it !in dismissed }
 }
 
 /** Numbers behind the speaker texts (units are formatted with string resources). Pure. */

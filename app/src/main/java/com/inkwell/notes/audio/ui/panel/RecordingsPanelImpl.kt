@@ -240,11 +240,12 @@ private fun DetailContent(
     val speakerFilter by vm.speakerFilter.collectAsStateWithLifecycle()
     val speakerNote by vm.speakerNote.collectAsStateWithLifecycle()
     val needsNaming by vm.needsNaming.collectAsStateWithLifecycle()
+    val storedNames by vm.storedNames.collectAsStateWithLifecycle()
     val active = live?.takeIf { it.recordingId == rec.id }
     val phase = TranscriptPhase.of(rec.transcriptStatus, work)
     val loaded = playback.recording?.id == rec.id
     val activeIndex = if (loaded) TranscriptFilter.activeIndex(transcript, playback.positionMs) else -1
-    val speakerState = SpeakerSectionState(speakerPrefs, speakers, shares, diarization, models, speakerFilter, speakerNote)
+    val speakerState = SpeakerSectionState(speakerPrefs, speakers, shares, diarization, models, speakerFilter, speakerNote, storedNames)
     // Lanes share the waveform's timeline; rebuilt only when turns, voices or the duration change.
     val laneDuration = (if (loaded && playback.durationMs > 0) playback.durationMs else rec.durationMs).coerceAtLeast(0)
     val lanes = remember(turns, speakers, laneDuration, speakerState.enabled) {
@@ -254,7 +255,7 @@ private fun DetailContent(
             SpeakerLanes.build(turns, laneDuration, { label -> colors[label] ?: ((SpeakerTranscript.labelNumber(label) ?: 1) - 1) })
         }
     }
-    val lanesDescription = lanesDescription(speakers, shares)
+    val lanesDescription = lanesDescription(speakers, shares, storedNames)
     val unnamed = SpeakerTranscript.unnamedCount(speakers)
     val hasSpeakerNames = remember(transcript) { transcript.any { !it.speaker.isNullOrBlank() } }
     val showBanner = active == null && needsNaming && unnamed > 0 && speakerState.enabled && speakerPrefs.askToName
@@ -350,11 +351,11 @@ private fun DetailContent(
 
 /** "Who spoke when. Priya 45%, Speaker 2 30%, ..." for the speaker lanes. */
 @Composable
-private fun lanesDescription(speakers: List<RecordingSpeaker>, shares: Map<String, Int>): String {
+private fun lanesDescription(speakers: List<RecordingSpeaker>, shares: Map<String, Int>, storedNames: Map<String, String>): String {
     val small = stringResource(R.string.spk_share_small)
     val parts = speakers.map { s ->
         val share = shares[s.label]?.let { if (it == 0) small else stringResource(R.string.spk_share, it) }.orEmpty()
-        stringResource(R.string.spk_lanes_entry, s.displayName, share).trim()
+        stringResource(R.string.spk_lanes_entry, SpeakerTranscript.voice(s, storedNames[s.label]).name, share).trim()
     }
     return stringResource(R.string.spk_lanes_cd, parts.joinToString(", "))
 }

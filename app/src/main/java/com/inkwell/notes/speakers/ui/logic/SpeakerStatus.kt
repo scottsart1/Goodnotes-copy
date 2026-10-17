@@ -58,7 +58,10 @@ object SpeakerStatusLogic {
                 SpeakerModelState.Ready -> SpeakerStatus.Queued
                 SpeakerModelState.NotDownloaded -> SpeakerStatus.WaitingForModels(wifiOnly)
             }
-            is DiarizationPhase.Failed -> SpeakerStatus.Failed(phase.message?.takeIf { it.isNotBlank() }, canRun)
+            // A device job that ended after the engine was switched away (the worker fails with
+            // "engine off") is nothing the user can act on here: no red card, no dead end.
+            is DiarizationPhase.Failed -> if (engine != SpeakerEngine.DEVICE) SpeakerStatus.Hidden
+            else SpeakerStatus.Failed(phase.message?.takeIf { it.isNotBlank() }, canRun)
             DiarizationPhase.Done -> if (hasSpeakers) SpeakerStatus.Hidden else SpeakerStatus.NoneFound(canRun)
             DiarizationPhase.None -> when {
                 hasSpeakers -> SpeakerStatus.Hidden

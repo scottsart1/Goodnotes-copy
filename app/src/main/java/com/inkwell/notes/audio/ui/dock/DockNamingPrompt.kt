@@ -27,7 +27,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.State
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
@@ -35,7 +34,6 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -61,38 +59,39 @@ import com.inkwell.notes.speakers.ui.logic.SpeakerTranscript
 import com.inkwell.notes.ui.theme.Dimens
 import com.inkwell.notes.ui.theme.Inkwell
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.map
 
 private val R12 = RoundedCornerShape(12.dp)
 
 /**
- * After a recording of this document stops while it is open, and once its voices are known, a
- * small card in the bottom corner on the recorder's side offers to name the new voices. It
- * stays clear of the page centre and any docked toolbar, takes touches only on itself, never
- * shows while anything is recording, and opens the naming sheet as a dialog.
+ * Once the voices of a recently finished recording of this document are known, a small card in
+ * the bottom corner on the recorder's side offers to name the new voices. It stays clear of the
+ * page centre and any docked toolbar, takes touches only on itself, never shows while anything
+ * is recording, and opens the naming sheet as a dialog.
+ *
+ * The recording to ask about comes from the stored rows (the most recent one that finished in
+ * the last 24 h and still needs naming), not from a stop seen live on this screen: so the offer
+ * is also there after leaving the board before identification finished, after process death,
+ * and when the "voices to name" notification opens the document. Closing the card hides it for
+ * that recording until the process restarts; Skip in the sheet hides it for good.
  */
 @Composable
 internal fun BoxWithConstraintsScope.DockNamingPrompt(graph: AppGraph, docId: String, recording: State<RecordingState>) {
-    var candidate by rememberSaveable(docId) { mutableStateOf<String?>(null) }
     var sheetFor by rememberSaveable(docId) { mutableStateOf<String?>(null) }
 
-    // A recording of this document that stops here becomes the one to ask about.
-    LaunchedEffect(docId) {
-        var before: NamingPromptLogic.Live? = null
-        snapshotFlow { (recording.value as? RecordingState.Active)?.let { NamingPromptLogic.Live(it.docId, it.recordingId) } }
-            .distinctUntilChanged()
-            .collect { now ->
-                NamingPromptLogic.finished(before, now, docId)?.let { candidate = it }
-                before = now
-            }
-    }
+    // Recent finished recordings of this document, most recent first, with whether each still needs naming.
+    val candidates by remember(docId) { namingCandidates(graph, docId) }.collectAsStateWithLifecycle(emptyList())
+    val id = NamingPromptLogic.pick(candidates.map { it.first }, candidates.toMap(), SpeakerUiMemory.dismissedPrompts.toSet())
 
-    val id = candidate
     if (id != null) {
         val settings by graph.settings.settings.collectAsStateWithLifecycle()
-        val needs by remember(id) { graph.speakers.needsNaming(id).catch { emit(false) }.flowOn(Dispatchers.IO) }.collectAsStateWithLifecycle(false)
         val speakers by remember(id) {
             graph.speakers.speakers(id).catch { emit(emptyList()) }.flowOn(Dispatchers.IO)
         }.collectAsStateWithLifecycle(emptyList())
@@ -101,7 +100,7 @@ internal fun BoxWithConstraintsScope.DockNamingPrompt(graph: AppGraph, docId: St
         val visible = NamingPromptLogic.visible(
             candidate = id,
             recordingActive = recordingActive,
-            needsNaming = needs && unnamed > 0,
+            needsNaming = unnamed > 0,
             dismissed = id in SpeakerUiMemory.dismissedPrompts,
             prefs = settings.speakers,
         )
@@ -132,6 +131,21 @@ internal fun BoxWithConstraintsScope.DockNamingPrompt(graph: AppGraph, docId: St
     }
     sheetFor?.let { NamingSheet(it, onClose = { sheetFor = null }) }
 }
+
+/**
+ * Recordings of [docId] that finished within the last 24 h (most recent first), each with
+ * whether it still has voices to name. Empty while nothing recent exists.
+ */
+private fun namingCandidates(graph: AppGraph, docId: String): Flow<List<Pair<String, Boolean>>> =
+    graph.db.recordings().observeForDocument(docId)
+        .map { rows -> NamingPromptLogic.recent(rows.map { it.toModel() }, System.currentTimeMillis()) }
+        .distinctUntilChanged()
+        .flatMapLatest { ids ->
+            if (ids.isEmpty()) flowOf(emptyList())
+            else combine(ids.map { id -> graph.speakers.needsNaming(id).catch { emit(false) }.map { id to it } }) { it.toList() }
+        }
+        .catch { emit(emptyList()) }
+        .flowOn(Dispatchers.IO)
 
 @Composable
 private fun PromptCard(unnamed: Int, maxWidth: androidx.compose.ui.unit.Dp, onOpen: () -> Unit, onDismiss: () -> Unit) {

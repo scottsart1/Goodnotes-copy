@@ -1,5 +1,6 @@
 package com.inkwell.notes.settings.logic
 
+import com.inkwell.notes.core.model.SpeakerEngine
 import com.inkwell.notes.core.model.SpeakerPrefs
 import kotlin.math.abs
 
@@ -27,4 +28,14 @@ internal object SpeakerPrefsLogic {
 
     /** The stored expected-speaker count as one of [expectedSpeakerChoices] (below 2 reads as automatic). */
     fun expected(prefs: SpeakerPrefs): Int = prefs.expectedSpeakers.let { if (it < 2) 0 else it.coerceAtMost(MAX_EXPECTED) }
+
+    /**
+     * Whether a voice sample can be recorded for a person: voiceprints are stored only while
+     * voices are remembered, and are pointless with speakers off. The on-device models make the
+     * voiceprint whichever engine labels recordings, so this also holds with engine OPENAI.
+     */
+    fun canEnroll(prefs: SpeakerPrefs): Boolean = prefs.rememberVoices && prefs.engine != SpeakerEngine.OFF
+
+    /** The "Voice models" row is shown whenever the models are used: engine DEVICE, or any enrollment. */
+    fun showModels(prefs: SpeakerPrefs): Boolean = prefs.engine == SpeakerEngine.DEVICE || canEnroll(prefs)
 }

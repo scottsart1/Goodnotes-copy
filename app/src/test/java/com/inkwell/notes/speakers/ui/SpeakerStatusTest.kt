@@ -48,7 +48,9 @@ class SpeakerStatusTest {
     fun failuresOfferARetryOnlyOnTheDevice() {
         assertEquals(SpeakerStatus.Failed("boom", canRetry = true), of(phase = DiarizationPhase.Failed("boom")))
         assertEquals(SpeakerStatus.Failed(null, canRetry = true), of(phase = DiarizationPhase.Failed(" ")))
-        assertEquals(SpeakerStatus.Failed(null, canRetry = false), of(engine = SpeakerEngine.OPENAI, phase = DiarizationPhase.Failed(null)))
+        // A device job that failed after the engine was switched to OpenAI (the worker ends with
+        // "engine off") used to show a red card with no retry: a dead end, now hidden.
+        assertEquals(SpeakerStatus.Hidden, of(engine = SpeakerEngine.OPENAI, phase = DiarizationPhase.Failed(null)))
         assertEquals(SpeakerStatus.Failed(null, canRetry = false), of(phase = DiarizationPhase.Failed(null), hasAudio = false))
     }
 
