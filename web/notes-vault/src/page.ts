@@ -502,7 +502,8 @@ function clientScript(): string {
   return CLIENT_JS.split("__RENDER_MARKDOWN__").join(md).replace(/<\/(script)/gi, "<\\/$1").replace(/<!--/g, "<\\!--");
 }
 
-export function renderPage(nonce: string, signedIn: boolean): string {
+/** [lockable]: false when the link alone opens the vault, so there is nothing to lock. */
+export function renderPage(nonce: string, signedIn: boolean, lockable = true): string {
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -539,7 +540,7 @@ export function renderPage(nonce: string, signedIn: boolean): string {
       <label class="visually-hidden" for="search">Search notes and transcripts</label>
       <input class="input" id="search" type="search" placeholder="Search notes and transcripts" autocomplete="off" spellcheck="false">
     </div>
-    <button id="lock-btn" class="btn" type="button">Lock</button>
+    <button id="lock-btn" class="btn" type="button"${lockable ? "" : " hidden"}>Lock</button>
   </header>
   <div class="layout">
     <nav class="list-pane" aria-label="Synced documents">

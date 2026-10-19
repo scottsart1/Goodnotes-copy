@@ -6,7 +6,12 @@ export interface Env {
   FILES: R2Bucket;
   /** Secret: the random path segment of the private link (`/notes/<NOTES_LINK_ID>`). */
   NOTES_LINK_ID?: string;
-  /** Secret: the vault password. Changing it invalidates every issued token. */
+  /**
+   * Var: "link" means the private link alone opens the vault (one user, no password).
+   * Anything else, or unset, means the link plus NOTES_PASSWORD.
+   */
+  NOTES_ACCESS?: string;
+  /** Secret: the vault password (not needed with NOTES_ACCESS = "link"). Changing it invalidates every issued token. */
   NOTES_PASSWORD?: string;
   /** Secret: HMAC key for session tokens. */
   SESSION_SECRET?: string;

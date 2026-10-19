@@ -183,7 +183,7 @@ class SyncManagerImpl(private val graph: AppGraph) : SyncManager {
         val stored = runCatching { graph.secrets.get(SecretStore.VAULT_PASSWORD) }.getOrNull()
         val password = password.ifEmpty { stored.orEmpty() }
         val isSavedLink = VaultUrl.endpointOrNull(graph.settings.current.destinations.vaultUrl) == endpoint
-        val isSavedVault = isSavedLink && password == stored
+        val isSavedVault = isSavedLink && password == stored.orEmpty()
         VaultConnectionTest.run(graph.http, endpoint, password).fold(
             onSuccess = { ok ->
                 val moved = ok.movedTo

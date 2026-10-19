@@ -173,7 +173,7 @@ internal fun VaultCard(
             SecondaryAction(
                 stringResource(if (check == CheckState.Running) R.string.sync_testing else R.string.sync_vault_test),
                 { onTest(url, password) },
-                enabled = normalized != null && (hasPassword || password.isNotEmpty()),
+                enabled = normalized != null,
                 busy = check == CheckState.Running,
             )
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -191,7 +191,7 @@ internal fun VaultCard(
         }
         CheckResult(check)
         val usesVault = prefs.hasAnyTarget && (OutputTarget.VAULT in prefs.notes || OutputTarget.VAULT in prefs.transcripts || OutputTarget.VAULT in prefs.audio)
-        if (usesVault && (normalized == null || (!hasPassword && password.isEmpty()))) {
+        if (usesVault && normalized == null) {
             InfoLine(stringResource(R.string.sync_vault_needs_setup))
         }
     }

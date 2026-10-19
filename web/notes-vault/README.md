@@ -6,7 +6,9 @@ and an R2 bucket, mounted on `yourpitbox.com/notes*` and `www.yourpitbox.com/not
 
 - **Invisible without the special link.** Everything except `/notes/<LINK_ID>` and the
   paths below it returns a plain `404 Not Found`, including `/notes` itself.
-- **Password on top.** The web page and the API need a session created with the password.
+- **Link only, or a password on top.** With `NOTES_ACCESS = "link"` in `wrangler.toml`
+  (the setting for this single-user vault) the private link alone opens the page and the
+  API. Without it the page and the API also need a session created with the password.
 - **Protocol:** [`docs/VAULT_API.md`](../../docs/VAULT_API.md) (the contract the app's
   sync client is written against).
 
@@ -31,7 +33,8 @@ web/notes-vault/
 | `DB` | D1 binding | database `notes-vault` (id in `wrangler.toml`) |
 | `FILES` | R2 binding | bucket `notes-vault-files` (bodies at `<docId>/<name>`) |
 | `NOTES_LINK_ID` | Worker secret | the private path segment, e.g. 32 random URL-safe characters |
-| `NOTES_PASSWORD` | Worker secret | the vault password |
+| `NOTES_ACCESS` | var (`wrangler.toml`) | `"link"`: the link alone opens the vault; anything else: link plus password |
+| `NOTES_PASSWORD` | Worker secret | the vault password (not needed with `NOTES_ACCESS = "link"`) |
 | `SESSION_SECRET` | Worker secret | HMAC key for session tokens |
 
 None of the secrets are stored in this repository. If `NOTES_LINK_ID` is missing the
@@ -109,9 +112,11 @@ npm run deploy                          # = bash scripts/deploy.sh
 
 ## Using the vault
 
-Open `https://yourpitbox.com/notes/<LINK_ID>` (bookmark it; `www.` works too), enter the
-password and press **Unlock**. The session lasts 30 days on that browser; **Lock** signs
-out. The page lists synced documents (newest first) with search across titles, recognised
+Open `https://yourpitbox.com/notes/<LINK_ID>` (bookmark it; `www.` redirects there).
+With link-only access the notes show straight away. Anyone who has the link can read and
+change them, so keep it to yourself the way you would a password. With password access,
+enter the password and press **Unlock**. The session lasts 30 days on that browser, and
+**Lock** signs out. The page lists synced documents (newest first) with search across titles, recognised
 text and transcripts; selecting one shows the rendered notes, transcripts with clickable
 `[mm:ss]` timestamps that seek the recording, and downloadable files.
 
@@ -138,10 +143,12 @@ update the URL in the app and your bookmark. Rotating `SESSION_SECRET` signs eve
 ## How the app connects
 
 In Inkwell: **Settings › Storage, sync & backup › Your Pit Box vault**. Paste the private
-URL (`https://yourpitbox.com/notes/<LINK_ID>`) and the password, then use *Test
-connection*. The app stores the password in its encrypted `SecretStore`, signs in with
-`POST {url}/api/session`, and sends `Authorization: Bearer <token>` with every call. On
-`401 {"error":"unauthorized"}` it signs in again. Choose per output (notes, transcripts,
+URL (`https://yourpitbox.com/notes/<LINK_ID>`) and use *Test connection*.
+- **Link-only vault:** leave the password empty. The app then calls the API with the link
+  alone.
+- **Password vault:** enter the password. The app stores it in its encrypted `SecretStore`,
+  signs in with `POST {url}/api/session`, and sends `Authorization: Bearer <token>` with
+  every call. On `401 {"error":"unauthorized"}` it signs in again. Choose per output (notes, transcripts,
 audio) whether it goes to the vault.
 
 Implementation details the client can rely on (all within `docs/VAULT_API.md`):

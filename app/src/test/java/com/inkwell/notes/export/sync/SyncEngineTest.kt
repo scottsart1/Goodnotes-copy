@@ -200,14 +200,34 @@ class SyncEngineTest {
     }
 
     @Test
-    fun `missing link or password is reported without network traffic`() = runBlocking {
+    fun `missing link is reported without network traffic`() = runBlocking {
         val noLink = harness(vaultPrefs.copy(vaultUrl = ""))
         noLink.engine.enqueue(d.id, SyncKind.NOTES, noLink.prefs.notes)
         assertTrue(noLink.engine.run().error!!.contains("vault link"))
+        assertTrue(vault.requests.isEmpty())
+    }
+
+    @Test
+    fun `without a password a vault that asks for one stops after one bare request and the item waits`() = runBlocking {
         val noPassword = harness(vaultPrefs, creds = MemoryCredentials(pw = null))
         noPassword.engine.enqueue(d.id, SyncKind.NOTES, noPassword.prefs.notes)
-        assertTrue(noPassword.engine.run().error!!.contains("vault password"))
-        assertTrue(vault.requests.isEmpty())
+        val report = noPassword.engine.run()
+        assertTrue(report.error!!, report.error!!.contains("asks for a password"))
+        assertEquals(1, vault.requests.size)
+        assertNull(vault.requests.single().getHeader("Authorization"))
+        assertEquals(SyncItemStatus.PENDING, noPassword.dao.all.single().status)
+    }
+
+    @Test
+    fun `a link-only vault syncs without a password`() = runBlocking {
+        vault.linkOnly = true
+        val h = harness(vaultPrefs, creds = MemoryCredentials(pw = null))
+        h.engine.enqueue(d.id, SyncKind.NOTES, h.prefs.notes)
+        val report = h.engine.run()
+        assertNull(report.error, report.error)
+        assertEquals(SyncItemStatus.DONE, h.dao.all.single().status)
+        assertTrue(vault.calls().none { it == "POST /api/session" })
+        assertTrue(vault.requests.all { it.getHeader("Authorization") == null })
     }
 
     @Test

@@ -2,13 +2,18 @@ package com.inkwell.notes.export.sync
 
 import okhttp3.OkHttpClient
 
-/** "Test connection": log in with the given password, then ping with the new token. */
+/**
+ * "Test connection": log in with the given password, then ping with the new token. With no
+ * password, ping with the link alone (a link-only vault).
+ */
 object VaultConnectionTest {
-    /** [movedTo]: the vault answered from another host of its site, which the link should now use. */
-    data class Success(val message: String, val session: VaultSession, val movedTo: VaultEndpoint? = null)
+    /**
+     * [session]: null for a link-only vault. [movedTo]: the vault answered from another host
+     * of its site, which the link should now use.
+     */
+    data class Success(val message: String, val session: VaultSession?, val movedTo: VaultEndpoint? = null)
 
     suspend fun run(http: OkHttpClient, endpoint: VaultEndpoint, password: String, clock: () -> Long = System::currentTimeMillis): Result<Success> {
-        if (password.isEmpty()) return Result.failure(SyncCheckFailure("Enter the vault password."))
         val credentials = object : VaultCredentials {
             @Volatile var current: VaultSession? = null
             override fun password(): String = password
@@ -19,7 +24,7 @@ object VaultConnectionTest {
         }
         val client = VaultClient(http, endpoint, credentials, clock)
         return try {
-            val session = client.login(password)
+            val session = if (password.isEmpty()) null else client.login(password)
             credentials.current = session
             val name = client.ping().ifBlank { DEFAULT_NAME }
             val moved = client.endpoint.takeIf { it != endpoint }
@@ -32,7 +37,7 @@ object VaultConnectionTest {
 
     fun message(e: VaultException, endpoint: VaultEndpoint): String = when (e) {
         is VaultException.WrongPassword -> "Wrong password."
-        is VaultException.MissingPassword -> "Enter the vault password."
+        is VaultException.MissingPassword -> "This vault asks for a password. Enter it and test again."
         is VaultException.Locked -> "Locked after too many attempts. Try again in ${VaultException.waitText(e.retryAfterSeconds)}."
         is VaultException.NotAVault -> "Not a vault link: ${endpoint.base.host} answered 404. Check the private link."
         is VaultException.Unreachable -> "Can't reach ${endpoint.base.host}. Check the internet connection."

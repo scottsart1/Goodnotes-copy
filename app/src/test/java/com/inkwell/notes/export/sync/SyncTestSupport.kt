@@ -248,6 +248,8 @@ class FakeVault(
     /** Tokens the server accepts. Clear it to simulate an expired/invalidated session. */
     val validTokens = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
     @Volatile var lockedSeconds: Long? = null
+    /** NOTES_ACCESS = "link": no password, no token needed; a login gets a token anyway. */
+    @Volatile var linkOnly = false
     @Volatile var failNext: MutableList<MockResponse> = CopyOnWriteArrayList()
     private var counter = 0
 
@@ -282,8 +284,8 @@ class FakeVault(
                 return json(429, """{"error":"locked","retryAfterSeconds":$it}""").setHeader("Retry-After", it.toString())
             }
             val body = r.body.clone().readUtf8()
-            val pw = Json.parseToJsonElement(body).jsonObject["password"]?.toString()?.trim('"')
-            if (pw != password) return json(401, """{"error":"invalid_password"}""")
+            val pw = runCatching { Json.parseToJsonElement(body).jsonObject["password"]?.toString()?.trim('"') }.getOrNull()
+            if (pw != password && !linkOnly) return json(401, """{"error":"invalid_password"}""")
             val token = "tok-${++counter}.sig"
             issuedTokens += token
             validTokens += token
@@ -292,7 +294,7 @@ class FakeVault(
         }
         val auth = r.getHeader("Authorization")
         val token = auth?.removePrefix("Bearer ").orEmpty()
-        if (auth == null || !validTokens.contains(token)) return json(401, """{"error":"unauthorized"}""")
+        if (!linkOnly && (auth == null || !validTokens.contains(token))) return json(401, """{"error":"unauthorized"}""")
         return when {
             rest == "/api/ping" && r.method == "GET" -> json(200, """{"ok":true,"name":"Your Pit Box · Notes"}""")
             rest == "/api/docs" && r.method == "GET" -> json(200, """{"docs":[${docIds.joinToString(",") { """{"id":"$it","title":"t","kind":"NOTEBOOK"}""" }}]}""")

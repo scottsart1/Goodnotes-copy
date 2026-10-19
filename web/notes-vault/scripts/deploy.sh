@@ -8,7 +8,9 @@
 #
 # Environment:
 #   CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID  wrangler credentials (or a prior `wrangler login`)
-#   NOTES_PASSWORD   required: the vault password (changing it signs every device out)
+#   NOTES_PASSWORD   the vault password (changing it signs every device out). Required unless
+#                    wrangler.toml sets NOTES_ACCESS = "link" (the private link alone opens
+#                    the vault); then it is optional and an existing secret is kept.
 #   NOTES_LINK_ID    optional: the private link segment. If unset, an existing secret is kept;
 #                    if the Worker has none yet, a random 32-character id is generated and the
 #                    private URL is printed once (local runs only, never in CI logs).
@@ -50,8 +52,13 @@ extract_json() {
   '
 }
 
-[[ -n "${NOTES_PASSWORD:-}" ]] || die "NOTES_PASSWORD must be set (the vault password)."
-if (( ${#NOTES_PASSWORD} < 12 )); then
+ACCESS="$(sed -n 's/^[[:space:]]*NOTES_ACCESS[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' wrangler.toml | head -n1 | tr '[:upper:]' '[:lower:]')"
+if [[ "$ACCESS" == "link" ]]; then
+  log "Access: the private link alone opens the vault (NOTES_ACCESS = \"link\")"
+else
+  [[ -n "${NOTES_PASSWORD:-}" ]] || die "NOTES_PASSWORD must be set (the vault password), or set NOTES_ACCESS = \"link\" in wrangler.toml."
+fi
+if [[ -n "${NOTES_PASSWORD:-}" ]] && (( ${#NOTES_PASSWORD} < 12 )); then
   log "warning: NOTES_PASSWORD is shorter than 12 characters; a long passphrase is strongly recommended."
 fi
 if [[ -n "${NOTES_LINK_ID:-}" && ! "${NOTES_LINK_ID}" =~ ^[A-Za-z0-9_-]{16,128}$ ]]; then
@@ -158,7 +165,11 @@ put_secret() {
   printf '%s' "$value" | "${WRANGLER[@]}" secret put "$name" --name "$WORKER" >/dev/null
 }
 
-put_secret NOTES_PASSWORD "$NOTES_PASSWORD"
+if [[ -n "${NOTES_PASSWORD:-}" ]]; then
+  put_secret NOTES_PASSWORD "$NOTES_PASSWORD"
+else
+  log "No NOTES_PASSWORD given; not needed with link-only access"
+fi
 
 PRINT_URL=""
 case "$LINK_ACTION" in

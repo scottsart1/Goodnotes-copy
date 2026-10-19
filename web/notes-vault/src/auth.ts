@@ -24,11 +24,17 @@ export interface Secrets {
   sessionSecret: string;
 }
 
+/** True when the private link alone opens the vault (NOTES_ACCESS = "link"): no password, no sessions. */
+export function linkOnly(env: Env): boolean {
+  return (env.NOTES_ACCESS ?? "").trim().toLowerCase() === "link";
+}
+
 export function getSecrets(env: Env): Secrets | null {
   const linkId = env.NOTES_LINK_ID ?? "";
   const password = env.NOTES_PASSWORD ?? "";
   const sessionSecret = env.SESSION_SECRET ?? "";
-  if (!linkId || !password || !sessionSecret) return null;
+  if (!linkId || !sessionSecret) return null;
+  if (!password && !linkOnly(env)) return null;
   return { linkId, password, sessionSecret };
 }
 
@@ -177,6 +183,11 @@ async function countAttempt(db: D1Database, bucket: string, now: number): Promis
 export async function handleLogin(request: Request, env: Env, secrets: Secrets): Promise<Response> {
   // Defence in depth for the browser: a cross-site page cannot post the login form for us.
   if (request.headers.has("Origin") && !sameOrigin(request)) throw new HttpError(403, "bad_origin");
+  if (linkOnly(env)) {
+    // Nothing to check: the link was. Apps that still log in get a token they don't need.
+    const { token, expiresAt } = await issueToken(secrets);
+    return json({ token, expiresAt });
+  }
   const body = await readJson(request, 4096);
   const password = (body as { password?: unknown } | null)?.password;
   if (typeof password !== "string" || password.length === 0 || password.length > 1024) {
