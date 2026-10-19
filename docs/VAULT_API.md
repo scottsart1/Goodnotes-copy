@@ -15,6 +15,13 @@ start with `/notes/<LINK_ID>` gets a plain 404, indistinguishable from a missing
 password is checked on top of that. Neither value is stored in this repository: both are
 Worker secrets (`NOTES_LINK_ID`, `NOTES_PASSWORD`).
 
+The Worker never redirects, and the app does not follow redirects, so the bearer token cannot
+travel to another server. The one exception is a site moving between `www.host` and `host`.
+The zone sends `www.yourpitbox.com/*` to the apex with a 301. When a permanent redirect (301
+or 308) keeps the scheme, port and path and only adds or drops a leading `www.`, the app
+follows it once and saves the new link (`VaultRedirect`). It shows any other redirect as an
+error.
+
 ## Authentication
 
 `POST {BASE}/api/session` with JSON `{"password": "..."}`

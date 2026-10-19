@@ -26,6 +26,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -102,6 +103,13 @@ internal fun VaultCard(
     val c = Inkwell.colors
     val uriHandler = LocalUriHandler.current
     var url by rememberSaveable { mutableStateOf(prefs.vaultUrl) }
+    // Inkwell itself can update the saved link (the vault moved between www.host and host):
+    // show the new one, unless the field holds something else the user typed.
+    var lastSaved by rememberSaveable { mutableStateOf(prefs.vaultUrl) }
+    LaunchedEffect(prefs.vaultUrl) {
+        if (prefs.vaultUrl != lastSaved && VaultUrl.normalize(url) == VaultUrl.normalize(lastSaved)) url = prefs.vaultUrl
+        lastSaved = prefs.vaultUrl
+    }
     // The password is never read back from storage; this field only holds what is typed now.
     var password by remember { mutableStateOf("") }
     var reveal by remember { mutableStateOf(false) }

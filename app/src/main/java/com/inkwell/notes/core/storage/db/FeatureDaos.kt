@@ -360,6 +360,10 @@ interface SyncQueueDao {
     @Query("UPDATE sync_queue SET status = 'PENDING', attempts = 0, lastError = NULL WHERE status = 'FAILED'")
     suspend fun retryFailed(): Int
 
+    /** Failed items for one destination get another chance (the vault moved to its new address). */
+    @Query("UPDATE sync_queue SET status = 'PENDING', attempts = 0, lastError = NULL WHERE status = 'FAILED' AND target = :target")
+    suspend fun retryFailedForTarget(target: String): Int
+
     @Query("DELETE FROM sync_queue WHERE status = 'FAILED' AND enqueuedAt < :before")
     suspend fun pruneFailed(before: Long)
 }

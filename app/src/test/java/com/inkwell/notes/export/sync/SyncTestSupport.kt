@@ -95,10 +95,14 @@ class FakeSyncQueueDao : SyncQueueDao {
         return n
     }
 
-    override suspend fun retryFailed(): Int {
+    override suspend fun retryFailed(): Int = retryWhere { true }
+
+    override suspend fun retryFailedForTarget(target: String): Int = retryWhere { it.target == target }
+
+    private fun retryWhere(which: (SyncQueueEntity) -> Boolean): Int {
         var n = 0
         rows.value = rows.value.map {
-            if (it.status == SyncItemStatus.FAILED) {
+            if (it.status == SyncItemStatus.FAILED && which(it)) {
                 n++
                 it.copy(status = SyncItemStatus.PENDING, attempts = 0, lastError = null)
             } else it

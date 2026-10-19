@@ -23,6 +23,9 @@ class VaultEndpoint private constructor(val base: HttpUrl) {
             .joinToString("") { "%02x".format(it) }.take(32)
     }
 
+    /** The same vault on another host of the same site (see [VaultRedirect]). */
+    internal fun withHost(host: String): VaultEndpoint = VaultEndpoint(base.newBuilder().host(host).build())
+
     override fun equals(other: Any?): Boolean = other is VaultEndpoint && other.baseUrl == baseUrl
     override fun hashCode(): Int = baseUrl.hashCode()
     override fun toString(): String = "VaultEndpoint(${base.host})"
@@ -86,4 +89,28 @@ object VaultUrl {
     fun endpointOrNull(raw: String): VaultEndpoint? = (parse(raw) as? Parsed.Valid)?.endpoint
 
     const val FORMAT_HINT = "Use the full private link, like https://yourpitbox.com/notes/<your private link>."
+}
+
+/** Which redirects from the vault are followed. The client never follows one blindly: the token must not travel. Pure. */
+object VaultRedirect {
+    /**
+     * The host to use instead of [request]'s when the answer is a permanent redirect (301/308) to
+     * the same address with only a leading `www.` added or dropped: how a site moves between
+     * `www.example.com` and `example.com`, both run by whoever owns example.com. Same scheme, port
+     * and path; anything else (another site, another path, http, a temporary redirect) is null.
+     */
+    fun movedHost(request: HttpUrl, code: Int, location: String?): String? {
+        if (code != 301 && code != 308) return null
+        val target = location?.trim()?.takeIf { it.isNotEmpty() }?.let { request.resolve(it) } ?: return null
+        if (target.scheme != request.scheme || target.port != request.port) return null
+        if (target.username.isNotEmpty() || target.password.isNotEmpty()) return null
+        if (target.encodedPath.trimEnd('/') != request.encodedPath.trimEnd('/')) return null
+        val from = request.host
+        val to = target.host
+        return to.takeIf { it == "www.$from" || from == "www.$to" }
+    }
+
+    /** The host a redirect points at, for a message; null when [location] is not a URL. */
+    fun targetHost(request: HttpUrl, location: String?): String? =
+        location?.trim()?.takeIf { it.isNotEmpty() }?.let { request.resolve(it) }?.host
 }
