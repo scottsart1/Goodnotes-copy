@@ -23,6 +23,7 @@ import com.inkwell.notes.export.sync.SyncScheduler
 import com.inkwell.notes.export.sync.SyncScope
 import com.inkwell.notes.export.sync.VaultClient
 import com.inkwell.notes.export.sync.VaultConnectionTest
+import com.inkwell.notes.export.sync.VaultEndpoint
 import com.inkwell.notes.export.sync.VaultException
 import com.inkwell.notes.export.sync.SyncCheckFailure
 import com.inkwell.notes.export.sync.VaultUrl
@@ -46,6 +47,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.util.concurrent.ConcurrentHashMap
 
 /**
  * Copies notes, transcripts and audio to the destinations chosen in Settings (a SAF folder and/or
@@ -62,13 +64,19 @@ class SyncManagerImpl(private val graph: AppGraph) : SyncManager {
     private val stateStore by lazy { PrefsSyncStateStore(graph.context) }
     private val scheduler by lazy { SyncScheduler(graph.context) }
     private val debouncer = Debouncer(graph.appScope, EDIT_SETTLE_MS)
+    /** Saved vault links the vault itself moved (normalised old -> new): see [vaultMoved]. */
+    private val vaultMoves = ConcurrentHashMap<String, String>()
 
     internal val engine: SyncEngine by lazy {
         SyncEngine(
             queue = { graph.db.syncQueue() },
             source = GraphSyncSource(graph),
             prefs = { graph.settings.current.destinations },
-            vaultClient = { endpoint -> VaultClient(graph.http, endpoint, SecretVaultCredentials(graph.secrets, endpoint)) },
+            vaultClient = { endpoint ->
+                VaultClient(graph.http, endpoint, SecretVaultCredentials(graph.secrets, endpoint), onMoved = { from, to ->
+                    graph.appScope.launch(Dispatchers.IO) { safely { vaultMoved(from, to) } }
+                })
+            },
             folders = SafFolderAccess(graph.context),
             network = AndroidNetworkState(graph.context),
             state = stateStore,
@@ -174,12 +182,15 @@ class SyncManagerImpl(private val graph: AppGraph) : SyncManager {
         }
         val stored = runCatching { graph.secrets.get(SecretStore.VAULT_PASSWORD) }.getOrNull()
         val password = password.ifEmpty { stored.orEmpty() }
-        val isSavedVault = VaultUrl.endpointOrNull(graph.settings.current.destinations.vaultUrl) == endpoint && password == stored
+        val isSavedLink = VaultUrl.endpointOrNull(graph.settings.current.destinations.vaultUrl) == endpoint
+        val isSavedVault = isSavedLink && password == stored
         VaultConnectionTest.run(graph.http, endpoint, password).fold(
             onSuccess = { ok ->
+                val moved = ok.movedTo
+                if (moved != null && isSavedLink) safely { vaultMoved(endpoint, moved) }
                 if (isSavedVault) {
                     // The saved settings work: reuse this session and release anything that waited.
-                    safely { SecretVaultCredentials(graph.secrets, endpoint).saveSession(ok.session) }
+                    safely { SecretVaultCredentials(graph.secrets, moved ?: endpoint).saveSession(ok.session) }
                     stateStore.vaultLockedUntil = 0
                     stateStore.vaultCredentialsRefusedAt = 0
                     if (stateStore.lastError != null) stateStore.lastError = null
@@ -229,6 +240,23 @@ class SyncManagerImpl(private val graph: AppGraph) : SyncManager {
             refreshStatus()
             if (graph.settings.current.destinations.autoSync) kick()
         }
+    }
+
+    /**
+     * The vault answered from [to] instead of [from]: the site in front of it moved between
+     * `www.host` and `host` (VaultRedirect). If [from] is still the saved link, saves [to]. It is
+     * the same vault, so nothing is copied again; what failed on the old address is retried.
+     */
+    private suspend fun vaultMoved(from: VaultEndpoint, to: VaultEndpoint) {
+        if (VaultUrl.endpointOrNull(graph.settings.current.destinations.vaultUrl) != from) return
+        vaultMoves[from.baseUrl] = to.baseUrl
+        graph.settings.update { s ->
+            if (VaultUrl.endpointOrNull(s.destinations.vaultUrl) != from) s
+            else s.copy(destinations = s.destinations.copy(vaultUrl = to.baseUrl))
+        }
+        Log.i(TAG, "The vault answered from another host of its site; the saved link now uses it")
+        val retried = graph.db.syncQueue().retryFailedForTarget(OutputTarget.VAULT.name)
+        if (retried > 0 && graph.settings.current.destinations.autoSync) kick()
     }
 
     /** One background pass (called by the worker). */
@@ -293,7 +321,9 @@ class SyncManagerImpl(private val graph: AppGraph) : SyncManager {
         }
         val oldVault = VaultUrl.normalize(old.vaultUrl)
         val newVault = VaultUrl.normalize(new.vaultUrl)
-        if (newVault != oldVault) {
+        // The vault moving between www.host and host is still the same vault: nothing to copy again.
+        val moved = oldVault != null && newVault != null && vaultMoves.remove(oldVault) == newVault
+        if (newVault != oldVault && !moved) {
             stateStore.vaultLockedUntil = 0
             stateStore.vaultCredentialsRefusedAt = 0
             if (newVault != null) enqueued += engine.enqueueEverything(new, onlyTarget = OutputTarget.VAULT)

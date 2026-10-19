@@ -32,11 +32,18 @@ interface VaultCredentials {
  */
 class VaultClient(
     http: OkHttpClient,
-    val endpoint: VaultEndpoint,
+    endpoint: VaultEndpoint,
     private val credentials: VaultCredentials,
     private val clock: () -> Long = System::currentTimeMillis,
+    /** The vault answered from another host of its site ([VaultRedirect]); [endpoint] is now [to]. */
+    private val onMoved: (from: VaultEndpoint, to: VaultEndpoint) -> Unit = { _, _ -> },
 ) {
-    // The vault never redirects; refusing redirects keeps the token from following one.
+    @Volatile private var current: VaultEndpoint = endpoint
+
+    /** Where requests go: the endpoint given, or where the vault moved to since. */
+    val endpoint: VaultEndpoint get() = current
+
+    // Redirects are handled in [execute]; OkHttp following them would send the token anywhere.
     private val client: OkHttpClient = http.newBuilder().followRedirects(false).followSslRedirects(false).build()
     private val loginLock = Mutex()
 
@@ -195,8 +202,40 @@ class VaultClient(
         }
     }
 
-    /** Every URL derives from [endpoint], which [VaultUrl.parse] only creates for https. */
+    /**
+     * Every URL derives from [endpoint], which [VaultUrl.parse] only creates for https. The vault
+     * itself never redirects; a site in front of it may move between `www.host` and `host`, and
+     * only that is followed (once) and adopted. Any other redirect is an error.
+     */
     private suspend fun execute(request: Request): Response {
+        val response = send(request)
+        if (response.code !in 300..399) return response
+        val code = response.code
+        val location = response.header("Location")
+        response.close()
+        val host = VaultRedirect.movedHost(request.url, code, location)
+            ?: throw VaultException.Redirected(code, VaultRedirect.targetHost(request.url, location))
+        val retried = send(request.newBuilder().url(request.url.newBuilder().host(host).build()).build())
+        if (retried.code in 300..399) {
+            val again = retried.header("Location")
+            retried.close()
+            throw VaultException.Redirected(retried.code, VaultRedirect.targetHost(request.url, again))
+        }
+        // A plain 404 means nothing is there: keep the link as it is.
+        if (retried.code != 404 || isJsonNotFound(retried)) adopt(host)
+        return retried
+    }
+
+    private fun adopt(host: String) {
+        val (from, to) = synchronized(this) {
+            val from = current
+            if (from.base.host == host) return
+            (from to from.withHost(host)).also { current = it.second }
+        }
+        runCatching { onMoved(from, to) }
+    }
+
+    private suspend fun send(request: Request): Response {
         return try {
             client.newCall(request).await()
         } catch (e: IOException) {

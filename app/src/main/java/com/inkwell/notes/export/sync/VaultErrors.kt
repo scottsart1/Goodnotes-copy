@@ -67,6 +67,14 @@ sealed class VaultException(message: String, cause: Throwable? = null) : Excepti
         override val blocksVault = true
     }
 
+    /** A redirect other than the vault moving between `www.host` and `host` ([VaultRedirect]). */
+    class Redirected(val code: Int, val toHost: String?) : VaultException(
+        "The vault link now redirects to another address${toHost?.let { " ($it)" } ?: ""}. Open it in a browser and put the address it ends at in Settings › Storage, sync & backup.",
+    ) {
+        override val retryable = false
+        override val blocksVault = true
+    }
+
     class TooLarge(what: String) : VaultException("$what is larger than the vault accepts.") {
         override val retryable = false
     }

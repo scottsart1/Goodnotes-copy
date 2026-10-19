@@ -41,6 +41,7 @@ import com.inkwell.notes.speakers.voices.valueOrNull
 import com.inkwell.notes.speakers.work.AwaitingModels
 import com.inkwell.notes.speakers.work.DiarizationWorker
 import com.inkwell.notes.speakers.work.Diarizations
+import com.inkwell.notes.speakers.work.NativeRunGuard
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -79,6 +80,8 @@ class SpeakerServiceImpl(private val graph: AppGraph) : SpeakerService {
 
     internal val models: SpeakerModels by lazy { SpeakerModels(graph.context, graph.appScope) }
     internal val store: VoiceprintStore by lazy { VoiceprintStore(graph.context) }
+    /** Recordings whose analysis died inside native code (crash-loop protection). */
+    internal val nativeRuns by lazy { NativeRunGuard(graph.context) }
     private val awaiting by lazy { AwaitingModels(graph.context) }
     private val notifications by lazy { SpeakerNotifications(graph.context) }
 
@@ -359,7 +362,11 @@ class SpeakerServiceImpl(private val graph: AppGraph) : SpeakerService {
             awaitModels(docId, recordingId)
             return
         }
-        withContext(Dispatchers.IO) { awaiting.remove(recordingId) }
+        withContext(Dispatchers.IO) {
+            awaiting.remove(recordingId)
+            // "Try again" is the user's call: earlier native crashes of this recording no longer stop it.
+            if (replace) nativeRuns.reset(recordingId)
+        }
         Diarizations.enqueue(graph.context, docId, recordingId, replace)
     }
 
@@ -639,6 +646,7 @@ class SpeakerServiceImpl(private val graph: AppGraph) : SpeakerService {
     }
 
     override suspend fun onRecordingDeleted(recordingId: String) {
+        withContext(Dispatchers.IO) { runCatching { nativeRuns.reset(recordingId) } }
         Diarizations.cancel(graph.context, recordingId)
         withContext(Dispatchers.IO) { awaiting.remove(recordingId) }
         voiceLock.withLock {

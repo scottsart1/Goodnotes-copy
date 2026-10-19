@@ -1,5 +1,7 @@
 package com.inkwell.notes.settings.sections
 
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.util.Log
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -17,16 +19,24 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.inkwell.notes.BuildConfig
 import com.inkwell.notes.app.SettingsSection
+import com.inkwell.notes.core.diagnostics.CrashReports
+import com.inkwell.notes.core.diagnostics.CrashText
 import com.inkwell.notes.core.model.StorageInfo
 import com.inkwell.notes.settings.logic.LicenseEntry
 import com.inkwell.notes.settings.logic.Licenses
@@ -40,6 +50,7 @@ import com.inkwell.notes.ui.theme.Dimens
 import com.inkwell.notes.ui.theme.Inkwell
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 private sealed interface StorageLoad {
@@ -108,6 +119,8 @@ internal fun AboutSection(actions: SettingsActions, openSection: (SettingsSectio
             )
         }
 
+        CrashReportGroup(actions)
+
         SettingsGroup("Open-source licences", description = "Inkwell is built with these components. Tap one to read its licence.") {
             Licenses.entries.forEachIndexed { i, entry ->
                 if (i > 0) RowDivider()
@@ -149,5 +162,50 @@ private fun LicenseRow(entry: LicenseEntry, actions: SettingsActions) {
         }
         Spacer(Modifier.width(12.dp))
         Icon(Icons.AutoMirrored.Outlined.OpenInNew, null, Modifier.size(Dimens.icon), tint = c.inkMuted)
+    }
+}
+
+/** The last crash report (if any), to copy into a message when reporting a problem. */
+@Composable
+private fun CrashReportGroup(actions: SettingsActions) {
+    val c = Inkwell.colors
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var report by remember { mutableStateOf<CrashReports.Report?>(null) }
+    LaunchedEffect(Unit) { report = withContext(Dispatchers.IO) { runCatching { CrashReports.latest(context) }.getOrNull() } }
+    val r = report ?: return
+    SettingsGroup(
+        "Last crash",
+        description = "Inkwell stopped unexpectedly on ${CrashText.time(r.exitMs)}. The report stays on this tablet; " +
+            "copy it into a message when you report the problem. It holds no notes, transcripts or voices.",
+    ) {
+        Text(
+            r.headline,
+            style = MaterialTheme.typography.bodySmall,
+            color = c.inkMuted,
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
+        )
+        RowDivider()
+        ActionRow(
+            title = "Crash report",
+            subtitle = "What failed and where, for whoever fixes it.",
+            actionLabel = "Copy",
+            onAction = {
+                val cm = context.getSystemService(ClipboardManager::class.java)
+                cm?.setPrimaryClip(ClipData.newPlainText("Inkwell crash report", r.text))
+                actions.message("Crash report copied")
+            },
+        )
+        RowDivider()
+        ActionRow(
+            title = "Clear the report",
+            actionLabel = "Clear",
+            onAction = {
+                scope.launch {
+                    withContext(Dispatchers.IO) { runCatching { CrashReports.clear(context) } }
+                    report = null
+                }
+            },
+        )
     }
 }

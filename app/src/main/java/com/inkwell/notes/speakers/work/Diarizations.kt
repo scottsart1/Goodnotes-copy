@@ -8,6 +8,8 @@ import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkInfo
 import androidx.work.WorkManager
 import androidx.work.workDataOf
+import com.inkwell.notes.speakers.logic.NativeRunRules
+import com.inkwell.notes.speakers.logic.NativeRuns
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -123,4 +125,35 @@ internal class AwaitingModels(context: Context) {
     private fun load(): List<Entry> = runCatching {
         if (file.isFile) json.decodeFromString(serializer, file.readText()) else emptyList()
     }.getOrDefault(emptyList())
+}
+
+/**
+ * The [NativeRuns] record on disk (noBackupFilesDir, ids and counts only, no voice data).
+ * Every change is fsynced before it returns: the next thing that may happen is a native fault.
+ */
+internal class NativeRunGuard(context: Context) {
+    private val file = File(context.noBackupFilesDir, "speakers/native-runs.json")
+
+    /** May a run of [recordingId] enter native code? Marks it in flight when it may. */
+    @Synchronized
+    fun start(recordingId: String): Boolean {
+        val d = NativeRunRules.start(load(), recordingId)
+        save(d.next)
+        return d is NativeRunRules.Decision.Proceed
+    }
+
+    @Synchronized
+    fun finish(recordingId: String, completed: Boolean) = save(NativeRunRules.finish(load(), recordingId, completed))
+
+    @Synchronized
+    fun reset(recordingId: String) = save(NativeRunRules.reset(load(), recordingId))
+
+    private fun load(): NativeRuns = runCatching { if (file.isFile) NativeRuns.decode(file.readText()) else NativeRuns() }.getOrDefault(NativeRuns())
+
+    private fun save(r: NativeRuns) {
+        runCatching {
+            if (r.entries.isEmpty()) file.delete()
+            else FileStore.writeAtomically(file, keepBackup = false) { it.write(NativeRuns.encode(r).toByteArray()) }
+        }.onFailure { Log.w("NativeRunGuard", "Could not save the native run record", it) }
+    }
 }

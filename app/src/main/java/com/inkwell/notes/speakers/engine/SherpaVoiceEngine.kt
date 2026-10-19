@@ -62,15 +62,23 @@ internal class SherpaVoiceEngine(
 
     override fun diarize(samples: FloatArray, progress: (Float) -> Unit): List<RawSegment> {
         val d = diarizer()
-        val segments = d.processWithCallback(
-            samples,
-            { done: Int, total: Int, _: Long ->
-                if (total > 0) progress(done.toFloat() / total)
-                0
-            },
-            0L,
-        )
+        val segments = d.processWithCallback(samples, ProgressCallback(progress), 0L)
         return segments.map { RawSegment(it.start, it.end, it.speaker) }
+    }
+
+    /**
+     * The progress callback handed to native code. sherpa-onnx's JNI looks it up by exact JVM
+     * signature, `invoke(IIJ)Ljava/lang/Integer;`. A Kotlin lambda (compiled through
+     * invokedynamic since Kotlin 2.0) only has the erased `invoke(Object, Object, Object)`, so
+     * the lookup fails mid-analysis with a Java exception pending, and the native code's next
+     * JNI calls abort the process. A named class keeps the primitive-typed method.
+     * SherpaCallbackSignatureTest checks the signature.
+     */
+    internal class ProgressCallback(private val progress: (Float) -> Unit) : (Int, Int, Long) -> Int {
+        override fun invoke(numProcessedChunks: Int, numTotalChunks: Int, arg: Long): Int {
+            if (numTotalChunks > 0) progress(numProcessedChunks.toFloat() / numTotalChunks)
+            return 0 // 0 = keep going
+        }
     }
 
     override fun embed(samples: FloatArray): FloatArray? {

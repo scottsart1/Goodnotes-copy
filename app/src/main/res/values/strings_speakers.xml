@@ -13,6 +13,7 @@
     <string name="speaker_engine_error_off">Telling voices apart on this tablet is turned off.</string>
     <string name="speaker_engine_error_no_audio">This recording has no audio to analyse.</string>
     <string name="speaker_engine_error_unsupported">Telling voices apart isn\'t available on this device.</string>
+    <string name="speaker_engine_error_crashed">Telling the voices apart stopped the app on this recording, so it was not retried. Try again to give it another go.</string>
     <string name="speaker_engine_error_failed">Couldn\'t tell the voices apart. Try again.</string>
 
     <!-- Model download errors -->

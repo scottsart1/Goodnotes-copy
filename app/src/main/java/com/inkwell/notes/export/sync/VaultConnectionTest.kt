@@ -4,7 +4,8 @@ import okhttp3.OkHttpClient
 
 /** "Test connection": log in with the given password, then ping with the new token. */
 object VaultConnectionTest {
-    data class Success(val message: String, val session: VaultSession)
+    /** [movedTo]: the vault answered from another host of its site, which the link should now use. */
+    data class Success(val message: String, val session: VaultSession, val movedTo: VaultEndpoint? = null)
 
     suspend fun run(http: OkHttpClient, endpoint: VaultEndpoint, password: String, clock: () -> Long = System::currentTimeMillis): Result<Success> {
         if (password.isEmpty()) return Result.failure(SyncCheckFailure("Enter the vault password."))
@@ -21,7 +22,9 @@ object VaultConnectionTest {
             val session = client.login(password)
             credentials.current = session
             val name = client.ping().ifBlank { DEFAULT_NAME }
-            Result.success(Success("Connected to $name", credentials.current ?: session))
+            val moved = client.endpoint.takeIf { it != endpoint }
+            val message = if (moved == null) "Connected to $name" else "Connected to $name. The vault moved to ${moved.base.host}; the link now uses it."
+            Result.success(Success(message, credentials.current ?: session, moved))
         } catch (e: VaultException) {
             Result.failure(SyncCheckFailure(message(e, endpoint), e))
         }
@@ -38,6 +41,7 @@ object VaultConnectionTest {
         is VaultException.Server -> "The vault had a problem (HTTP ${e.code}). Try again later."
         is VaultException.BadResponse -> "${endpoint.base.host} didn't answer like a notes vault. Check the link."
         is VaultException.Unauthorized -> "The vault accepted the password but refused the session. Try again."
+        is VaultException.Redirected -> "${endpoint.base.host} redirects to ${e.toHost ?: "another address"} (HTTP ${e.code}). Open the link in a browser and use the address it ends at."
         else -> e.message ?: "The connection test failed."
     }
 
