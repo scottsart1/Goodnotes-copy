@@ -4,14 +4,21 @@ import android.app.Application
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import com.inkwell.notes.app.AppGraph
+import com.inkwell.notes.core.diagnostics.CrashReports
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 class InkwellApp : Application() {
     override fun onCreate() {
         super.onCreate()
+        CrashReports.install(this)
         val graph = AppGraph.init(this)
         createNotificationChannels()
+        graph.appScope.launch(Dispatchers.IO) {
+            // Why the previous process ended, if it crashed (Settings > About shows it).
+            runCatching { CrashReports.collect(this@InkwellApp) }
+        }
         graph.appScope.launch {
             runCatching { graph.recording.recoverInterrupted() }
             runCatching { graph.naming.schedule() }

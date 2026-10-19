@@ -87,6 +87,16 @@ class DiarizationWorker(appContext: Context, params: WorkerParameters) : Corouti
         val embeddings = HashMap<String, FloatArray>(resumed?.second.orEmpty())
         if (resumed == null) withContext(Dispatchers.IO) { service.store.deleteWork(recordingId) }
 
+        // A native fault kills the process with nothing to catch, and the job would run (and
+        // crash) again on every start: after repeated deaths inside native code, stop here.
+        val guard = service.nativeRuns
+        if (!withContext(Dispatchers.IO) { guard.start(recordingId) }) {
+            Log.e(TAG, "Identification kept stopping the app on this recording; not retried")
+            runCatching { discard(service, checkpointFile, recordingId) }
+            return failure(R.string.speaker_engine_error_crashed)
+        }
+        var analysed = false
+
         val audio = graph.speakerAudio as? SpeakerAudioImpl
         val dispatcher = SherpaVoiceEngine.newDispatcher()
         var engine: SherpaVoiceEngine? = null
@@ -117,6 +127,7 @@ class DiarizationWorker(appContext: Context, params: WorkerParameters) : Corouti
                 saveCheckpoint(service, checkpointFile, recordingId, checkpoint, embeddings)
                 report(windows, w.index + 1, 0f, force = true)
             }
+            analysed = true
         } catch (e: CancellationException) {
             // Cancelled by the user (or replaced): nothing resumes this run, so its temporary
             // voice data must not stay behind. A system stop keeps the checkpoint to resume from.
@@ -146,6 +157,8 @@ class DiarizationWorker(appContext: Context, params: WorkerParameters) : Corouti
         } finally {
             withContext(NonCancellable + dispatcher) { engine?.close() }
             dispatcher.close()
+            // Back from native code (whatever the outcome): this run did not crash the app.
+            withContext(NonCancellable + Dispatchers.IO) { guard.finish(recordingId, completed = analysed) }
         }
 
         val final = checkpoint
