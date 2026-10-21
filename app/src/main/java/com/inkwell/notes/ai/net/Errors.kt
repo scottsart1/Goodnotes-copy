@@ -196,8 +196,11 @@ object ErrorMapper {
 
     private fun isQuota(lower: String): Boolean =
         // No bare "billing": OpenAI rate-limit (429) bodies link to account/billing and must stay retryable.
-        listOf("insufficient_quota", "insufficient balance", "insufficient_balance", "credit balance is too low", "exceeded your current quota")
-            .any { lower.contains(it) }
+        // OpenAI's inactive-billing errors (also 429, never retryable) are named explicitly instead.
+        listOf(
+            "insufficient_quota", "insufficient balance", "insufficient_balance", "credit balance is too low", "exceeded your current quota",
+            "billing_not_active", "billing_hard_limit_reached", "check your billing details",
+        ).any { lower.contains(it) }
 
     /** Retry-After as seconds or HTTP date, in ms. */
     fun parseRetryAfter(value: String?, nowMs: Long = System.currentTimeMillis()): Long? {

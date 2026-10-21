@@ -150,6 +150,7 @@ class TranscriptionEmbeddingsTest {
         val check = h.engine.checkKey(AiProviderId.ANTHROPIC, "sk-ant-bad-123456", null)
         assertFalse(check.ok)
         assertTrue(check.rejected)
+        assertFalse(check.authenticated)
         assertTrue(check.message.contains("Anthropic rejected the API key"))
         val anth = h.take()
         assertEquals("sk-ant-bad-123456", anth.getHeader("x-api-key"))
@@ -163,6 +164,7 @@ class TranscriptionEmbeddingsTest {
         val check = h.engine.checkKey(AiProviderId.OPENAI, "sk-restricted-123456789", null)
         assertFalse(check.ok)
         assertFalse(check.rejected)
+        assertTrue(check.authenticated)
         assertTrue(check.message.contains("403"))
     }
 }

@@ -125,6 +125,9 @@ class AiServiceImpl(private val graph: AppGraph) : AiService {
                     setInvalid(provider, check.message)
                     graph.settings.update { s -> s.copy(ai = s.ai.updateProvider(provider) { it.copy(validatedAt = 0) }) }
                 }
+                // The provider accepted the key but refused the model list (403). Older builds flagged that as a
+                // rejected key; clear the stale flag without marking the key validated.
+                check.authenticated -> setInvalid(provider, null)
             }
         }
         return if (check.ok) Result.success(check.message) else Result.failure(AiException(check.message))

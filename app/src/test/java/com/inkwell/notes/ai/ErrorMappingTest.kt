@@ -74,6 +74,17 @@ class ErrorMappingTest {
         assertEquals(20_000L, r.retryAfterMs)
     }
 
+    @Test fun inactiveBillingIsQuotaNotRateLimit() {
+        val inactive = ErrorMapper.http(p, 429,
+            """{"error":{"message":"Your account is not active, please check your billing details on our website.","type":"billing_not_active","code":"billing_not_active"}}""")
+        assertEquals(AiFailure.Kind.QUOTA, inactive.kind)
+        assertFalse(inactive.retryable)
+        val hardLimit = ErrorMapper.http(p, 429,
+            """{"error":{"message":"Billing hard limit has been reached","type":"invalid_request_error","code":"billing_hard_limit_reached"}}""")
+        assertEquals(AiFailure.Kind.QUOTA, hardLimit.kind)
+        assertFalse(hardLimit.retryable)
+    }
+
     @Test fun nonPrimitiveErrorMessagesDoNotThrow() {
         assertNull(ErrorMapper.providerMessage("""{"error":{"message":{"code":1}}}"""))
         assertNull(ErrorMapper.providerMessage("""{"error":{"message":["a","b"]}}"""))

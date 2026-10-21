@@ -423,7 +423,9 @@ internal class AiPanelViewModel(private val graph: AppGraph, val docId: String) 
                 finished = true
                 error = PanelError("Something went wrong talking to ${p.model.provider.displayName}. Try again.", p.copy(persistUser = false))
             } finally {
-                if (!finished && stopRequested && reply.text.isNotBlank()) {
+                // A stopped regeneration keeps the complete answer it was replacing instead of adding a partial
+                // second answer to the same question.
+                if (!finished && stopRequested && p.replaces == null && reply.text.isNotBlank()) {
                     withContext(NonCancellable) {
                         runCatching {
                             val item = chats.add(tid, docId, AiRole.ASSISTANT, reply.text, p.model, p.context.sources)

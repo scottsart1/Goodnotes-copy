@@ -186,8 +186,11 @@ class AiEngine(
                 .filter { capability in it.capabilities }
         }
 
-    /** Result of an authenticated key check; [rejected] when the provider refused the key itself. */
-    data class KeyCheck(val ok: Boolean, val message: String, val rejected: Boolean)
+    /**
+     * Result of an authenticated key check; [rejected] when the provider refused the key itself,
+     * [authenticated] when the check failed although the provider accepted the key (a 403 on /models).
+     */
+    data class KeyCheck(val ok: Boolean, val message: String, val rejected: Boolean, val authenticated: Boolean = false)
 
     suspend fun checkKey(p: AiProviderId, apiKey: String, baseUrl: String?): KeyCheck {
         val key = apiKey.trim()
@@ -207,7 +210,11 @@ class AiEngine(
         } catch (e: FailureException) {
             // Only a 401 rejects the key itself. A 403 on /models means it authenticated but may lack the
             // model-list scope (OpenAI restricted keys) or be region/proxy blocked; chat can still work.
-            KeyCheck(false, e.failure.message, rejected = e.failure.kind == AiFailure.Kind.AUTH)
+            KeyCheck(
+                false, e.failure.message,
+                rejected = e.failure.kind == AiFailure.Kind.AUTH,
+                authenticated = e.failure.kind == AiFailure.Kind.FORBIDDEN,
+            )
         } catch (e: Throwable) {
             KeyCheck(false, asAiException(p, e, key).message ?: "Validation failed.", rejected = false)
         }
