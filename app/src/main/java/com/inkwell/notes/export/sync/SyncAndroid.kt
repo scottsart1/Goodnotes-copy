@@ -169,8 +169,9 @@ internal class AndroidNetworkState(context: Context) : NetworkState {
  * another link (a new vault, a typo, a look-alike host). A password saved before it was tied to
  * a link, or while no link was set, belongs to the saved link. The same vault on the other host
  * of its site (`www.` added or dropped, see [VaultRedirect]) counts as the same link. Changing
- * the saved link to another vault forgets the password ([linkChanged]), so what settings show
- * as saved is always what sync sends.
+ * the saved link never forgets the password ([keepWith] ties it to the link it was for): it is
+ * shown as saved ([savedFor]) and sent ([storedFor]) only while its link is the saved one again,
+ * so a half-edited or mistyped link costs nothing. Only "Forget password" ([forget]) removes it.
  */
 internal object VaultPassword {
     /** True when a password tied to [boundTo] (a fingerprint; null = untied) may be sent to [endpoint]. */
@@ -182,15 +183,12 @@ internal object VaultPassword {
     }
 
     /**
-     * True when a password tied to [boundTo] (null = untied) stays saved as the saved link changes
-     * from [oldLink] to [newLink]: unless [newLink] is another vault. Clearing the link keeps it
-     * (until another vault's link is entered); an untied password with no old link belongs to the new one.
+     * The link a password tied to [boundTo] (null = untied) belongs to once the saved link moves
+     * away from [oldLink]: an untied one stays with [oldLink], or, when no link was set, stays
+     * untied (it is for the next link entered).
      */
-    fun keptAcross(boundTo: String?, oldLink: String, newLink: String): Boolean {
-        val new = VaultUrl.endpointOrNull(newLink) ?: return true
-        val owner = boundTo ?: VaultUrl.endpointOrNull(oldLink)?.fingerprint ?: return true
-        return fits(owner, new, newLink)
-    }
+    fun boundAcross(boundTo: String?, oldLink: String): String? =
+        boundTo ?: VaultUrl.endpointOrNull(oldLink)?.fingerprint
 
     /** The saved password if it may be sent to [endpoint]; [savedLink] is the vault link in settings. */
     @Synchronized
@@ -214,34 +212,14 @@ internal object VaultPassword {
         secrets.put(SecretStore.VAULT_PASSWORD_VAULT, endpoint?.fingerprint)
     }
 
-    /** The saved link is about to change from [oldLink]: an untied password stays with it. */
-    @Synchronized
-    fun keepWith(secrets: SecretStore, oldLink: String) {
-        val old = VaultUrl.endpointOrNull(oldLink) ?: return
-        if (secrets.has(SecretStore.VAULT_PASSWORD) && !secrets.has(SecretStore.VAULT_PASSWORD_VAULT)) {
-            secrets.put(SecretStore.VAULT_PASSWORD_VAULT, old.fingerprint)
-        }
-    }
-
     /**
-     * The saved link is about to change from [oldLink] to [newLink]: a password for another vault
-     * is forgotten (see [keptAcross]), one that stays is tied to its vault. True when it was forgotten.
+     * The saved link is about to change from [oldLink]: the password stays saved, tied to its
+     * link (see [boundAcross]), so no other link receives it and going back to that link restores it.
      */
     @Synchronized
-    fun linkChanged(secrets: SecretStore, oldLink: String, newLink: String): Boolean {
-        if (!secrets.has(SecretStore.VAULT_PASSWORD)) return false
-        val boundTo = if (secrets.has(SecretStore.VAULT_PASSWORD_VAULT)) {
-            // Unreadable for now (Keystore hiccup): leave everything as it is.
-            secrets.get(SecretStore.VAULT_PASSWORD_VAULT) ?: return false
-        } else {
-            null
-        }
-        if (keptAcross(boundTo, oldLink, newLink)) {
-            keepWith(secrets, oldLink)
-            return false
-        }
-        forget(secrets)
-        return true
+    fun keepWith(secrets: SecretStore, oldLink: String) {
+        if (!secrets.has(SecretStore.VAULT_PASSWORD) || secrets.has(SecretStore.VAULT_PASSWORD_VAULT)) return
+        boundAcross(null, oldLink)?.let { secrets.put(SecretStore.VAULT_PASSWORD_VAULT, it) }
     }
 
     /** The same vault answers from [to] now (VaultRedirect): its password follows it. */

@@ -212,9 +212,10 @@ internal class StorageSettingsViewModel(private val graph: AppGraph) : ViewModel
             }
             val oldLink = settings.value.destinations.vaultUrl
             if (value != oldLink) {
-                // A saved password never goes to another vault: a new vault's link forgets it
-                // (hasPassword follows the saved link).
-                withContext(Dispatchers.IO) { runCatching { VaultPassword.linkChanged(graph.secrets, oldLink, value) } }
+                // The saved password stays tied to the link it was for and never goes to another
+                // one; going back to that link brings it back (hasPassword follows the saved link).
+                // Never forgotten here: this runs on every pause while the link is being edited.
+                withContext(Dispatchers.IO) { runCatching { VaultPassword.keepWith(graph.secrets, oldLink) } }
                 graph.settings.update { it.copy(destinations = it.destinations.copy(vaultUrl = value)) }
             }
         } finally {
@@ -334,6 +335,8 @@ internal class StorageSettingsViewModel(private val graph: AppGraph) : ViewModel
             val pref = AutoBackupPref(uri.toString(), label)
             withContext(Dispatchers.IO) { uiPrefs.setAutoBackup(pref) }
             autoBackup = pref
+            // Scheduling a new folder cleared the old folder's status (AutoBackup.schedule).
+            autoBackupStatus = withContext(Dispatchers.IO) { runCatching { BackupPrefs(context).status() }.getOrNull() } ?: AutoBackupStatus()
             releaseIfUnused(previous, keep = uri.toString())
         }
     }
@@ -346,6 +349,7 @@ internal class StorageSettingsViewModel(private val graph: AppGraph) : ViewModel
                 uiPrefs.setAutoBackup(null)
             }
             autoBackup = null
+            autoBackupStatus = AutoBackupStatus()
             releaseIfUnused(previous, keep = null)
         }
     }
@@ -357,7 +361,7 @@ internal class StorageSettingsViewModel(private val graph: AppGraph) : ViewModel
         val password = pendingPassword
         pendingPassword = null
         if (url != null || password != null) {
-            // In order: the link first, so changing it can't forget the password typed for it.
+            // In order: the link first, then the password typed for it.
             graph.appScope.launch {
                 if (url != null) saveUrl(url)
                 if (password != null) {

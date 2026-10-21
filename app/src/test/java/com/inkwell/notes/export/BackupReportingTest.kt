@@ -1,9 +1,11 @@
 package com.inkwell.notes.export
 
 import com.inkwell.notes.export.backup.AutoBackupStatus
+import com.inkwell.notes.export.backup.BackupPrefs
 import com.inkwell.notes.export.format.RowSlices
 import com.inkwell.notes.export.sync.ui.BackupJobs
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -25,6 +27,15 @@ class BackupReportingTest {
         // A run that skipped documents says how many; one that failed outright says so.
         assertEquals(AutoBackupStatus.Problem.SKIPPED, AutoBackupStatus(lastRunAt = 9, lastSuccessAt = 5, lastFailed = true, lastSkipped = 2).problem)
         assertEquals(AutoBackupStatus.Problem.FAILED, AutoBackupStatus(lastRunAt = 9, lastSuccessAt = 5, lastFailed = true).problem)
+    }
+
+    @Test fun anotherAutomaticBackupFolderStartsWithACleanStatus() {
+        val old = "content://com.android.externalstorage.documents/tree/1234-5678%3ABackups"
+        val new = "content://com.android.externalstorage.documents/tree/primary%3ABackups"
+        assertTrue("same folder rescheduled: its runs still apply", BackupPrefs.keepsRunStatus(old, old))
+        assertFalse("a new folder: the old folder's failure no longer applies", BackupPrefs.keepsRunStatus(old, new))
+        assertFalse("turned off", BackupPrefs.keepsRunStatus(old, null))
+        assertFalse("turned on after being off", BackupPrefs.keepsRunStatus(null, new))
     }
 
     @Test fun reportsDefaultToNothingSkipped() {

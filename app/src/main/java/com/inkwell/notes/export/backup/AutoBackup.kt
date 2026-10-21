@@ -62,7 +62,18 @@ internal class BackupPrefs(context: Context) {
         get() = prefs.getString(KEY_LAST_COMPLETE, null)
         set(value) { prefs.edit().putString(KEY_LAST_COMPLETE, value).apply() }
 
+    /** Forgets how earlier runs went (they were for another folder, or auto-backup is off). */
+    fun resetRunStatus() {
+        prefs.edit()
+            .remove(KEY_LAST_RUN).remove(KEY_LAST_FAILED).remove(KEY_LAST_SKIPPED)
+            .remove(KEY_LAST_OK).remove(KEY_LAST_COMPLETE)
+            .apply()
+    }
+
     companion object {
+        /** True when the run status recorded for folder [previous] still describes folder [next]. */
+        fun keepsRunStatus(previous: String?, next: String?): Boolean = next != null && previous == next
+
         private const val FILE = "inkwell_export_backup"
         private const val KEY_TREE = "auto_tree_uri"
         private const val KEY_DAYS = "auto_interval_days"
@@ -103,6 +114,8 @@ internal object AutoBackup {
     fun schedule(context: Context, treeUri: Uri?, intervalDays: Int) {
         val prefs = BackupPrefs(context)
         val wm = WorkManager.getInstance(context)
+        // A new folder (or none) starts with a clean status: an old failure no longer applies.
+        if (!BackupPrefs.keepsRunStatus(prefs.treeUri?.toString(), treeUri?.toString())) prefs.resetRunStatus()
         if (treeUri == null) {
             prefs.treeUri = null
             wm.cancelUniqueWork(WORK_NAME)

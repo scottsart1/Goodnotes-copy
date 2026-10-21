@@ -127,7 +127,7 @@ internal fun VaultCard(
                     url = it
                     onUrlChanged(it)
                     // A password still in the field is for the link the field now shows: save it
-                    // again for that link (a new vault's link forgets the one saved for the old).
+                    // again for that link (one saved for another link only ever goes to that link).
                     if (password.isNotEmpty()) onPasswordChanged(password)
                 },
                 modifier = Modifier.fillMaxWidth().onFocusChanged {
