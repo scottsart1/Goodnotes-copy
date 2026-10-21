@@ -325,7 +325,7 @@ internal class InputRouter(private val e: InkEngine) {
             cur.onUp(e, ev)
         }
         handler.removeCallbacks(longPress)
-        if (stylusToolType == ToolType.LASSO && buttons.mode == SideButtonMode.HOLD_TO_LASSO && buttons.temporaryTool == null) {
+        if (endsContactOnLassoRelease(stylusToolType, cur === e.selectionTool, buttons.mode, buttons.temporaryTool)) {
             // Hold-to-lasso button released before lifting: the loop is done. Continuing with the
             // base tool would clear the new selection and draw a stray stroke to the lift point.
             stylusTool = null
@@ -905,6 +905,20 @@ internal class InputRouter(private val e: InkEngine) {
          * restore what it just erased and pop a menu whenever the pen rests on a speck.
          */
         fun allowsStylusLongPress(type: ToolType, isInking: Boolean): Boolean = !isInking && type != ToolType.ERASER
+
+        /**
+         * Whether a side-button change mid-contact ends the contact instead of continuing with the
+         * new tool: true when the hold-to-lasso button was released while drawing a lasso loop.
+         * A selection move/resize started with the button held ([manipulatingSelection]) keeps
+         * going, so the box keeps following the pen.
+         */
+        fun endsContactOnLassoRelease(
+            contactType: ToolType?,
+            manipulatingSelection: Boolean,
+            mode: SideButtonMode,
+            temporaryTool: ToolType?,
+        ): Boolean = contactType == ToolType.LASSO && !manipulatingSelection &&
+            mode == SideButtonMode.HOLD_TO_LASSO && temporaryTool == null
         /** MotionEvent.FLAG_CANCELED (API 33): the pointer was cancelled, e.g. a palm. */
         private const val FLAG_CANCELED = 0x20
         private const val EXCLUSION_HEIGHT_DP = 200f

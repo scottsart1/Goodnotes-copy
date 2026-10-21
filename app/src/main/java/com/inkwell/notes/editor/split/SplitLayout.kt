@@ -31,6 +31,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
@@ -149,24 +150,29 @@ fun SplitLayout(leftDocId: String, rightDocId: String, nav: AppNavigator, keepSc
         // would drop undo history, selection, open panels and text being typed).
         fun paneContent(id: String): @Composable (Boolean, Modifier) -> Unit = panes.getOrPut(id) {
             movableContentOf { isFirst: Boolean, mod: Modifier ->
-                // One sink per pane: a new object would restart the drag handle's gesture mid-drag.
-                val sink = remember { sinkFor(id) }
-                NotebookPane(
-                    docId = id,
-                    initialPage = null,
-                    nav = nav,
-                    mode = PaneMode.SPLIT,
-                    modifier = mod
-                        .onGloballyPositioned { bounds[id] = it.boundsInRoot() }
-                        .border(1.dp, Inkwell.colors.outline),
-                    split = SplitHooks(
-                        isLeft = isFirst,
-                        onClosePane = { closePane(id) },
-                        onSendToOther = { content, from -> send(content, from) },
-                        dragSink = sink,
-                    ),
-                    onController = { c -> if (c == null) controllers.remove(id) else controllers[id] = c },
-                )
+                // Movable content resets the compound key, so without key(id) both panes would share
+                // rememberSaveable keys (camera capture, launcher keys, scroll and search state) and,
+                // after a swap, restore each other's saved values.
+                key(id) {
+                    // One sink per pane: a new object would restart the drag handle's gesture mid-drag.
+                    val sink = remember { sinkFor(id) }
+                    NotebookPane(
+                        docId = id,
+                        initialPage = null,
+                        nav = nav,
+                        mode = PaneMode.SPLIT,
+                        modifier = mod
+                            .onGloballyPositioned { bounds[id] = it.boundsInRoot() }
+                            .border(1.dp, Inkwell.colors.outline),
+                        split = SplitHooks(
+                            isLeft = isFirst,
+                            onClosePane = { closePane(id) },
+                            onSendToOther = { content, from -> send(content, from) },
+                            dragSink = sink,
+                        ),
+                        onController = { c -> if (c == null) controllers.remove(id) else controllers[id] = c },
+                    )
+                }
             }
         }
         if (stacked) {

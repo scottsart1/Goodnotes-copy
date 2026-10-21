@@ -35,6 +35,18 @@ class InputRulesTest {
         assertTrue(InputRouter.allowsStylusLongPress(ToolType.TEXT, isInking = false))
     }
 
+    @Test fun releasingHoldToLassoEndsALoopButNotASelectionDrag() {
+        // Drawing a lasso loop: releasing the button ends the contact.
+        assertTrue(InputRouter.endsContactOnLassoRelease(ToolType.LASSO, manipulatingSelection = false, SideButtonMode.HOLD_TO_LASSO, temporaryTool = null))
+        // Moving or resizing the selection with the button held: the drag carries on with the base tool.
+        assertFalse(InputRouter.endsContactOnLassoRelease(ToolType.LASSO, manipulatingSelection = true, SideButtonMode.HOLD_TO_LASSO, temporaryTool = null))
+        // Button still (or again) held, another mode, or a non-lasso contact: switch tools as usual.
+        assertFalse(InputRouter.endsContactOnLassoRelease(ToolType.LASSO, manipulatingSelection = false, SideButtonMode.HOLD_TO_LASSO, temporaryTool = ToolType.LASSO))
+        assertFalse(InputRouter.endsContactOnLassoRelease(ToolType.LASSO, manipulatingSelection = false, SideButtonMode.HOLD_TO_ERASE, temporaryTool = null))
+        assertFalse(InputRouter.endsContactOnLassoRelease(ToolType.PEN, manipulatingSelection = false, SideButtonMode.HOLD_TO_LASSO, temporaryTool = null))
+        assertFalse(InputRouter.endsContactOnLassoRelease(null, manipulatingSelection = false, SideButtonMode.HOLD_TO_LASSO, temporaryTool = null))
+    }
+
     @Test fun toggleModeDoesNotToggleAgainWhenTheHeldButtonSurvivesALostHover() {
         val sm = StylusButtonStateMachine()
         sm.mode = SideButtonMode.TOGGLE_ERASER
