@@ -486,17 +486,17 @@ class SyncEngine(
      * is still true of the vault or folder that did not change.
      */
     private inner class RunContext(val prefs: DestinationPrefs, previous: RunContext? = null) {
-        private val sameVault = previous != null && previous.prefs.vaultUrl == prefs.vaultUrl
-        private val sameFolder = previous != null && previous.prefs.folderUri == prefs.folderUri
-        var succeeded = previous?.succeeded ?: 0
-        var failed = previous?.failed ?: 0
-        var deferred = previous?.deferred ?: 0
-        var retryLater = previous?.retryLater ?: false
-        var lastSuccessAt = previous?.lastSuccessAt ?: 0L
+        private val sameVault: Boolean = previous != null && previous.prefs.vaultUrl == prefs.vaultUrl
+        private val sameFolder: Boolean = previous != null && previous.prefs.folderUri == prefs.folderUri
+        var succeeded: Int = previous?.succeeded ?: 0
+        var failed: Int = previous?.failed ?: 0
+        var deferred: Int = previous?.deferred ?: 0
+        var retryLater: Boolean = previous?.retryLater ?: false
+        var lastSuccessAt: Long = previous?.lastSuccessAt ?: 0L
         var error: String? = previous?.error
         var vaultBlocked: VaultException? = previous?.vaultBlocked?.takeIf { sameVault }
         /** True when this run's vault error came from the credentials hold, not from the vault. */
-        var heldForCredentials = sameVault && previous?.heldForCredentials == true
+        var heldForCredentials: Boolean = sameVault && previous?.heldForCredentials == true
         var folderBlocked: Exception? = previous?.folderBlocked?.takeIf { sameFolder }
         var knownVaultDocs: HashSet<String>? = previous?.knownVaultDocs?.takeIf { sameVault }
         val placements: HashMap<String, Placement> = previous?.placements?.takeIf { sameFolder } ?: HashMap()
