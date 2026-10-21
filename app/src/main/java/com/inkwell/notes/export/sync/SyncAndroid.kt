@@ -136,7 +136,9 @@ internal class AndroidNetworkState(context: Context) : NetworkState {
  * The saved vault password belongs to the vault link it was entered for: it is never sent to
  * another link (a new vault, a typo, a look-alike host). A password saved before it was tied to
  * a link, or while no link was set, belongs to the saved link. The same vault on the other host
- * of its site (`www.` added or dropped, see [VaultRedirect]) counts as the same link.
+ * of its site (`www.` added or dropped, see [VaultRedirect]) counts as the same link. Changing
+ * the saved link to another vault forgets the password ([linkChanged]), so what settings show
+ * as saved is always what sync sends.
  */
 internal object VaultPassword {
     /** True when a password tied to [boundTo] (a fingerprint; null = untied) may be sent to [endpoint]. */
@@ -147,19 +149,41 @@ internal object VaultPassword {
         return if (boundTo != null) same.any { it.fingerprint == boundTo } else VaultUrl.endpointOrNull(savedLink) in same
     }
 
+    /**
+     * True when a password tied to [boundTo] (null = untied) stays saved as the saved link changes
+     * from [oldLink] to [newLink]: unless [newLink] is another vault. Clearing the link keeps it
+     * (until another vault's link is entered); an untied password with no old link belongs to the new one.
+     */
+    fun keptAcross(boundTo: String?, oldLink: String, newLink: String): Boolean {
+        val new = VaultUrl.endpointOrNull(newLink) ?: return true
+        val owner = boundTo ?: VaultUrl.endpointOrNull(oldLink)?.fingerprint ?: return true
+        return fits(owner, new, newLink)
+    }
+
     /** The saved password if it may be sent to [endpoint]; [savedLink] is the vault link in settings. */
+    @Synchronized
     fun storedFor(secrets: SecretStore, endpoint: VaultEndpoint, savedLink: String): String? {
         val password = secrets.get(SecretStore.VAULT_PASSWORD) ?: return null
         return password.takeIf { fits(secrets.get(SecretStore.VAULT_PASSWORD_VAULT), endpoint, savedLink) }
     }
 
+    /** True when a saved password applies to [savedLink] (no link set: when one is saved at all). */
+    @Synchronized
+    fun savedFor(secrets: SecretStore, savedLink: String): Boolean {
+        if (!secrets.has(SecretStore.VAULT_PASSWORD)) return false
+        val endpoint = VaultUrl.endpointOrNull(savedLink) ?: return true
+        return fits(secrets.get(SecretStore.VAULT_PASSWORD_VAULT), endpoint, savedLink)
+    }
+
     /** Saves [password] for [endpoint] (null: for whichever link is saved when it is first used). */
+    @Synchronized
     fun save(secrets: SecretStore, password: String, endpoint: VaultEndpoint?) {
         secrets.put(SecretStore.VAULT_PASSWORD, password)
         secrets.put(SecretStore.VAULT_PASSWORD_VAULT, endpoint?.fingerprint)
     }
 
     /** The saved link is about to change from [oldLink]: an untied password stays with it. */
+    @Synchronized
     fun keepWith(secrets: SecretStore, oldLink: String) {
         val old = VaultUrl.endpointOrNull(oldLink) ?: return
         if (secrets.has(SecretStore.VAULT_PASSWORD) && !secrets.has(SecretStore.VAULT_PASSWORD_VAULT)) {
@@ -167,11 +191,34 @@ internal object VaultPassword {
         }
     }
 
+    /**
+     * The saved link is about to change from [oldLink] to [newLink]: a password for another vault
+     * is forgotten (see [keptAcross]), one that stays is tied to its vault. True when it was forgotten.
+     */
+    @Synchronized
+    fun linkChanged(secrets: SecretStore, oldLink: String, newLink: String): Boolean {
+        if (!secrets.has(SecretStore.VAULT_PASSWORD)) return false
+        val boundTo = if (secrets.has(SecretStore.VAULT_PASSWORD_VAULT)) {
+            // Unreadable for now (Keystore hiccup): leave everything as it is.
+            secrets.get(SecretStore.VAULT_PASSWORD_VAULT) ?: return false
+        } else {
+            null
+        }
+        if (keptAcross(boundTo, oldLink, newLink)) {
+            keepWith(secrets, oldLink)
+            return false
+        }
+        forget(secrets)
+        return true
+    }
+
     /** The same vault answers from [to] now (VaultRedirect): its password follows it. */
+    @Synchronized
     fun moved(secrets: SecretStore, from: VaultEndpoint, to: VaultEndpoint) {
         if (secrets.get(SecretStore.VAULT_PASSWORD_VAULT) == from.fingerprint) secrets.put(SecretStore.VAULT_PASSWORD_VAULT, to.fingerprint)
     }
 
+    @Synchronized
     fun forget(secrets: SecretStore) {
         secrets.remove(SecretStore.VAULT_PASSWORD)
         secrets.remove(SecretStore.VAULT_PASSWORD_VAULT)

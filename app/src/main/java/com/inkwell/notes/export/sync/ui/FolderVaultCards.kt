@@ -123,7 +123,13 @@ internal fun VaultCard(
         LabeledField(stringResource(R.string.sync_vault_url)) {
             OutlinedTextField(
                 value = url,
-                onValueChange = { url = it; onUrlChanged(it) },
+                onValueChange = {
+                    url = it
+                    onUrlChanged(it)
+                    // A password still in the field is for the link the field now shows: save it
+                    // again for that link (a new vault's link forgets the one saved for the old).
+                    if (password.isNotEmpty()) onPasswordChanged(password)
+                },
                 modifier = Modifier.fillMaxWidth().onFocusChanged {
                     if (urlFocused && !it.isFocused) onUrlCommit(url)
                     urlFocused = it.isFocused

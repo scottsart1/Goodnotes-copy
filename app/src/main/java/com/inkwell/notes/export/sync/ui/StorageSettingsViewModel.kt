@@ -14,7 +14,6 @@ import com.inkwell.notes.core.model.AppSettings
 import com.inkwell.notes.core.model.DestinationPrefs
 import com.inkwell.notes.core.model.NotesExportFormat
 import com.inkwell.notes.core.model.OutputTarget
-import com.inkwell.notes.core.settings.SecretStore
 import com.inkwell.notes.export.SyncManagerImpl
 import com.inkwell.notes.export.SyncStatus
 import com.inkwell.notes.export.sync.SafFolderAccess
@@ -28,7 +27,9 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -59,7 +60,7 @@ internal class StorageUiPrefs(context: Context) {
 
 /**
  * State and actions of "Storage, sync & backup". Never holds the vault password after it is
- * saved; [hasPassword] only says whether one exists.
+ * saved; [hasPassword] only says whether one is saved for the current vault link.
  */
 internal class StorageSettingsViewModel(private val graph: AppGraph) : ViewModel() {
     private val context: Context get() = graph.context
@@ -89,15 +90,27 @@ internal class StorageSettingsViewModel(private val graph: AppGraph) : ViewModel
     private var pendingPassword: String? = null
     private var urlJob: Job? = null
     private var pendingUrl: String? = null
+    /** Bumped when the password is saved or forgotten here, so an older [refreshHasPassword] can't undo it. */
+    private var passwordEdits = 0
 
     init {
         viewModelScope.launch {
-            val (has, auto) = withContext(Dispatchers.IO) {
-                runCatching { graph.secrets.has(SecretStore.VAULT_PASSWORD) }.getOrDefault(false) to runCatching { uiPrefs.autoBackup() }.getOrNull()
-            }
-            hasPassword = has
-            autoBackup = auto
+            autoBackup = withContext(Dispatchers.IO) { runCatching { uiPrefs.autoBackup() }.getOrNull() }
         }
+        // A saved password only counts for the link it belongs to; the link can change here or
+        // in the background (the vault moved between www.host and host).
+        viewModelScope.launch {
+            settings.map { it.destinations.vaultUrl }.distinctUntilChanged().collect { refreshHasPassword() }
+        }
+    }
+
+    private suspend fun refreshHasPassword() {
+        val edits = passwordEdits
+        val link = settings.value.destinations.vaultUrl
+        val has = withContext(Dispatchers.IO) {
+            runCatching { VaultPassword.savedFor(graph.secrets, link) }.getOrDefault(false)
+        }
+        if (edits == passwordEdits) hasPassword = has
     }
 
     // ------------------------------------------------------------------ destinations
@@ -185,17 +198,22 @@ internal class StorageSettingsViewModel(private val graph: AppGraph) : ViewModel
     }
 
     private suspend fun saveUrl(text: String) {
-        pendingUrl = null
-        val value = when (val p = VaultUrl.parse(text)) {
-            is VaultUrl.Parsed.Valid -> p.endpoint.baseUrl
-            VaultUrl.Parsed.Empty -> ""
-            is VaultUrl.Parsed.Invalid -> return
-        }
-        val oldLink = settings.value.destinations.vaultUrl
-        if (value != oldLink) {
-            // A saved password stays with the vault it was entered for, never goes to the new link.
-            withContext(Dispatchers.IO) { runCatching { VaultPassword.keepWith(graph.secrets, oldLink) } }
-            graph.settings.update { it.copy(destinations = it.destinations.copy(vaultUrl = value)) }
+        try {
+            val value = when (val p = VaultUrl.parse(text)) {
+                is VaultUrl.Parsed.Valid -> p.endpoint.baseUrl
+                VaultUrl.Parsed.Empty -> ""
+                is VaultUrl.Parsed.Invalid -> return
+            }
+            val oldLink = settings.value.destinations.vaultUrl
+            if (value != oldLink) {
+                // A saved password never goes to another vault: a new vault's link forgets it
+                // (hasPassword follows the saved link).
+                withContext(Dispatchers.IO) { runCatching { VaultPassword.linkChanged(graph.secrets, oldLink, value) } }
+                graph.settings.update { it.copy(destinations = it.destinations.copy(vaultUrl = value)) }
+            }
+        } finally {
+            // Only now: until the link is saved, a password typed meanwhile is for it (passwordVault).
+            if (pendingUrl == text) pendingUrl = null
         }
     }
 
@@ -227,6 +245,7 @@ internal class StorageSettingsViewModel(private val graph: AppGraph) : ViewModel
             runCatching { VaultPassword.save(graph.secrets, text, vault) }.isSuccess
         }
         if (saved) {
+            passwordEdits++
             hasPassword = true
             impl?.onVaultCredentialsChanged()
         } else {
@@ -245,6 +264,7 @@ internal class StorageSettingsViewModel(private val graph: AppGraph) : ViewModel
             withContext(Dispatchers.IO) {
                 runCatching { VaultPassword.forget(graph.secrets) }
             }
+            passwordEdits++
             hasPassword = false
             vaultCheck = CheckState.Idle
             // Releases a hold or lockout from the old password and retries what waited for it.
@@ -260,6 +280,9 @@ internal class StorageSettingsViewModel(private val graph: AppGraph) : ViewModel
         passwordJob?.cancel()
         viewModelScope.launch {
             saveUrl(urlText)
+            // A password typed and tested now is for this link: save it for it, so sync sends
+            // what passed the test (and the test keeps its session and releases holds).
+            if (passwordText.isNotEmpty()) pendingPassword = passwordText
             flushPassword()
             val r = graph.sync.testVault(urlText, passwordText)
             vaultCheck = r.fold({ CheckState.Ok(it) }, { CheckState.Failed(it.message ?: "The connection test failed.") })
@@ -324,13 +347,17 @@ internal class StorageSettingsViewModel(private val graph: AppGraph) : ViewModel
     override fun onCleared() {
         // Keep what was typed: finish pending saves outside the closing screen.
         val vault = passwordVault()
-        pendingUrl?.let { text -> graph.appScope.launch { saveUrl(text) } }
+        val url = pendingUrl
         val password = pendingPassword
         pendingPassword = null
-        if (password != null) {
-            graph.appScope.launch(Dispatchers.IO) {
-                runCatching { VaultPassword.save(graph.secrets, password, vault) }
-                impl?.onVaultCredentialsChanged()
+        if (url != null || password != null) {
+            // In order: the link first, so changing it can't forget the password typed for it.
+            graph.appScope.launch {
+                if (url != null) saveUrl(url)
+                if (password != null) {
+                    withContext(Dispatchers.IO) { runCatching { VaultPassword.save(graph.secrets, password, vault) } }
+                    impl?.onVaultCredentialsChanged()
+                }
             }
         }
         super.onCleared()
