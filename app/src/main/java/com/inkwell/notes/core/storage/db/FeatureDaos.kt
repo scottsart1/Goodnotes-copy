@@ -369,6 +369,21 @@ interface SyncQueueDao {
     @Query("SELECT COUNT(*) FROM sync_queue WHERE status = 'PENDING'")
     suspend fun pendingCount(): Int
 
+    /** Pending items in queue order (enqueuedAt, rowId) after the item ([afterAt], [afterRowId]): one page of the whole queue. */
+    @Query(
+        """SELECT * FROM sync_queue WHERE status = 'PENDING'
+           AND (enqueuedAt > :afterAt OR (enqueuedAt = :afterAt AND rowId > :afterRowId))
+           ORDER BY enqueuedAt, rowId LIMIT :limit"""
+    )
+    suspend fun pendingAfter(afterAt: Long, afterRowId: Long, limit: Int): List<SyncQueueEntity>
+
+    /** One pending item per kind and target: tells which background runs are needed, however long the queue. */
+    @Query(
+        """SELECT * FROM sync_queue WHERE rowId IN
+           (SELECT MIN(rowId) FROM sync_queue WHERE status = 'PENDING' GROUP BY kind, target)"""
+    )
+    suspend fun pendingKindsAndTargets(): List<SyncQueueEntity>
+
     @Query("SELECT COUNT(*) FROM sync_queue WHERE status = 'FAILED'")
     fun observeFailedCount(): Flow<Int>
 

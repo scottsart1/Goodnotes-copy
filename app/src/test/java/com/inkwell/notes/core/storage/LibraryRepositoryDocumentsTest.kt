@@ -190,6 +190,7 @@ class LibraryRepositoryDocumentsTest {
         assertEquals(f.id, after.folderId)
         assertEquals(3, after.lastPageIndex)
         assertEquals(h.now, after.openedAt)
+        assertEquals("a move tells sync to move the copies", listOf(d.id), h.hooks.moved)
     }
 
     @Test fun viewStateRejectsNonFiniteValues() = runTest {
@@ -220,6 +221,7 @@ class LibraryRepositoryDocumentsTest {
         assertNull(repo.getDocument(d.id)!!.folderId)
         repo.moveDocument(d.id, "nope")
         assertNull(repo.getDocument(d.id)!!.folderId)
+        assertTrue(h.hooks.moved.isEmpty())
     }
 
     // ------------------------------------------------------------------ duplicate

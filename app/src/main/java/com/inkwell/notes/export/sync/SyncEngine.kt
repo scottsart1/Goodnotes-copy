@@ -49,8 +49,11 @@ class SyncEngine(
     private val folders: FolderAccess,
     private val network: NetworkState,
     private val state: SyncStateStore,
-    /** Called when the folder permission is gone: clear the folder destination in settings. */
-    private val onFolderRevoked: suspend () -> Unit,
+    /**
+     * Called when the permission for the folder [revokedUri] is gone: clear the folder destination
+     * in settings, unless another folder was chosen meanwhile.
+     */
+    private val onFolderRevoked: suspend (revokedUri: String?) -> Unit,
     private val clock: () -> Long = System::currentTimeMillis,
     private val io: kotlinx.coroutines.CoroutineDispatcher = Dispatchers.IO,
     /** Resolves the saved vault link (HTTPS only); replaceable for tests against a local server. */
@@ -137,20 +140,34 @@ class SyncEngine(
     }
 
     private suspend fun runLocked(scope: SyncScope): SyncRunReport {
-        val ctx = RunContext(prefs())
+        var ctx = RunContext(prefs())
         val attempted = HashSet<Long>()
         try {
             while (true) {
                 dirty = false
-                val items = queue().pending(QUERY_LIMIT)
-                    .filter { it.rowId !in attempted && scope.accepts(it) }
-                    .sortedWith(compareBy<SyncQueueEntity>({ kindOrder(it.kind) }, { it.documentId }, { it.enqueuedAt }, { it.rowId }))
-                if (items.isEmpty() && !dirty) break
-                for (item in items) {
-                    currentCoroutineContext().ensureActive()
-                    attempted += item.rowId
-                    processOne(item, ctx)
+                var processed = false
+                // Page through the whole queue: items left waiting at its head (offline, Wi-Fi
+                // only, another scope) must not hide the ones behind them.
+                var afterAt = Long.MIN_VALUE
+                var afterRowId = Long.MIN_VALUE
+                while (true) {
+                    val page = queue().pendingAfter(afterAt, afterRowId, QUERY_LIMIT)
+                    val items = page
+                        .filter { it.rowId !in attempted && scope.accepts(it) }
+                        .sortedWith(compareBy<SyncQueueEntity>({ kindOrder(it.kind) }, { it.documentId }, { it.enqueuedAt }, { it.rowId }))
+                    for (item in items) {
+                        currentCoroutineContext().ensureActive()
+                        // Destinations can change during a long run: each item goes by the current settings.
+                        ctx = ctx.following(prefs())
+                        attempted += item.rowId
+                        processed = true
+                        processOne(item, ctx)
+                    }
+                    if (page.size < QUERY_LIMIT) break
+                    afterAt = page.last().enqueuedAt
+                    afterRowId = page.last().rowId
                 }
+                if (!processed && !dirty) break
             }
         } finally {
             ctx.exports.clear()
@@ -212,26 +229,16 @@ class SyncEngine(
         } catch (e: VaultException) {
             onVaultError(item, e, ctx)
         } catch (e: FolderRevokedException) {
-            ctx.folderBlocked = e
-            ctx.failed++
-            ctx.error = e.message
-            finish(item, SyncItemStatus.FAILED, item.attempts + 1, e.message)
-            runCatching { queue().failPendingForTarget(OutputTarget.FOLDER.name, e.message.orEmpty()) }
-            runCatching { onFolderRevoked() }
+            onFolderLost(item, e, ctx)
         } catch (e: FolderUnavailableException) {
             ctx.folderBlocked = e
             ctx.retryLater = true
             ctx.error = e.message
             finish(item, SyncItemStatus.PENDING, item.attempts + 1, e.message)
         } catch (e: SecurityException) {
-            val revoked = FolderRevokedException(e)
-            if (target == OutputTarget.FOLDER) {
-                ctx.folderBlocked = revoked
-                runCatching { queue().failPendingForTarget(OutputTarget.FOLDER.name, revoked.message.orEmpty()) }
-                runCatching { onFolderRevoked() }
-            }
+            if (target == OutputTarget.FOLDER) return onFolderLost(item, FolderRevokedException(e), ctx)
             ctx.failed++
-            ctx.error = if (target == OutputTarget.FOLDER) revoked.message else genericError(item, ctx, e)
+            ctx.error = genericError(item, ctx, e)
             finish(item, SyncItemStatus.FAILED, item.attempts + 1, ctx.error)
         } catch (e: Throwable) {
             // IOException from the folder, export failures, anything else: retry a few times.
@@ -243,6 +250,26 @@ class SyncEngine(
             ctx.error = message
             finish(item, if (giveUp) SyncItemStatus.FAILED else SyncItemStatus.PENDING, attempts, message)
         }
+    }
+
+    /**
+     * The folder refused access: its items fail and the destination is cleared. When the user
+     * chose another folder during this run, it is the old folder's access that went away: the
+     * item waits for the new folder (which gets its own copies queued) and nothing else changes.
+     */
+    private suspend fun onFolderLost(item: SyncQueueEntity, e: FolderRevokedException, ctx: RunContext) {
+        ctx.folderBlocked = e
+        val revokedUri = ctx.prefs.folderUri
+        if (prefs().folderUri != revokedUri) {
+            ctx.defer()
+            finish(item, SyncItemStatus.PENDING, item.attempts, null)
+            return
+        }
+        ctx.failed++
+        ctx.error = e.message
+        finish(item, SyncItemStatus.FAILED, item.attempts + 1, e.message)
+        runCatching { queue().failPendingForTarget(OutputTarget.FOLDER.name, e.message.orEmpty()) }
+        runCatching { onFolderRevoked(revokedUri) }
     }
 
     private suspend fun onVaultError(item: SyncQueueEntity, e: VaultException, ctx: RunContext) {
@@ -257,8 +284,9 @@ class SyncEngine(
             ctx.vaultBlocked = e
             ctx.deferred++
             if (e.retryable) ctx.retryLater = true
-            val attempts = if (e is VaultException.Unreachable || e is VaultException.InsecureConnection) item.attempts + 1 else item.attempts
-            finish(item, SyncItemStatus.PENDING, attempts, e.message)
+            // Waiting for the vault or the network is not a failed attempt of this item: counting
+            // it would make the item give up at its first real server error later.
+            finish(item, SyncItemStatus.PENDING, item.attempts, e.message)
             return
         }
         val attempts = item.attempts + 1
@@ -391,26 +419,41 @@ class SyncEngine(
 
     // ------------------------------------------------------------------ folder placement
 
-    /** The document's directory, following a rename or move since the last copy. */
+    /**
+     * The document's directory, following a rename or move since the last copy. A directory that
+     * holds another document's copies (one using the title before, or a deleted document whose
+     * copies are kept) is never written into, renamed or emptied: the document gets its own
+     * directory with a short id suffix instead.
+     */
     private suspend fun documentDir(root: FolderNode, doc: DocumentMeta, ctx: RunContext): Placement {
         ctx.placements[doc.id]?.let { return it }
-        val segments = FolderNaming.documentDir(source.folderNames(doc.folderId), doc.title, doc.id)
+        val folderNames = source.folderNames(doc.folderId)
+        var segments = FolderNaming.documentDir(folderNames, doc.title, doc.id)
         val previous = state.folderLocation(doc.id)
+        if (ctx.ownersOf(segments).any { it != doc.id }) {
+            if (FolderWriter.findDir(root, segments) != null) {
+                segments = FolderNaming.documentDir(folderNames, doc.title, doc.id, withId = true)
+            } else {
+                // Those copies are gone from the folder: the name is free again.
+                ctx.forgetOwners(segments)
+            }
+        }
         var oldDir: FolderNode? = null
-        if (previous != null && previous != segments) {
+        val oldShared = previous != null && ctx.ownersOf(previous).any { it != doc.id }
+        if (previous != null && previous != segments && !oldShared) {
             val old = FolderWriter.findDir(root, previous)
             if (old != null) {
                 val parentSegments = segments.dropLast(1)
                 val parent = if (previous.dropLast(1) == parentSegments) FolderWriter.findDir(root, parentSegments) else null
                 if (parent != null && FolderWriter.renameDirInPlace(old, segments.last(), parent)) {
-                    state.setFolderLocation(doc.id, segments)
+                    ctx.setLocation(doc.id, previous, segments)
                     return Placement(old, null, doc.id).also { ctx.placements[doc.id] = it }
                 }
                 oldDir = old
             }
         }
         val dir = FolderWriter.ensureDirs(root, segments)
-        state.setFolderLocation(doc.id, segments)
+        ctx.setLocation(doc.id, previous, segments)
         return Placement(dir, oldDir, doc.id).also { ctx.placements[doc.id] = it }
     }
 
@@ -437,23 +480,53 @@ class SyncEngine(
 
     // ------------------------------------------------------------------ run state
 
-    private inner class RunContext(val prefs: DestinationPrefs) {
-        var succeeded = 0
-        var failed = 0
-        var deferred = 0
-        var retryLater = false
-        var lastSuccessAt = 0L
-        var error: String? = null
-        var vaultBlocked: VaultException? = null
+    /**
+     * State of one run under one set of destination settings. When the settings change during
+     * the run, [following] continues with a new context that keeps the results so far and what
+     * is still true of the vault or folder that did not change.
+     */
+    private inner class RunContext(val prefs: DestinationPrefs, previous: RunContext? = null) {
+        private val sameVault = previous != null && previous.prefs.vaultUrl == prefs.vaultUrl
+        private val sameFolder = previous != null && previous.prefs.folderUri == prefs.folderUri
+        var succeeded = previous?.succeeded ?: 0
+        var failed = previous?.failed ?: 0
+        var deferred = previous?.deferred ?: 0
+        var retryLater = previous?.retryLater ?: false
+        var lastSuccessAt = previous?.lastSuccessAt ?: 0L
+        var error: String? = previous?.error
+        var vaultBlocked: VaultException? = previous?.vaultBlocked?.takeIf { sameVault }
         /** True when this run's vault error came from the credentials hold, not from the vault. */
-        var heldForCredentials = false
-        var folderBlocked: Exception? = null
-        var knownVaultDocs: HashSet<String>? = null
-        val placements = HashMap<String, Placement>()
-        private var client: VaultClient? = null
-        private var root: FolderNode? = null
-        private var markdownCache: Pair<String, String>? = null
-        val exports = ExportCache(source)
+        var heldForCredentials = sameVault && previous?.heldForCredentials == true
+        var folderBlocked: Exception? = previous?.folderBlocked?.takeIf { sameFolder }
+        var knownVaultDocs: HashSet<String>? = previous?.knownVaultDocs?.takeIf { sameVault }
+        val placements: HashMap<String, Placement> = previous?.placements?.takeIf { sameFolder } ?: HashMap()
+        private var client: VaultClient? = previous?.client?.takeIf { sameVault }
+        private var root: FolderNode? = previous?.root?.takeIf { sameFolder }
+        /** Folder location -> documents whose copies are there; loaded on first use. */
+        private var ownerMap: HashMap<List<String>, HashSet<String>>? = previous?.ownerMap?.takeIf { sameFolder }
+        private var markdownCache: Pair<String, String>? = previous?.markdownCache
+        val exports: ExportCache = previous?.exports ?: ExportCache(source)
+
+        /** This context while the settings are still [current]; otherwise a new one for them. */
+        fun following(current: DestinationPrefs): RunContext = if (current == prefs) this else RunContext(current, this)
+
+        private fun owners(): HashMap<List<String>, HashSet<String>> = ownerMap ?: HashMap<List<String>, HashSet<String>>().also { map ->
+            for ((docId, segments) in state.folderLocations()) map.getOrPut(segments) { HashSet() } += docId
+            ownerMap = map
+        }
+
+        fun ownersOf(segments: List<String>): Set<String> = owners()[segments].orEmpty()
+
+        fun forgetOwners(segments: List<String>) {
+            owners().remove(segments)?.forEach { state.setFolderLocation(it, null) }
+        }
+
+        fun setLocation(docId: String, from: List<String>?, segments: List<String>) {
+            state.setFolderLocation(docId, segments)
+            val map = owners()
+            if (from != null) map[from]?.remove(docId)
+            map.getOrPut(segments) { HashSet() } += docId
+        }
 
         suspend fun markdown(docId: String): String {
             markdownCache?.takeIf { it.first == docId }?.let { return it.second }

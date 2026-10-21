@@ -25,6 +25,12 @@ internal interface LibraryHooks {
     /** The title changed: refresh search and copies kept in sync destinations. */
     fun documentRenamed(docId: String)
 
+    /**
+     * The document is in another folder now, or its folder was renamed or moved: refresh search
+     * and move the copies kept in sync destinations.
+     */
+    fun documentMoved(docId: String) = documentMetaChanged(docId)
+
     /** Pages were created whose text is not indexed yet (copies of stale pages). */
     fun pagesNeedIndexing(docId: String, pageIds: List<String>)
 
@@ -72,6 +78,11 @@ internal object GraphLibraryHooks : LibraryHooks {
     override fun documentMetaChanged(docId: String) = dispatch("index meta") { it.indexing.documentMetaChanged(docId) }
 
     override fun documentRenamed(docId: String) = dispatch("rename") {
+        it.indexing.documentMetaChanged(docId)
+        it.sync.onDocumentChanged(docId)
+    }
+
+    override fun documentMoved(docId: String) = dispatch("move") {
         it.indexing.documentMetaChanged(docId)
         it.sync.onDocumentChanged(docId)
     }

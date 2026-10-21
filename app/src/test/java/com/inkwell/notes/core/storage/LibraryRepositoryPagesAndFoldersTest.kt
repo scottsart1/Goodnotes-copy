@@ -350,6 +350,7 @@ class LibraryRepositoryPagesAndFoldersTest {
         assertEquals("X (2)", repo.getFolder(x2.id)!!.name)
         assertNotNull(repo.getFolder(x1.id))
         assertEquals(listOf(d.id), h.hooks.metaChanged)
+        assertEquals(listOf(d.id), h.hooks.moved)
     }
 
     @Test fun trashingAFolderTrashesItsSubtreeAndRestoreOnlyBringsBackWhatWentTogether() = runTest {
@@ -438,6 +439,7 @@ class LibraryRepositoryPagesAndFoldersTest {
         assertEquals("b (2)", after.name)
         assertEquals(5, after.color)
         assertEquals(listOf(d.id), h.hooks.metaChanged)
+        assertEquals(listOf(d.id), h.hooks.moved)
         // Colour-only change: no rename, no notification.
         h.hooks.metaChanged.clear()
         repo.updateFolder(after.copy(color = 6))

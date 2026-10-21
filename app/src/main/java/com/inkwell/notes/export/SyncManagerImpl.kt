@@ -26,6 +26,7 @@ import com.inkwell.notes.export.sync.VaultConnectionTest
 import com.inkwell.notes.export.sync.VaultEndpoint
 import com.inkwell.notes.export.sync.VaultException
 import com.inkwell.notes.export.sync.SyncCheckFailure
+import com.inkwell.notes.export.sync.VaultPassword
 import com.inkwell.notes.export.sync.VaultUrl
 import com.inkwell.notes.export.sync.hasAnyTarget
 import com.inkwell.notes.export.sync.includesMarkdown
@@ -73,14 +74,15 @@ class SyncManagerImpl(private val graph: AppGraph) : SyncManager {
             source = GraphSyncSource(graph),
             prefs = { graph.settings.current.destinations },
             vaultClient = { endpoint ->
-                VaultClient(graph.http, endpoint, SecretVaultCredentials(graph.secrets, endpoint), onMoved = { from, to ->
+                val credentials = SecretVaultCredentials(graph.secrets, endpoint, savedLink = { graph.settings.current.destinations.vaultUrl })
+                VaultClient(graph.http, endpoint, credentials, onMoved = { from, to ->
                     graph.appScope.launch(Dispatchers.IO) { safely { vaultMoved(from, to) } }
                 })
             },
             folders = SafFolderAccess(graph.context),
             network = AndroidNetworkState(graph.context),
             state = stateStore,
-            onFolderRevoked = { clearFolderDestination() },
+            onFolderRevoked = { revokedUri -> clearFolderDestination(revokedUri) },
         )
     }
 
@@ -144,9 +146,10 @@ class SyncManagerImpl(private val graph: AppGraph) : SyncManager {
     override fun onDocumentDeleted(docId: String) {
         debouncer.cancel(docId)
         graph.appScope.launch(Dispatchers.IO) {
-            // Copies in the folder and the vault stay: deleting locally never deletes them.
+            // Copies in the folder and the vault stay: deleting locally never deletes them. The
+            // folder location is kept too, so a later document with the same title gets its own
+            // directory instead of writing over these last copies.
             safely { graph.db.syncQueue().dropOpenForDocument(docId) }
-            safely { stateStore.setFolderLocation(docId, null) }
         }
     }
 
@@ -180,9 +183,11 @@ class SyncManagerImpl(private val graph: AppGraph) : SyncManager {
             VaultUrl.Parsed.Empty -> return@withContext Result.failure(SyncCheckFailure("Enter the vault link first."))
             is VaultUrl.Parsed.Invalid -> return@withContext Result.failure(SyncCheckFailure(parsed.reason))
         }
-        val stored = runCatching { graph.secrets.get(SecretStore.VAULT_PASSWORD) }.getOrNull()
+        val savedLink = graph.settings.current.destinations.vaultUrl
+        // The saved password only ever goes to the vault it was entered for.
+        val stored = runCatching { VaultPassword.storedFor(graph.secrets, endpoint, savedLink) }.getOrNull()
         val password = password.ifEmpty { stored.orEmpty() }
-        val isSavedLink = VaultUrl.endpointOrNull(graph.settings.current.destinations.vaultUrl) == endpoint
+        val isSavedLink = VaultUrl.endpointOrNull(savedLink) == endpoint
         val isSavedVault = isSavedLink && password == stored.orEmpty()
         VaultConnectionTest.run(graph.http, endpoint, password).fold(
             onSuccess = { ok ->
@@ -250,6 +255,7 @@ class SyncManagerImpl(private val graph: AppGraph) : SyncManager {
     private suspend fun vaultMoved(from: VaultEndpoint, to: VaultEndpoint) {
         if (VaultUrl.endpointOrNull(graph.settings.current.destinations.vaultUrl) != from) return
         vaultMoves[from.baseUrl] = to.baseUrl
+        safely { VaultPassword.moved(graph.secrets, from, to) }
         graph.settings.update { s ->
             if (VaultUrl.endpointOrNull(s.destinations.vaultUrl) != from) s
             else s.copy(destinations = s.destinations.copy(vaultUrl = to.baseUrl))
@@ -270,7 +276,7 @@ class SyncManagerImpl(private val graph: AppGraph) : SyncManager {
     fun kick() {
         graph.appScope.launch(Dispatchers.IO) {
             safely {
-                val items = graph.db.syncQueue().pending(QUEUE_SCAN_LIMIT)
+                val items = graph.db.syncQueue().pendingKindsAndTargets()
                 val needs = syncNeeds(items, graph.settings.current.destinations)
                 if (needs.any) scheduler.schedule(needs)
             }
@@ -289,8 +295,11 @@ class SyncManagerImpl(private val graph: AppGraph) : SyncManager {
         _status.update { it.copy(lastSuccessAt = lastSuccess, lastError = lastError) }
     }
 
-    private suspend fun clearFolderDestination() {
-        graph.settings.update { it.copy(destinations = it.destinations.withoutFolder()) }
+    /** Clears the folder destination, unless the user has chosen another folder than [revokedUri] since. */
+    private suspend fun clearFolderDestination(revokedUri: String?) {
+        graph.settings.update { s ->
+            if (s.destinations.folderUri != revokedUri) s else s.copy(destinations = s.destinations.withoutFolder())
+        }
     }
 
     // ------------------------------------------------------------------ destination changes
@@ -354,6 +363,5 @@ class SyncManagerImpl(private val graph: AppGraph) : SyncManager {
         const val EDIT_SETTLE_MS = 30_000L
         const val SETTINGS_SETTLE_MS = 1_200L
         const val STARTUP_DELAY_MS = 15_000L
-        const val QUEUE_SCAN_LIMIT = 5000
     }
 }

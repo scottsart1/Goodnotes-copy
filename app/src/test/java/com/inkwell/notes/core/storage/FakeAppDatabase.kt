@@ -201,6 +201,7 @@ class FakeAppDatabase : AppDatabase() {
         }
         override suspend fun setSize(id: String, sizeBytes: Long) { tx { documentTable.replace(id) { it.copy(sizeBytes = sizeBytes) } } }
         override suspend fun setThumbnail(id: String, path: String?) { tx { documentTable.replace(id) { it.copy(thumbnailPath = path) } } }
+        override suspend fun setLastSyncedAt(id: String, at: Long) { tx { documentTable.replace(id) { it.copy(lastSyncedAt = at) } } }
     }
 
     private val pageDao = object : PageDao {

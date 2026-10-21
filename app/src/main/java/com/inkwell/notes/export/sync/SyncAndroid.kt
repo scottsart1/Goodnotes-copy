@@ -61,9 +61,9 @@ internal class GraphSyncSource(private val graph: AppGraph) : SyncSource {
 
     override suspend fun markSynced(docId: String, at: Long) {
         try {
-            // Re-read right before writing so a concurrent edit (title, tags...) is never undone.
-            val current = graph.library.getDocument(docId) ?: return
-            graph.library.updateDocument(current.copy(lastSyncedAt = at))
+            // Only this column: writing the whole document back could undo a concurrent edit
+            // (title, folder, tags...) or bring back a document deleted meanwhile.
+            graph.db.documents().setLastSyncedAt(docId, at)
         } catch (e: Exception) {
             Log.w("InkwellSync", "Couldn't record the sync time: ${e.javaClass.simpleName}")
         }
@@ -95,8 +95,13 @@ internal class PrefsSyncStateStore(context: Context) : SyncStateStore {
         get() = prefs.getLong(KEY_REFUSED_AT, 0)
         set(value) = prefs.edit().putLong(KEY_REFUSED_AT, value).apply()
 
-    override fun folderLocation(docId: String): List<String>? =
-        locations.getString(docId, null)?.split(SEP)?.filter { it.isNotEmpty() }?.takeIf { it.isNotEmpty() }
+    override fun folderLocation(docId: String): List<String>? = decode(locations.getString(docId, null))
+
+    override fun folderLocations(): Map<String, List<String>> =
+        locations.all.mapNotNull { (docId, value) -> decode(value as? String)?.let { docId to it } }.toMap()
+
+    private fun decode(stored: String?): List<String>? =
+        stored?.split(SEP)?.filter { it.isNotEmpty() }?.takeIf { it.isNotEmpty() }
 
     override fun setFolderLocation(docId: String, segments: List<String>?) {
         locations.edit().apply { if (segments == null) remove(docId) else putString(docId, segments.joinToString(SEP)) }.apply()
@@ -127,9 +132,61 @@ internal class AndroidNetworkState(context: Context) : NetworkState {
     }
 }
 
+/**
+ * The saved vault password belongs to the vault link it was entered for: it is never sent to
+ * another link (a new vault, a typo, a look-alike host). A password saved before it was tied to
+ * a link, or while no link was set, belongs to the saved link. The same vault on the other host
+ * of its site (`www.` added or dropped, see [VaultRedirect]) counts as the same link.
+ */
+internal object VaultPassword {
+    /** True when a password tied to [boundTo] (a fingerprint; null = untied) may be sent to [endpoint]. */
+    fun fits(boundTo: String?, endpoint: VaultEndpoint, savedLink: String): Boolean {
+        val host = endpoint.base.host
+        val sibling = runCatching { endpoint.withHost(if (host.startsWith("www.")) host.removePrefix("www.") else "www.$host") }.getOrNull()
+        val same = listOfNotNull(endpoint, sibling)
+        return if (boundTo != null) same.any { it.fingerprint == boundTo } else VaultUrl.endpointOrNull(savedLink) in same
+    }
+
+    /** The saved password if it may be sent to [endpoint]; [savedLink] is the vault link in settings. */
+    fun storedFor(secrets: SecretStore, endpoint: VaultEndpoint, savedLink: String): String? {
+        val password = secrets.get(SecretStore.VAULT_PASSWORD) ?: return null
+        return password.takeIf { fits(secrets.get(SecretStore.VAULT_PASSWORD_VAULT), endpoint, savedLink) }
+    }
+
+    /** Saves [password] for [endpoint] (null: for whichever link is saved when it is first used). */
+    fun save(secrets: SecretStore, password: String, endpoint: VaultEndpoint?) {
+        secrets.put(SecretStore.VAULT_PASSWORD, password)
+        secrets.put(SecretStore.VAULT_PASSWORD_VAULT, endpoint?.fingerprint)
+    }
+
+    /** The saved link is about to change from [oldLink]: an untied password stays with it. */
+    fun keepWith(secrets: SecretStore, oldLink: String) {
+        val old = VaultUrl.endpointOrNull(oldLink) ?: return
+        if (secrets.has(SecretStore.VAULT_PASSWORD) && !secrets.has(SecretStore.VAULT_PASSWORD_VAULT)) {
+            secrets.put(SecretStore.VAULT_PASSWORD_VAULT, old.fingerprint)
+        }
+    }
+
+    /** The same vault answers from [to] now (VaultRedirect): its password follows it. */
+    fun moved(secrets: SecretStore, from: VaultEndpoint, to: VaultEndpoint) {
+        if (secrets.get(SecretStore.VAULT_PASSWORD_VAULT) == from.fingerprint) secrets.put(SecretStore.VAULT_PASSWORD_VAULT, to.fingerprint)
+    }
+
+    fun forget(secrets: SecretStore) {
+        secrets.remove(SecretStore.VAULT_PASSWORD)
+        secrets.remove(SecretStore.VAULT_PASSWORD_VAULT)
+        secrets.remove(SecretStore.VAULT_SESSION)
+    }
+}
+
 /** Vault password and the cached session token, both in [SecretStore] (Keystore-encrypted). */
-internal class SecretVaultCredentials(private val secrets: SecretStore, private val endpoint: VaultEndpoint) : VaultCredentials {
-    override fun password(): String? = secrets.get(SecretStore.VAULT_PASSWORD)
+internal class SecretVaultCredentials(
+    private val secrets: SecretStore,
+    private val endpoint: VaultEndpoint,
+    /** The vault link in settings, for a password not tied to a link yet (see [VaultPassword]). */
+    private val savedLink: () -> String = { "" },
+) : VaultCredentials {
+    override fun password(): String? = VaultPassword.storedFor(secrets, endpoint, savedLink())
 
     override fun session(): VaultSession? = VaultSessionCodec.decode(secrets.get(SecretStore.VAULT_SESSION), endpoint.fingerprint)
 

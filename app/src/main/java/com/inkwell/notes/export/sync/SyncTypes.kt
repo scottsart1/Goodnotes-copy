@@ -94,9 +94,14 @@ interface SyncStateStore {
     var vaultCredentialsRefusedAt: Long
         get() = 0L
         set(@Suppress("UNUSED_PARAMETER") value) {}
-    /** Where the document's files were last written inside the folder destination. */
+    /**
+     * Where the document's files were last written inside the folder destination. Kept after the
+     * document is deleted (its copies stay), so no other document writes over them.
+     */
     fun folderLocation(docId: String): List<String>?
     fun setFolderLocation(docId: String, segments: List<String>?)
+    /** Every stored location, by document id. */
+    fun folderLocations(): Map<String, List<String>> = emptyMap()
 }
 
 interface NetworkState {
@@ -114,4 +119,5 @@ class InMemorySyncState : SyncStateStore {
     override fun setFolderLocation(docId: String, segments: List<String>?) {
         synchronized(locations) { if (segments == null) locations.remove(docId) else locations[docId] = segments }
     }
+    override fun folderLocations(): Map<String, List<String>> = synchronized(locations) { HashMap(locations) }
 }

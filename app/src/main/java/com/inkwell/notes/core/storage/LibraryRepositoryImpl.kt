@@ -106,7 +106,7 @@ class LibraryRepositoryImpl internal constructor(
             db.folders().upsert(next)
             if (name != cur.name || parentId != cur.parentId) docsInSubtree(tree, folder.id) else emptyList()
         }
-        affectedDocs.forEach { hooks.documentMetaChanged(it) }
+        affectedDocs.forEach { hooks.documentMoved(it) }
     }
 
     override suspend fun moveFolder(id: String, newParentId: String?) {
@@ -124,7 +124,7 @@ class LibraryRepositoryImpl internal constructor(
             db.folders().upsert(cur.copy(parentId = newParentId, name = uniqueSiblingName(cur.name, newParentId, id), modifiedAt = now))
             docsInSubtree(tree, id)
         }
-        affectedDocs.forEach { hooks.documentMetaChanged(it) }
+        affectedDocs.forEach { hooks.documentMoved(it) }
     }
 
     override suspend fun trashFolder(id: String) {
@@ -353,7 +353,7 @@ class LibraryRepositoryImpl internal constructor(
             db.documents().update(cur.copy(folderId = folderId))
             true
         }
-        if (moved) hooks.documentMetaChanged(id)
+        if (moved) hooks.documentMoved(id)
     }
 
     override suspend fun duplicateDocument(id: String): DocumentMeta {

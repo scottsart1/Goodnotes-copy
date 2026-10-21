@@ -96,5 +96,7 @@ class SecretStore(context: Context) {
         fun aiKey(provider: com.inkwell.notes.core.model.AiProviderId) = "ai.key.${provider.name}"
         const val VAULT_PASSWORD = "vault.password"
         const val VAULT_SESSION = "vault.session"
+        /** Fingerprint of the vault link [VAULT_PASSWORD] was entered for (see VaultPassword). */
+        const val VAULT_PASSWORD_VAULT = "vault.password.vault"
     }
 }
