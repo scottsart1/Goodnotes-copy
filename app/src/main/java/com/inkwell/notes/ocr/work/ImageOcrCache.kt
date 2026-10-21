@@ -73,6 +73,30 @@ internal class ImageOcrCache(private val dir: File) {
         }
     }
 
+    /**
+     * Copies the results of [docId] whose key starts with [keyPrefix] and that were stored for
+     * [fromSize] so they are found under [toSize] as well. Used when a file is replaced by a
+     * larger one that keeps the earlier items unchanged (pages appended to a source PDF); the
+     * old entries stay valid until the replacement lands and are dropped by the next [put].
+     */
+    suspend fun copySize(docId: String, keyPrefix: String, fromSize: Long, toSize: Long) = withContext(Dispatchers.IO) {
+        if (fromSize <= 0 || toSize <= 0 || fromSize == toSize) return@withContext
+        val prefix = "${FileStore.safe(docId)}$SEP${FileStore.safe(keyPrefix)}"
+        val suffix = "$SEP$fromSize.json"
+        lock.withLock {
+            try {
+                dir.listFiles()?.filter { it.name.startsWith(prefix) && it.name.endsWith(suffix) }?.forEach { f ->
+                    val target = File(dir, f.name.removeSuffix(suffix) + "$SEP$toSize.json")
+                    val bytes = f.readBytes()
+                    FileStore.writeAtomically(target, keepBackup = false) { it.write(bytes) }
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Could not carry OCR results over: ${e.javaClass.simpleName}")
+            }
+        }
+        Unit
+    }
+
     /** Forgets a document's cached results (when it is deleted). */
     suspend fun removeDocument(docId: String) = withContext(Dispatchers.IO) {
         val prefix = "${FileStore.safe(docId)}$SEP"
@@ -97,6 +121,8 @@ internal class ImageOcrCache(private val dir: File) {
         private const val SEP = "__"
         /** Folder under noBackupFilesDir. */
         const val DIR = "ocr-cache"
+        /** Key prefix of scanned source-PDF pages ("pdfpage-<pdf page index>"). */
+        const val PDF_PAGE_KEY = "pdfpage-"
         /** Cache I/O is tiny; one lock for the process keeps workers from interleaving writes. */
         private val lock = Mutex()
         /** Images smaller than this (px, longest edge) carry no readable text. */

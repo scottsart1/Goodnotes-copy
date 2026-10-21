@@ -178,6 +178,9 @@ class PdfServiceImpl(private val graph: AppGraph) : PdfService {
     /** [pageText], but null when the text could not be read for now (see [PdfTextExtractor.pageTextOrNull]). */
     internal suspend fun pageTextOrNull(docId: String, pdfPageIndex: Int): String? = text.pageTextOrNull(docId, pdfPageIndex)
 
+    /** True when [docId]'s text layer keeps running out of memory (see [PdfTextExtractor.givenUp]). */
+    internal suspend fun pageTextGivenUp(docId: String): Boolean = text.givenUp(docId)
+
     // ------------------------------------------------------------------ page operations
 
     override suspend fun insertPdf(docId: String, uri: Uri, atIndex: Int?) {
@@ -192,6 +195,7 @@ class PdfServiceImpl(private val graph: AppGraph) : PdfService {
             sourceLocks.getOrPut(docId) { Mutex() }.withLock {
                 val source = files.sourcePdf(docId)
                 val existingCount = existingPdfPageCount(docId, source)
+                val oldSize = source.length()
                 val replacement = if (existingCount > 0) {
                     appendPdf(source, incoming, existingCount, newSizes.size).also { merged = it }
                 } else {
@@ -200,6 +204,15 @@ class PdfServiceImpl(private val graph: AppGraph) : PdfService {
                 }
                 // Once the file is swapped, the pages must follow: no cancellation in between.
                 withContext(NonCancellable) {
+                    if (existingCount > 0) {
+                        // Existing pages keep their indices: their OCR stays valid for the new file.
+                        val newSize = replacement.length()
+                        try {
+                            graph.indexing.sourcePdfAppending(docId, oldSize, newSize)
+                        } catch (e: Exception) {
+                            Log.w(TAG, "Keeping OCR results failed (${e.javaClass.simpleName})")
+                        }
+                    }
                     engine.replaceSource(docId, replacement)
                     text.invalidate(docId)
                     val plan = PdfPageMapping.insertPlan(existingCount, newSizes.size, atIndex, library.getPages(docId).size)

@@ -97,6 +97,33 @@ class OcrCacheAndHitsTest {
     }
 
     @Test
+    fun scannedPageResultsSurviveAppendingPagesToTheSourcePdf() = runTest {
+        val dir = tmp.newFolder("cache")
+        val cache = ImageOcrCache(dir)
+        val ai = CachedImageOcr("ai:OPENAI:gpt-4o", listOf(CachedImageOcr.CachedBlock("Paid for", listOf(0f, 0f, 1f, 1f))))
+        val tried = result.copy(aiTried = true)
+        cache.put("d", "${ImageOcrCache.PDF_PAGE_KEY}0", 1000, ai)
+        cache.put("d", "${ImageOcrCache.PDF_PAGE_KEY}1", 1000, tried)
+        cache.put("d", "asset-a.png", 1000, result)
+        cache.put("other", "${ImageOcrCache.PDF_PAGE_KEY}0", 1000, result)
+
+        cache.copySize("d", ImageOcrCache.PDF_PAGE_KEY, 1000, 1500)
+
+        // Found under the new source size, with the AI result and the "already tried" marker intact.
+        assertEquals(ai, cache.get("d", "${ImageOcrCache.PDF_PAGE_KEY}0", 1500))
+        assertEquals(tried, cache.get("d", "${ImageOcrCache.PDF_PAGE_KEY}1", 1500))
+        // Still valid under the old size until the new file lands.
+        assertEquals(ai, cache.get("d", "${ImageOcrCache.PDF_PAGE_KEY}0", 1000))
+        // Only this document's scanned pages are carried over.
+        assertNull(cache.get("d", "asset-a.png", 1500))
+        assertNull(cache.get("other", "${ImageOcrCache.PDF_PAGE_KEY}0", 1500))
+        // The next result for a page replaces both copies.
+        cache.put("d", "${ImageOcrCache.PDF_PAGE_KEY}0", 1500, result)
+        assertNull(cache.get("d", "${ImageOcrCache.PDF_PAGE_KEY}0", 1000))
+        assertEquals(result, cache.get("d", "${ImageOcrCache.PDF_PAGE_KEY}0", 1500))
+    }
+
+    @Test
     fun concurrentWritersOfTheSameItemLeaveOneReadableFile() = runTest {
         val dir = tmp.newFolder("cache")
         // Each worker has its own cache instance over the same folder.

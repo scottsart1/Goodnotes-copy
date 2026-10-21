@@ -225,9 +225,13 @@ internal class DocumentAssembler(
     /**
      * Copies ink and other items plus the image files they reference. Returns false for empty pages.
      * Audio links are dropped: the recordings belong to the source document.
+     *
+     * A page whose stored content cannot be read throws [com.inkwell.notes.core.storage.UnreadablePageException]
+     * instead of being copied as blank, so the operation is abandoned and a split never deletes
+     * the only (possibly recoverable) copy of that page.
      */
     private suspend fun copyContent(fromDoc: String, fromPage: String, toDoc: String, toPage: String): Boolean {
-        val content = graph.pageStore.load(fromDoc, fromPage)
+        val content = graph.pageStore.load(fromDoc, fromPage, strict = true)
         if (content.isEmpty) return false
         withContext(Dispatchers.IO) {
             for (assetId in content.images.map { it.assetId }.distinct()) {

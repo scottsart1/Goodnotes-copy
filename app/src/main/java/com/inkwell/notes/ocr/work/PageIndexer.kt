@@ -108,8 +108,15 @@ internal class PageIndexer(private val graph: AppGraph) {
                 null
             }
             if (layer == null) {
-                // Not "no text layer": keep the page's PDF text and OCR rows and try again later.
-                pdfTextFailed = true
+                // Not "no text layer": keep the page's PDF text and OCR rows and try again later,
+                // unless there is nothing to keep or the file keeps running out of memory.
+                val pdf = graph.pdf
+                val givenUp = pdf is PdfServiceImpl && pdf.pageTextGivenUp(realDocId)
+                if (!PdfTextFallback.ocrInstead(indexedBefore = pageEntity.indexedAt > 0, givenUp = givenUp)) {
+                    pdfTextFailed = true
+                } else if (ocrPrefs.autoOcrImports) {
+                    ocr += scannedPageEntries(realDocId, page, pdfIndex)
+                }
             } else if (layer.trim().length >= MIN_PDF_TEXT_CHARS) {
                 pdfText = TextSplitter.passages(layer).map { IndexEntry(it, null, null, ENGINE_PDF_TEXT) }
             } else if (ocrPrefs.autoOcrImports) {
@@ -313,7 +320,7 @@ internal class PageIndexer(private val graph: AppGraph) {
         const val MIN_PDF_TEXT_CHARS = 20
         const val ENGINE_PDF_TEXT = "pdf-text"
         const val ENGINE_TYPED = "typed"
-        private const val PDF_PAGE_KEY = "pdfpage-"
+        private const val PDF_PAGE_KEY = ImageOcrCache.PDF_PAGE_KEY
         private const val IMAGE_KEY = "asset-"
         private val WHOLE = listOf(0f, 0f, 1f, 1f)
 

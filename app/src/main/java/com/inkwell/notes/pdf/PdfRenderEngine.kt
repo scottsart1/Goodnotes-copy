@@ -137,25 +137,27 @@ internal class PdfRenderEngine(
      * on-screen renders queued meanwhile are not held up by a long document.
      */
     suspend fun probe(file: File): Probe {
+        // A caller cancelled before this point never opens anything.
+        currentCoroutineContext().ensureActive()
         var failure: Probe = Probe.Damaged
-        // Not cancellable, so an opened renderer always reaches the finally below that closes it.
-        val handle = withContext(NonCancellable + dispatcher) {
-            var descriptor: ParcelFileDescriptor? = null
-            try {
-                descriptor = ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY)
-                ProbeHandle(descriptor, PdfRenderer(descriptor))
-            } catch (e: SecurityException) {
-                failure = Probe.Locked
-                runCatching { descriptor?.close() }
-                null
-            } catch (e: Exception) {
-                Log.w(TAG, "PDF probe failed (${e.javaClass.simpleName})")
-                runCatching { descriptor?.close() }
-                null
-            }
-        } ?: return failure
+        // Set on the render thread as soon as the renderer exists. withContext drops its result
+        // when the caller is cancelled meanwhile, so the finally below closes it from here.
+        var opened: ProbeHandle? = null
         try {
-            currentCoroutineContext().ensureActive()
+            withContext<Unit>(dispatcher) {
+                var descriptor: ParcelFileDescriptor? = null
+                try {
+                    descriptor = ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY)
+                    opened = ProbeHandle(descriptor, PdfRenderer(descriptor))
+                } catch (e: SecurityException) {
+                    failure = Probe.Locked
+                    runCatching { descriptor?.close() }
+                } catch (e: Exception) {
+                    Log.w(TAG, "PDF probe failed (${e.javaClass.simpleName})")
+                    runCatching { descriptor?.close() }
+                }
+            }
+            val handle = opened ?: return failure
             val count = handle.pageCount
             val sizes = ArrayList<Pair<Float, Float>>(count)
             while (sizes.size < count) {
@@ -173,9 +175,11 @@ internal class PdfRenderEngine(
             Log.w(TAG, "Reading pages failed (${e.javaClass.simpleName})")
             return Probe.Damaged
         } finally {
-            withContext(NonCancellable + dispatcher) {
-                runCatching { handle.renderer.close() }
-                runCatching { handle.descriptor.close() }
+            opened?.let { handle ->
+                withContext(NonCancellable + dispatcher) {
+                    runCatching { handle.renderer.close() }
+                    runCatching { handle.descriptor.close() }
+                }
             }
         }
     }

@@ -70,4 +70,11 @@ interface IndexingScheduler {
     fun documentMetaChanged(docId: String)
     /** Re-index everything (settings action). */
     fun reindexAll()
+
+    /**
+     * [docId]'s source PDF of [oldSize] bytes is about to be replaced by one of [newSize] bytes
+     * that keeps every existing page at its index (pages were appended). Recognition results of
+     * those pages stay valid, so scanned pages are not OCRed (or AI-transcribed, at a cost) again.
+     */
+    suspend fun sourcePdfAppending(docId: String, oldSize: Long, newSize: Long) {}
 }
