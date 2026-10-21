@@ -158,23 +158,31 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    /** Gives the app itself read access to [uri], beyond this activity's life; false when not possible or not needed. */
+    /**
+     * Gives the app itself read access to [uri], beyond this activity's life; false when not possible or not needed.
+     * The app holds one grant per URI, so imports of the same file share it: it is counted, and only the
+     * last [releaseReadGrant] revokes it.
+     */
     private fun holdReadGrant(app: Context, uri: Uri): Boolean {
         if (uri.scheme != ContentResolver.SCHEME_CONTENT) return false
-        return try {
-            app.grantUriPermission(app.packageName, uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            true
-        } catch (e: Exception) {
-            // Nothing to pass on (e.g. readable without a grant): it is read under the activity's grant.
-            false
+        return readGrants.acquire(uri) {
+            try {
+                app.grantUriPermission(app.packageName, uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                true
+            } catch (e: Exception) {
+                // Nothing to pass on (e.g. readable without a grant): it is read under the activity's grant.
+                false
+            }
         }
     }
 
     private fun releaseReadGrant(app: Context, uri: Uri) {
-        try {
-            app.revokeUriPermission(app.packageName, uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
-        } catch (e: Exception) {
-            Log.w("MainActivity", "Read grant not released (${e.javaClass.simpleName})")
+        readGrants.release(uri) {
+            try {
+                app.revokeUriPermission(app.packageName, uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            } catch (e: Exception) {
+                Log.w("MainActivity", "Read grant not released (${e.javaClass.simpleName})")
+            }
         }
     }
 
@@ -190,7 +198,43 @@ class MainActivity : AppCompatActivity() {
         /** Opens the document whose id is in [EXTRA_DOC_ID]. */
         const val ACTION_OPEN_DOCUMENT = "com.inkwell.notes.OPEN_DOCUMENT"
         const val EXTRA_DOC_ID = "docId"
+
+        /** In-flight imports holding the app's own read grant, per URI (process-wide: a re-share can reach another activity). */
+        private val readGrants = RefCounts<Uri>()
     }
+}
+
+/**
+ * Reference counts for a resource held once per key: [acquire] runs its action for the first
+ * holder only and [release] runs its action for the last one, both under the lock so a grant
+ * and a revoke for the same key cannot interleave.
+ */
+internal class RefCounts<K> {
+    private val counts = HashMap<K, Int>()
+
+    /** Takes a reference to [key]; [first] (run for the first one only) says whether the resource could be taken. False leaves nothing held. */
+    @Synchronized
+    fun acquire(key: K, first: () -> Boolean): Boolean {
+        val n = counts[key] ?: 0
+        if (n == 0 && !first()) return false
+        counts[key] = n + 1
+        return true
+    }
+
+    /** Drops a reference to [key]; [last] runs when it was the last one. Keys not held are ignored. */
+    @Synchronized
+    fun release(key: K, last: () -> Unit) {
+        val n = counts[key] ?: return
+        if (n <= 1) {
+            counts.remove(key)
+            last()
+        } else {
+            counts[key] = n - 1
+        }
+    }
+
+    @Synchronized
+    fun count(key: K): Int = counts[key] ?: 0
 }
 
 /** How files shared with or opened in the app are imported, and what the user is told after. */

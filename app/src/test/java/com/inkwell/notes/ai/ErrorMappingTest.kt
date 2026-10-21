@@ -128,4 +128,15 @@ class ErrorMappingTest {
         assertEquals("https://api.openai.com/v1", Endpoints.resolve("https://api.openai.com/v1/", "  "))
         assertEquals("https://api.moonshot.cn/v1", Endpoints.resolve("https://api.moonshot.ai/v1", "https://api.moonshot.cn/v1"))
     }
+
+    @Test fun aForbiddenCheckClearsOnlyTheStale403Flag() {
+        // A 403 on the key check (possibly a region or proxy block) must not clear a flag a 401 set.
+        val rejected = ErrorMapper.http(p, 401, """{"error":{"message":"Incorrect API key"}}""").message
+        assertFalse(AiServiceImpl.isStaleForbiddenFlag(rejected))
+        // Older builds stored the 403 message as "Invalid": that one is cleared.
+        val forbidden = ErrorMapper.http(p, 403, """{"error":{"message":"unsupported_country_region_territory"}}""").message
+        assertTrue(AiServiceImpl.isStaleForbiddenFlag(forbidden))
+        assertTrue(AiServiceImpl.isStaleForbiddenFlag("Anthropic refused access to this model."))
+        assertFalse(AiServiceImpl.isStaleForbiddenFlag(null))
+    }
 }
