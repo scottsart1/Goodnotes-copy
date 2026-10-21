@@ -171,6 +171,9 @@ class PdfServiceImpl(private val graph: AppGraph) : PdfService {
 
     override suspend fun pageText(docId: String, pdfPageIndex: Int): String = text.pageText(docId, pdfPageIndex)
 
+    /** [pageText], but null when the text could not be read for now (see [PdfTextExtractor.pageTextOrNull]). */
+    internal suspend fun pageTextOrNull(docId: String, pdfPageIndex: Int): String? = text.pageTextOrNull(docId, pdfPageIndex)
+
     // ------------------------------------------------------------------ page operations
 
     override suspend fun insertPdf(docId: String, uri: Uri, atIndex: Int?) {
