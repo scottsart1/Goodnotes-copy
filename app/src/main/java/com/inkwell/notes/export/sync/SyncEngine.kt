@@ -111,8 +111,8 @@ class SyncEngine(
      * - Folder (only when it holds copies of the document): one output is written again in the new
      *   directory, and [Placement.finishMove] moves the rest there: the notes when they go to the
      *   folder, otherwise one transcript, otherwise one recording.
-     * - Vault (only when notes go there): the title and folder path of a document the vault
-     *   already has, sent with its current note text (see [vaultMetadataTargets]).
+     * - Vault: the title and folder path of a document the vault already has, with its current
+     *   note text, or the text the vault stores when notes don't go there (see [vaultMetadataTargets]).
      */
     suspend fun enqueueMoved(docId: String, prefs: DestinationPrefs = this.prefs()): Int {
         var n = 0
@@ -509,9 +509,9 @@ class SyncEngine(
         val client = ctx.vault()
         val id = VaultNames.docId(doc.id)
         if (!vaultHasDoc(client, id, ctx)) return Outcome.Skipped
-        // The upsert replaces the text as well, so it is sent again (metadata items only go to
-        // the vault while notes do: see vaultMetadataTargets).
-        val markdown = ctx.markdown(doc.id)
+        // The upsert replaces the text as well: send the current notes, or, when notes don't go to
+        // the vault, the text it already stores (an earlier Notes -> Vault setting left it there).
+        val markdown = if (OutputTarget.VAULT in ctx.prefs.notes) ctx.markdown(doc.id) else client.storedMarkdown(id) ?: return Outcome.Skipped
         val writtenAt = clock()
         client.putDoc(id, SyncPayloads.docUpsert(doc, source.folderPath(doc.folderId), markdown))
         ctx.vaultDocWrittenAt[doc.id] = writtenAt

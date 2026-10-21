@@ -117,6 +117,7 @@ internal fun StorageSettingsScreen(modifier: Modifier = Modifier) {
                 VaultCard(
                     prefs = prefs,
                     hasPassword = vm.hasPassword,
+                    hasAnyPassword = vm.hasAnyPassword,
                     check = vm.vaultCheck,
                     onUrlChanged = vm::onUrlChanged,
                     onUrlCommit = vm::commitUrl,

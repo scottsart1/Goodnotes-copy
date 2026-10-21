@@ -78,7 +78,7 @@ internal class PdfTextExtractor(
                         endPage = pdfPageIndex + 1
                         lineSeparator = "\n"
                     }
-                    PdfText.normalize(stripper.getText(doc))
+                    PdfText.normalize(stripper.getText(doc)).also { outOfMemoryFailures.recordSuccess(docId) }
                 } catch (e: Exception) {
                     // Broken content streams or fonts: OCR covers the page instead.
                     Log.w(TAG, "Text extraction failed for a page (${e.javaClass.simpleName})")

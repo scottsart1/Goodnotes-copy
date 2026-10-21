@@ -87,6 +87,15 @@ class VaultClient(
         missingIsAnswer = true,
     ) { r -> r.code != 404 }
 
+    /**
+     * `GET api/docs/{docId}`: the note text the vault stores for the document, or null when the
+     * vault does not have it (or did not say).
+     */
+    suspend fun storedMarkdown(docId: String): String? = authorized(
+        build = { token -> Request.Builder().url(endpoint.api("docs", docId)).get().header("Accept", "application/json").bearer(token).build() },
+        missingIsAnswer = true,
+    ) { r -> if (r.code == 404) null else decode(r, VaultStoredDoc.serializer()).markdown }
+
     /** `PUT api/docs/{docId}` with a [VaultDocUpsert]. */
     suspend fun putDoc(docId: String, doc: VaultDocUpsert) {
         val json = VaultJson.encodeToString(VaultDocUpsert.serializer(), doc)

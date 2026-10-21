@@ -91,6 +91,8 @@ internal fun FolderCard(
 internal fun VaultCard(
     prefs: DestinationPrefs,
     hasPassword: Boolean,
+    /** A password is saved, perhaps for another vault link: Forget still removes it. */
+    hasAnyPassword: Boolean = hasPassword,
     check: CheckState,
     onUrlChanged: (String) -> Unit,
     onUrlCommit: (String) -> Unit,
@@ -193,7 +195,7 @@ internal fun VaultCard(
                 }, enabled = normalized != null)
                 Icon(Icons.AutoMirrored.Outlined.OpenInNew, null, Modifier.size(16.dp), tint = if (normalized != null) c.accent else c.inkMuted)
             }
-            if (hasPassword) QuietAction(stringResource(R.string.sync_vault_forget), { password = ""; onForgetPassword() }, color = c.danger)
+            if (hasPassword || hasAnyPassword) QuietAction(stringResource(R.string.sync_vault_forget), { password = ""; onForgetPassword() }, color = c.danger)
         }
         CheckResult(check)
         val usesVault = prefs.hasAnyTarget && (OutputTarget.VAULT in prefs.notes || OutputTarget.VAULT in prefs.transcripts || OutputTarget.VAULT in prefs.audio)

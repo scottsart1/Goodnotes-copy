@@ -155,17 +155,22 @@ class SyncEngineMoveTest {
     }
 
     @Test
-    fun `with only transcripts in the vault a move leaves the vault's stored notes alone`() = runBlocking {
-        // Notes went to the vault before; the upsert would replace their text with nothing.
+    fun `with only transcripts in the vault a move updates the place and keeps the vault's stored notes`() = runBlocking {
+        // Notes went to the vault before; the upsert must send their text back, not nothing.
         vault.docIds += d.id
+        vault.markdowns[d.id] = "# Notes the vault keeps"
         val prefs = DestinationPrefs(transcripts = setOf(OutputTarget.VAULT), vaultUrl = vaultUrl)
         val h = harness(prefs)
         h.move()
-        assertEquals(0, h.engine.enqueueMoved(d.id, prefs))
+        assertEquals(1, h.engine.enqueueMoved(d.id, prefs))
         h.engine.run()
 
-        assertTrue(vault.requests.isEmpty())
-        assertTrue(h.dao.all.isEmpty())
+        val put = FakeVault.jsonOf(vault.requests.last())
+        assertEquals("PUT /api/docs/${d.id}", vault.calls().last())
+        assertEquals("# Notes the vault keeps", put["markdown"]?.jsonPrimitive?.content)
+        assertEquals("# Notes the vault keeps", vault.markdowns[d.id])
+        assertEquals(0, h.source.pdfExports)
+        assertTrue(h.dao.pendingRows().isEmpty())
     }
 
     @Test
@@ -212,31 +217,30 @@ class SyncEngineMoveTest {
     }
 
     @Test
-    fun `a metadata update is dropped once notes no longer go to the vault`() = runBlocking {
+    fun `a metadata update is dropped once nothing goes to the vault`() = runBlocking {
         vault.docIds += d.id
         val prefs = DestinationPrefs(notes = setOf(OutputTarget.VAULT), transcripts = setOf(OutputTarget.VAULT), vaultUrl = vaultUrl)
         val h = harness(prefs)
         assertEquals(1, h.engine.enqueueMoved(d.id, prefs))
-        // Transcripts still go to the vault: a metadata-only upsert would erase its stored notes.
-        h.prefs = prefs.copy(notes = emptySet())
+        h.prefs = prefs.copy(notes = emptySet(), transcripts = emptySet())
         h.engine.run()
         assertTrue(vault.requests.isEmpty())
         assertTrue(h.dao.pendingRows().isEmpty())
     }
 
     @Test
-    fun `metadata updates go to the vault while notes do`() {
+    fun `metadata updates go to the vault while anything does`() {
         val none = DestinationPrefs()
         assertEquals(emptySet<OutputTarget>(), none.vaultMetadataTargets())
         assertEquals(setOf(OutputTarget.VAULT), none.copy(notes = setOf(OutputTarget.VAULT)).vaultMetadataTargets())
-        assertEquals(emptySet<OutputTarget>(), none.copy(audio = setOf(OutputTarget.VAULT)).vaultMetadataTargets())
+        assertEquals(setOf(OutputTarget.VAULT), none.copy(audio = setOf(OutputTarget.VAULT)).vaultMetadataTargets())
         assertEquals(emptySet<OutputTarget>(), none.copy(notes = setOf(OutputTarget.FOLDER)).vaultMetadataTargets())
         assertEquals(
             setOf(OutputTarget.VAULT),
             SyncEngine.targetsFor(SyncKind.NOTES, SyncEngine.VAULT_METADATA_REF, none.copy(notes = setOf(OutputTarget.VAULT))),
         )
         assertEquals(
-            emptySet<OutputTarget>(),
+            setOf(OutputTarget.VAULT),
             SyncEngine.targetsFor(SyncKind.NOTES, SyncEngine.VAULT_METADATA_REF, none.copy(transcripts = setOf(OutputTarget.VAULT))),
         )
         assertEquals(emptySet<OutputTarget>(), SyncEngine.targetsFor(SyncKind.NOTES, null, none.copy(transcripts = setOf(OutputTarget.VAULT))))

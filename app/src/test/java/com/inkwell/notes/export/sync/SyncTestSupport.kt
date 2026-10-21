@@ -257,6 +257,8 @@ class FakeVault(
     val requests = CopyOnWriteArrayList<RecordedRequest>()
     val issuedTokens = CopyOnWriteArrayList<String>()
     val docIds = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+    /** Note text the vault stores per document (from PUT api/docs/{id}). */
+    val markdowns = java.util.concurrent.ConcurrentHashMap<String, String>()
     /** Tokens the server accepts. Clear it to simulate an expired/invalidated session. */
     val validTokens = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
     @Volatile var lockedSeconds: Long? = null
@@ -311,11 +313,19 @@ class FakeVault(
             rest == "/api/ping" && r.method == "GET" -> json(200, """{"ok":true,"name":"Your Pit Box · Notes"}""")
             rest == "/api/docs" && r.method == "GET" -> json(200, """{"docs":[${docIds.joinToString(",") { """{"id":"$it","title":"t","kind":"NOTEBOOK"}""" }}]}""")
             rest.startsWith("/api/docs/") && r.method == "GET" && rest.removePrefix("/api/docs/").none { it == '/' } ->
-                if (rest.removePrefix("/api/docs/") in docIds) json(200, """{"id":"${rest.removePrefix("/api/docs/")}","title":"t","kind":"NOTEBOOK"}""")
+                if (rest.removePrefix("/api/docs/") in docIds) {
+                    val id = rest.removePrefix("/api/docs/")
+                    val md = kotlinx.serialization.json.JsonPrimitive(markdowns[id].orEmpty()).toString()
+                    json(200, """{"id":"$id","title":"t","kind":"NOTEBOOK","markdown":$md}""")
+                }
                 else json(404, """{"error":"not_found"}""")
             rest.startsWith("/api/docs/") && r.method == "PUT" -> {
                 val parts = rest.removePrefix("/api/docs/").split("/")
                 docIds += parts[0]
+                if (parts.size == 1) {
+                    val md = runCatching { Json.parseToJsonElement(r.body.clone().readUtf8()).jsonObject["markdown"] }.getOrNull()
+                    markdowns[parts[0]] = (md as? kotlinx.serialization.json.JsonPrimitive)?.content.orEmpty()
+                }
                 if (parts.size == 3 && parts[1] == "files" && r.getHeader("Content-Length") == null) json(411, """{"error":"length_required"}""")
                 else json(200, """{"ok":true}""")
             }

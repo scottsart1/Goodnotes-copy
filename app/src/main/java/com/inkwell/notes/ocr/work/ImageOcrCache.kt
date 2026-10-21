@@ -56,9 +56,15 @@ internal class ImageOcrCache(private val dir: File) {
         }
     }
 
-    suspend fun put(docId: String, key: String, size: Long, value: CachedImageOcr) = withContext(Dispatchers.IO) {
-        lock.withLock { write(docId, key, size, value) }
-    }
+    /**
+     * Stores [value] for [size]. [stillCurrent] is checked under the cache lock, right before the
+     * write: a result for a file that was replaced meanwhile is dropped instead of deleting what
+     * [copySize] carried over to the new file.
+     */
+    suspend fun put(docId: String, key: String, size: Long, value: CachedImageOcr, stillCurrent: () -> Boolean = { true }) =
+        withContext(Dispatchers.IO) {
+            lock.withLock { if (stillCurrent()) write(docId, key, size, value) }
+        }
 
     private fun write(docId: String, key: String, size: Long, value: CachedImageOcr) {
         try {

@@ -297,14 +297,17 @@ internal class PageIndexer(private val graph: AppGraph) {
         }
         // The source may have been replaced meanwhile (pages inserted): storing under the old size
         // would delete the result carried over to the new file, so it would be OCRed (and paid
-        // for) again. Store only while the file is still the one this page was read from.
-        if (sourceSize > 0 && sourceSize == sourcePdfSize(docId)) imageCache.put(docId, key, sourceSize, result)
+        // for) again. Store only while the file is still the one this page was read from, checked
+        // under the cache lock that copySize also holds.
+        if (sourceSize > 0) imageCache.put(docId, key, sourceSize, result) { sourceSize == sourcePdfSizeNow(docId) }
         return pageEntries(result, page)
     }
 
     /** Size of [docId]'s source PDF (0 when it has none), the version key of scanned-page results. */
-    private suspend fun sourcePdfSize(docId: String): Long =
-        withContext(Dispatchers.IO) { graph.files.sourcePdf(docId).let { if (it.exists()) it.length() else 0L } }
+    private suspend fun sourcePdfSize(docId: String): Long = withContext(Dispatchers.IO) { sourcePdfSizeNow(docId) }
+
+    /** [sourcePdfSize] on the calling thread (already on IO). */
+    private fun sourcePdfSizeNow(docId: String): Long = graph.files.sourcePdf(docId).let { if (it.exists()) it.length() else 0L }
 
     private fun normalised(text: String, b: FloatArray, w: Float, h: Float, confidence: Float?) =
         CachedImageOcr.CachedBlock(text, listOf(b[0] / w, b[1] / h, b[2] / w, b[3] / h), confidence)

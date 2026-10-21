@@ -204,16 +204,18 @@ class PdfServiceImpl(private val graph: AppGraph) : PdfService {
                 }
                 // Once the file is swapped, the pages must follow: no cancellation in between.
                 withContext(NonCancellable) {
+                    val newSize = replacement.length()
+                    engine.replaceSource(docId, replacement)
                     if (existingCount > 0) {
                         // Existing pages keep their indices: their OCR stays valid for the new file.
-                        val newSize = replacement.length()
+                        // Carried over after the swap, so a result an indexer stores for the old
+                        // size meanwhile is either copied too or dropped (ImageOcrCache.put).
                         try {
                             graph.indexing.sourcePdfAppending(docId, oldSize, newSize)
                         } catch (e: Exception) {
                             Log.w(TAG, "Keeping OCR results failed (${e.javaClass.simpleName})")
                         }
                     }
-                    engine.replaceSource(docId, replacement)
                     text.invalidate(docId)
                     val plan = PdfPageMapping.insertPlan(existingCount, newSizes.size, atIndex, library.getPages(docId).size)
                     library.addPdfPages(docId, newSizes, firstPdfIndex = plan.firstPdfIndex, atIndex = plan.atPageIndex)

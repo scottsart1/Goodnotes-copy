@@ -61,6 +61,29 @@ class PdfTextOutOfMemoryTest {
         assertTrue(oom.givenUp("e", 100, 1, pdfPageIndex = 0))
     }
 
+    @Test fun aFileWhosePagesRunOutOfMemoryOneAfterAnotherIsGivenUpAsAWhole() {
+        val oom = PdfTextOutOfMemory()
+        // A heavy resource every page shares: pages 0, 1 and 2 each run out of memory once.
+        oom.record("d", 100, 1, pdfPageIndex = 0)
+        oom.record("d", 100, 1, pdfPageIndex = 1)
+        assertFalse(oom.givenUp("d", 100, 1, pdfPageIndex = 7))
+        oom.record("d", 100, 1, pdfPageIndex = 2)
+        assertTrue(oom.givenUp("d", 100, 1))
+        assertTrue(oom.givenUp("d", 100, 1, pdfPageIndex = 7))
+        // Another version of the file starts again.
+        assertFalse(oom.givenUp("d", 100, 2, pdfPageIndex = 7))
+    }
+
+    @Test fun aPageReadInBetweenKeepsTheFileAlive() {
+        val oom = PdfTextOutOfMemory()
+        oom.record("d", 100, 1, pdfPageIndex = 0)
+        oom.record("d", 100, 1, pdfPageIndex = 1)
+        oom.recordSuccess("d")
+        oom.record("d", 100, 1, pdfPageIndex = 5)
+        assertFalse(oom.givenUp("d", 100, 1))
+        assertFalse(oom.givenUp("d", 100, 1, pdfPageIndex = 6))
+    }
+
     @Test fun givenUpPagesKeepTheirPdfTextWhenNothingWouldReplaceIt() {
         // The failure may pass and there are rows to keep: retry later.
         assertEquals(PdfTextFallback.Plan.RETRY_LATER, PdfTextFallback.plan(indexedBefore = true, givenUp = false, autoOcr = true))

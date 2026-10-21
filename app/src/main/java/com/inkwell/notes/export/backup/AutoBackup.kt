@@ -62,11 +62,15 @@ internal class BackupPrefs(context: Context) {
         get() = prefs.getString(KEY_LAST_COMPLETE, null)
         set(value) { prefs.edit().putString(KEY_LAST_COMPLETE, value).apply() }
 
-    /** Forgets how earlier runs went (they were for another folder, or auto-backup is off). */
+    /**
+     * Forgets how earlier runs went (they were for another folder, or auto-backup is off). The
+     * name of the last complete backup stays: pruning only matches it inside the folder it prunes,
+     * and forgetting it would let partial runs prune the only complete backup away.
+     */
     fun resetRunStatus() {
         prefs.edit()
             .remove(KEY_LAST_RUN).remove(KEY_LAST_FAILED).remove(KEY_LAST_SKIPPED)
-            .remove(KEY_LAST_OK).remove(KEY_LAST_COMPLETE)
+            .remove(KEY_LAST_OK)
             .apply()
     }
 
