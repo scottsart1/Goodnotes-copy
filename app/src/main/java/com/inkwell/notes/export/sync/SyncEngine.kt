@@ -116,7 +116,7 @@ class SyncEngine(
     suspend fun enqueueMoved(docId: String, prefs: DestinationPrefs = this.prefs()): Int {
         var n = 0
         val folder = setOf(OutputTarget.FOLDER)
-        if (state.folderLocation(docId) != null) {
+        if (state.folderLocation(prefs.folderUri.orEmpty(), docId) != null) {
             if (OutputTarget.FOLDER in prefs.notes) {
                 n += enqueue(docId, SyncKind.NOTES, folder)
             } else if (OutputTarget.FOLDER in prefs.transcripts || OutputTarget.FOLDER in prefs.audio) {

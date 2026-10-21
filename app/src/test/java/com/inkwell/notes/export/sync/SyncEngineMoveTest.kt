@@ -159,7 +159,7 @@ class SyncEngineMoveTest {
             notes = setOf(OutputTarget.VAULT, OutputTarget.FOLDER), vaultUrl = vaultUrl, folderUri = folderUri,
         )
         val h = harness(prefs)
-        h.state.setFolderLocation(d.id, listOf("Inkwell", "Economics", "Term 1", d.title))
+        h.state.setFolderLocation(folderUri, d.id, listOf("Inkwell", "Economics", "Term 1", d.title))
         h.move()
         h.engine.enqueueMoved(d.id, prefs)
         assertEquals(
