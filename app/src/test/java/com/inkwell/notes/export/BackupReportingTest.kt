@@ -1,5 +1,6 @@
 package com.inkwell.notes.export
 
+import com.inkwell.notes.export.backup.AutoBackupStatus
 import com.inkwell.notes.export.format.RowSlices
 import com.inkwell.notes.export.sync.ui.BackupJobs
 import org.junit.Assert.assertEquals
@@ -16,6 +17,14 @@ class BackupReportingTest {
         assertEquals("None of the documents in the backup could be restored.", BackupJobs.restoreMessage(0, 4))
         assertEquals("", BackupJobs.skippedNote(0, "backed up"))
         assertEquals(" 3 documents could not be backed up.", BackupJobs.skippedNote(3, "backed up"))
+    }
+
+    @Test fun automaticBackupsThatLeaveDocumentsOutAreShown() {
+        assertEquals(AutoBackupStatus.Problem.NONE, AutoBackupStatus().problem)
+        assertEquals(AutoBackupStatus.Problem.NONE, AutoBackupStatus(lastRunAt = 5, lastSuccessAt = 5).problem)
+        // A run that skipped documents says how many; one that failed outright says so.
+        assertEquals(AutoBackupStatus.Problem.SKIPPED, AutoBackupStatus(lastRunAt = 9, lastSuccessAt = 5, lastFailed = true, lastSkipped = 2).problem)
+        assertEquals(AutoBackupStatus.Problem.FAILED, AutoBackupStatus(lastRunAt = 9, lastSuccessAt = 5, lastFailed = true).problem)
     }
 
     @Test fun reportsDefaultToNothingSkipped() {

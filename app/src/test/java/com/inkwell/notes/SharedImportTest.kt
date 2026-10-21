@@ -48,6 +48,12 @@ class SharedImportTest {
         assertEquals(SharedImport.Outcome.Failed(null), SharedImport.outcome(imported = 0, total = 1, documents = 0, error = null))
     }
 
+    @Test fun aFullyImportedMixedShareCountsFilesNotDocuments() {
+        // 4 photos (one document) and 2 PDFs: "Imported 6 files", not 3, like the partial message.
+        assertEquals(SharedImport.Outcome.Imported(6), SharedImport.outcome(imported = 6, total = 6, documents = 3, error = null))
+        assertEquals(SharedImport.Outcome.Partial(5, 6), SharedImport.outcome(imported = 5, total = 6, documents = 2, error = "bad"))
+    }
+
     @Test fun inkwellIsNotOfferedForSharedText() {
         // Shared text has nowhere to go: the app must not appear as a share target for it.
         val manifest = File("src/main/AndroidManifest.xml").readText()

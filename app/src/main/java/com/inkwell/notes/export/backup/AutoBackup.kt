@@ -35,6 +35,28 @@ internal class BackupPrefs(context: Context) {
         get() = prefs.getBoolean(KEY_LAST_FAILED, false)
         set(value) { prefs.edit().putBoolean(KEY_LAST_FAILED, value).apply() }
 
+    /** When the last automatic run ended (complete, partial or failed); 0 when it never ran. */
+    val lastRunAt: Long
+        get() = prefs.getLong(KEY_LAST_RUN, 0)
+
+    /** Documents the last automatic run had to leave out (0 when it failed outright or was complete). */
+    val lastSkipped: Int
+        get() = prefs.getInt(KEY_LAST_SKIPPED, 0)
+
+    /** What the Storage settings screen shows about automatic backups. */
+    fun status(): AutoBackupStatus = AutoBackupStatus(lastRunAt, lastSuccessAt, lastFailed, lastSkipped)
+
+    /** Records how an automatic run ended: [skipped] documents left out, or [failed] outright. */
+    fun recordRun(now: Long, failed: Boolean, skipped: Int) {
+        val complete = !failed && skipped == 0
+        prefs.edit().apply {
+            putLong(KEY_LAST_RUN, now)
+            putBoolean(KEY_LAST_FAILED, !complete)
+            putInt(KEY_LAST_SKIPPED, if (failed) 0 else skipped)
+            if (complete) putLong(KEY_LAST_OK, now)
+        }.apply()
+    }
+
     /** File name of the newest automatic backup that holds every document; pruning keeps it. */
     var lastCompleteName: String?
         get() = prefs.getString(KEY_LAST_COMPLETE, null)
@@ -47,7 +69,30 @@ internal class BackupPrefs(context: Context) {
         private const val KEY_LAST_OK = "auto_last_success"
         private const val KEY_LAST_FAILED = "auto_last_failed"
         private const val KEY_LAST_COMPLETE = "auto_last_complete_name"
+        private const val KEY_LAST_RUN = "auto_last_run"
+        private const val KEY_LAST_SKIPPED = "auto_last_skipped"
     }
+}
+
+/**
+ * How automatic backups have gone, for the Storage settings screen: [lastSuccessAt] is the
+ * last run that held every document, [lastSkipped] how many the last run left out.
+ */
+internal data class AutoBackupStatus(
+    val lastRunAt: Long = 0,
+    val lastSuccessAt: Long = 0,
+    val lastFailed: Boolean = false,
+    val lastSkipped: Int = 0,
+) {
+    enum class Problem { NONE, SKIPPED, FAILED }
+
+    /** What went wrong in the last run, if anything. */
+    val problem: Problem
+        get() = when {
+            !lastFailed -> Problem.NONE
+            lastSkipped > 0 -> Problem.SKIPPED
+            else -> Problem.FAILED
+        }
 }
 
 /** Schedules and runs automatic backups into a user-chosen folder. */
@@ -114,7 +159,7 @@ class AutoBackupWorker(context: Context, params: WorkerParameters) : CoroutineWo
         val tree = prefs.treeUri ?: return Result.success()
         val dir = DocumentFile.fromTreeUri(applicationContext, tree)
         if (dir == null || !dir.exists() || !dir.canWrite()) {
-            prefs.lastFailed = true
+            prefs.recordRun(System.currentTimeMillis(), failed = true, skipped = 0)
             return Result.failure()
         }
         return try {
@@ -124,14 +169,14 @@ class AutoBackupWorker(context: Context, params: WorkerParameters) : CoroutineWo
             if (complete) report.file?.let { DocumentFile.fromSingleUri(applicationContext, it)?.name }?.let { prefs.lastCompleteName = it }
             // A backup that had to leave documents out never pushes out the last one that has them all.
             AutoBackup.prune(applicationContext, tree, keepName = prefs.lastCompleteName)
-            if (complete) prefs.lastSuccessAt = System.currentTimeMillis()
-            prefs.lastFailed = !complete
+            // Shown in Storage settings, so documents left out never go unnoticed.
+            prefs.recordRun(System.currentTimeMillis(), failed = false, skipped = report.skipped)
             Result.success()
         } catch (c: CancellationException) {
             throw c
         } catch (t: Throwable) {
             Log.w("AutoBackup", "Automatic backup failed (${t.javaClass.simpleName})")
-            prefs.lastFailed = true
+            prefs.recordRun(System.currentTimeMillis(), failed = true, skipped = 0)
             if (runAttemptCount < 2) Result.retry() else Result.failure()
         }
     }

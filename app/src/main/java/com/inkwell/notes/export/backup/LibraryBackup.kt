@@ -106,9 +106,10 @@ internal class LibraryBackup(private val graph: AppGraph) {
                     }
                 }
             } }
-            // Only a complete backup gets a name that restore and pruning recognise.
+            // Only a complete backup gets a name that restore and pruning recognise. A refused
+            // rename never costs the finished backup: it is copied into a file with that name.
             val finished = resolved.finalName?.let { name ->
-                rename(fileUri, name) ?: throw ExportErrors.of(context, R.string.export_err_backup_target)
+                rename(fileUri, name) ?: copyToFinal(target, fileUri, name)
             } ?: fileUri
             written = finished
             ok = true
@@ -143,6 +144,29 @@ internal class LibraryBackup(private val graph: AppGraph) {
         val file = tree.createFile("application/zip", finalName)
             ?: throw ExportErrors.of(context, R.string.export_err_backup_target)
         return Target(file.uri, null)
+    }
+
+    /**
+     * Fallback when the provider refused to rename the finished [partial] backup in [tree]:
+     * copies it into a new file named [name] and deletes the partial one. Throws (leaving no
+     * half-written copy behind) when the copy cannot be made; the caller then removes [partial].
+     */
+    private fun copyToFinal(tree: Uri, partial: Uri, name: String): Uri {
+        val dir = DocumentFile.fromTreeUri(context, tree)
+        val copy = dir?.createFile("application/zip", name) ?: throw ExportErrors.of(context, R.string.export_err_backup_target)
+        try {
+            val out = SafStreams.openForWrite(context, copy.uri) ?: throw ExportErrors.of(context, R.string.export_err_backup_target)
+            out.use { o ->
+                val input = context.contentResolver.openInputStream(partial) ?: throw ExportErrors.of(context, R.string.export_err_backup_target)
+                input.use { it.copyTo(o, 256 * 1024) }
+            }
+        } catch (t: Throwable) {
+            runCatching { copy.delete() }
+            throw t
+        }
+        // Left behind only if this fails too; pruning removes stale partial files.
+        runCatching { DocumentsContract.deleteDocument(context.contentResolver, partial) }
+        return copy.uri
     }
 
     private fun supportsRename(uri: Uri): Boolean = try {

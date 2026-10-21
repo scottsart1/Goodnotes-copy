@@ -1,5 +1,7 @@
 package com.inkwell.notes
 
+import android.content.ContentResolver
+import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
@@ -100,46 +102,79 @@ class MainActivity : AppCompatActivity() {
         if (uris.isEmpty()) return
         val app = applicationContext
         val sharedType = intent.type
+        // The read grants that came with the intent belong to this activity and end when it
+        // finishes (Back on a share-started task): give the app its own grant for each file
+        // first, so the import below can still read the later ones, and drop it afterwards.
+        val held = uris.filter { holdReadGrant(app, it) }
         // In the app scope, so leaving the screen mid-import doesn't cancel it. Images become one
         // document and each PDF its own, so one unreadable file doesn't lose the others.
         graph.appScope.launch(Dispatchers.IO) {
-            val (images, pdfs) = SharedImport.split(uris) { SharedImport.mimeOf(app.contentResolver.getType(it), sharedType) }
-            val docs = ArrayList<DocumentMeta>()
-            var imported = 0
-            var error: String? = null
-            if (images.isNotEmpty()) {
-                try {
-                    docs += graph.pdf.importImages(images)
-                    imported += images.size
-                } catch (c: CancellationException) {
-                    throw c
-                } catch (t: Throwable) {
-                    Log.e("MainActivity", "Import failed", t)
-                    if (error == null) error = t.message
-                }
+            try {
+                importShared(graph, app, uris, sharedType)
+            } finally {
+                held.forEach { releaseReadGrant(app, it) }
             }
-            for (uri in pdfs) {
-                try {
-                    docs += graph.pdf.importPdf(uri)
-                    imported++
-                } catch (c: CancellationException) {
-                    throw c
-                } catch (t: Throwable) {
-                    Log.e("MainActivity", "Import failed", t)
-                    if (error == null) error = t.message
-                }
+        }
+    }
+
+    /** Imports the shared [uris], then opens the first document and says what happened. */
+    private suspend fun importShared(graph: AppGraph, app: Context, uris: List<Uri>, sharedType: String?) {
+        val (images, pdfs) = SharedImport.split(uris) { SharedImport.mimeOf(app.contentResolver.getType(it), sharedType) }
+        val docs = ArrayList<DocumentMeta>()
+        var imported = 0
+        var error: String? = null
+        if (images.isNotEmpty()) {
+            try {
+                docs += graph.pdf.importImages(images)
+                imported += images.size
+            } catch (c: CancellationException) {
+                throw c
+            } catch (t: Throwable) {
+                Log.e("MainActivity", "Import failed", t)
+                if (error == null) error = t.message
             }
-            val outcome = SharedImport.outcome(imported, uris.size, docs.size, error)
-            withContext(Dispatchers.Main) {
-                docs.firstOrNull()?.let { doc -> pendingNavigation.post { it.openDocument(doc) } }
-                val text = when (outcome) {
-                    null -> null
-                    is SharedImport.Outcome.Imported -> app.resources.getQuantityString(R.plurals.lib_msg_imported, outcome.count, outcome.count)
-                    is SharedImport.Outcome.Partial -> app.getString(R.string.lib_msg_import_partial, outcome.imported, outcome.total)
-                    is SharedImport.Outcome.Failed -> "Couldn't import: ${outcome.error ?: "unknown error"}"
-                }
-                if (text != null) Toast.makeText(app, text, Toast.LENGTH_LONG).show()
+        }
+        for (uri in pdfs) {
+            try {
+                docs += graph.pdf.importPdf(uri)
+                imported++
+            } catch (c: CancellationException) {
+                throw c
+            } catch (t: Throwable) {
+                Log.e("MainActivity", "Import failed", t)
+                if (error == null) error = t.message
             }
+        }
+        val outcome = SharedImport.outcome(imported, uris.size, docs.size, error)
+        withContext(Dispatchers.Main) {
+            docs.firstOrNull()?.let { doc -> pendingNavigation.post { it.openDocument(doc) } }
+            val text = when (outcome) {
+                null -> null
+                is SharedImport.Outcome.Imported -> app.resources.getQuantityString(R.plurals.lib_msg_imported, outcome.count, outcome.count)
+                is SharedImport.Outcome.Partial -> app.getString(R.string.lib_msg_import_partial, outcome.imported, outcome.total)
+                is SharedImport.Outcome.Failed -> "Couldn't import: ${outcome.error ?: "unknown error"}"
+            }
+            if (text != null) Toast.makeText(app, text, Toast.LENGTH_LONG).show()
+        }
+    }
+
+    /** Gives the app itself read access to [uri], beyond this activity's life; false when not possible or not needed. */
+    private fun holdReadGrant(app: Context, uri: Uri): Boolean {
+        if (uri.scheme != ContentResolver.SCHEME_CONTENT) return false
+        return try {
+            app.grantUriPermission(app.packageName, uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            true
+        } catch (e: Exception) {
+            // Nothing to pass on (e.g. readable without a grant): it is read under the activity's grant.
+            false
+        }
+    }
+
+    private fun releaseReadGrant(app: Context, uri: Uri) {
+        try {
+            app.revokeUriPermission(app.packageName, uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        } catch (e: Exception) {
+            Log.w("MainActivity", "Read grant not released (${e.javaClass.simpleName})")
         }
     }
 
@@ -161,7 +196,7 @@ class MainActivity : AppCompatActivity() {
 /** How files shared with or opened in the app are imported, and what the user is told after. */
 internal object SharedImport {
     sealed interface Outcome {
-        /** Several documents, all imported. */
+        /** All [count] files imported, as several documents (the toast counts files, like [Partial]). */
         data class Imported(val count: Int) : Outcome
         data class Partial(val imported: Int, val total: Int) : Outcome
         data class Failed(val error: String?) : Outcome
@@ -182,7 +217,7 @@ internal object SharedImport {
         imported == 0 -> Outcome.Failed(error)
         imported < total -> Outcome.Partial(imported, total)
         documents == 1 -> null
-        else -> Outcome.Imported(documents)
+        else -> Outcome.Imported(imported)
     }
 }
 

@@ -16,6 +16,8 @@ import com.inkwell.notes.core.model.NotesExportFormat
 import com.inkwell.notes.core.model.OutputTarget
 import com.inkwell.notes.export.SyncManagerImpl
 import com.inkwell.notes.export.SyncStatus
+import com.inkwell.notes.export.backup.AutoBackupStatus
+import com.inkwell.notes.export.backup.BackupPrefs
 import com.inkwell.notes.export.sync.SafFolderAccess
 import com.inkwell.notes.export.sync.SyncKind
 import com.inkwell.notes.export.sync.VaultPassword
@@ -83,6 +85,9 @@ internal class StorageSettingsViewModel(private val graph: AppGraph) : ViewModel
         private set
     var autoBackup by mutableStateOf<AutoBackupPref?>(null)
         private set
+    /** How the automatic backups have gone (complete, or documents left out). */
+    var autoBackupStatus by mutableStateOf(AutoBackupStatus())
+        private set
     /** One-off problem to show (picker unavailable, permission refused...). */
     var notice by mutableStateOf<String?>(null)
 
@@ -96,6 +101,7 @@ internal class StorageSettingsViewModel(private val graph: AppGraph) : ViewModel
     init {
         viewModelScope.launch {
             autoBackup = withContext(Dispatchers.IO) { runCatching { uiPrefs.autoBackup() }.getOrNull() }
+            autoBackupStatus = withContext(Dispatchers.IO) { runCatching { BackupPrefs(context).status() }.getOrNull() } ?: AutoBackupStatus()
         }
         // A saved password only counts for the link it belongs to; the link can change here or
         // in the background (the vault moved between www.host and host).
