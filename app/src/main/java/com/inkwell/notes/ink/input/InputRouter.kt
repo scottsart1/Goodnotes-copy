@@ -320,12 +320,19 @@ internal class InputRouter(private val e: InkEngine) {
 
     private fun switchStylusTool(newType: ToolType) {
         val cur = stylusTool
+        handler.removeCallbacks(longPress)
+        if (keepsSelectionManipulation(cur === e.selectionTool, newType)) {
+            // The selection tool works the same under any tool but the eraser: keep the running
+            // move/resize/rotate (or pending tap) instead of committing and hit-testing again,
+            // which would ink from a rotate handle that moved, or count one press as a double tap.
+            stylusToolType = newType
+            return
+        }
         if (cur != null) {
             fillSingle(ev, stylusPage, lastSX, lastSY, lastSPressure, lastSTilt, lastSTime, stylus = true)
             cur.onUp(e, ev)
         }
-        handler.removeCallbacks(longPress)
-        if (endsContactOnLassoRelease(stylusToolType, cur === e.selectionTool, buttons.mode, buttons.temporaryTool)) {
+        if (endsContactOnLassoRelease(stylusToolType, buttons.mode, buttons.temporaryTool)) {
             // Hold-to-lasso button released before lifting: the loop is done. Continuing with the
             // base tool would clear the new selection and draw a stray stroke to the lift point.
             stylusTool = null
@@ -907,17 +914,25 @@ internal class InputRouter(private val e: InkEngine) {
         fun allowsStylusLongPress(type: ToolType, isInking: Boolean): Boolean = !isInking && type != ToolType.ERASER
 
         /**
+         * Whether a side-button change mid-contact leaves a running selection manipulation
+         * ([manipulatingSelection]) untouched, only relabelling the contact with [newType]. True for
+         * every tool but the eraser, which never acts on the selection: the move, resize or rotate
+         * keeps following the pen and a press without movement stays a single tap.
+         */
+        fun keepsSelectionManipulation(manipulatingSelection: Boolean, newType: ToolType): Boolean =
+            manipulatingSelection && newType != ToolType.ERASER
+
+        /**
          * Whether a side-button change mid-contact ends the contact instead of continuing with the
-         * new tool: true when the hold-to-lasso button was released while drawing a lasso loop.
-         * A selection move/resize started with the button held ([manipulatingSelection]) keeps
-         * going, so the box keeps following the pen.
+         * new tool: true when the hold-to-lasso button was released while drawing a lasso loop (or
+         * while manipulating the selection with the eraser as the base tool, see
+         * [keepsSelectionManipulation]).
          */
         fun endsContactOnLassoRelease(
             contactType: ToolType?,
-            manipulatingSelection: Boolean,
             mode: SideButtonMode,
             temporaryTool: ToolType?,
-        ): Boolean = contactType == ToolType.LASSO && !manipulatingSelection &&
+        ): Boolean = contactType == ToolType.LASSO &&
             mode == SideButtonMode.HOLD_TO_LASSO && temporaryTool == null
         /** MotionEvent.FLAG_CANCELED (API 33): the pointer was cancelled, e.g. a palm. */
         private const val FLAG_CANCELED = 0x20
