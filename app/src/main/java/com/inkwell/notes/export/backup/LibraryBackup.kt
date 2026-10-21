@@ -12,6 +12,7 @@ import com.inkwell.notes.core.model.Folder
 import com.inkwell.notes.core.settings.SettingsRepository
 import com.inkwell.notes.core.storage.db.FolderEntity
 import com.inkwell.notes.export.BackupReport
+import com.inkwell.notes.export.RestoreReport
 import com.inkwell.notes.export.format.ExportErrors
 import com.inkwell.notes.export.format.SafStreams
 import kotlinx.coroutines.CancellationException
@@ -48,13 +49,15 @@ internal class LibraryBackup(private val graph: AppGraph) {
         var written: Uri? = null
         var ok = false
         try {
-            val fileUri = resolveTarget(target, now)
+            val resolved = resolveTarget(target, now)
+            val fileUri = resolved.uri
             written = fileUri
             val out = SafStreams.openForWrite(context, fileUri) ?: throw ExportErrors.of(context, R.string.export_err_backup_target)
             val counter = CountingOutputStream(BufferedOutputStream(out, 256 * 1024))
             var count = 0
-            counter.use { stream ->
-                val zip = ZipOutputStream(stream)
+            var skipped = 0
+            // Closing the zip frees its Deflater; closing the counter closes the file even when that fails.
+            counter.use { stream -> ZipOutputStream(stream).use { zip ->
                 val docs = graph.db.documents().getAll().map { it.toModel() }.filter { it.trashedAt == null }.sortedBy { it.createdAt }
                 val folders = graph.db.folders().getAllIncludingTrashed().map { it.toModel() }.filter { it.trashedAt == null }
                 val paths = BackupNaming.folderPaths(folders)
@@ -72,6 +75,8 @@ internal class LibraryBackup(private val graph: AppGraph) {
                 zip.closeEntry()
 
                 val tmpDir = File(graph.files.cacheDir, "backup-tmp").apply { mkdirs() }
+                // Packages left behind by a backup that was killed part-way through.
+                tmpDir.listFiles()?.filter { it.isFile && now - it.lastModified() > STALE_TEMP_MS }?.forEach { it.delete() }
                 for (entry in entries) {
                     coroutineContext.ensureActive()
                     val tmp = File(tmpDir, UUID.randomUUID().toString() + ".inkwell")
@@ -85,6 +90,7 @@ internal class LibraryBackup(private val graph: AppGraph) {
                         } catch (e: Exception) {
                             if (ExportErrors.isNoSpace(e)) throw e
                             Log.w(TAG, "Skipped a document in the backup (${e.javaClass.simpleName})")
+                            skipped++
                             false
                         }
                         if (packaged) {
@@ -99,11 +105,14 @@ internal class LibraryBackup(private val graph: AppGraph) {
                         tmp.delete()
                     }
                 }
-                zip.finish()
-                zip.flush()
-            }
+            } }
+            // Only a complete backup gets a name that restore and pruning recognise.
+            val finished = resolved.finalName?.let { name ->
+                rename(fileUri, name) ?: throw ExportErrors.of(context, R.string.export_err_backup_target)
+            } ?: fileUri
+            written = finished
             ok = true
-            BackupReport(count, counter.count, fileUri)
+            BackupReport(count, counter.count, finished, skipped)
         } catch (t: Throwable) {
             throw if (t is CancellationException) t else ExportErrors.wrap(context, t)
         } finally {
@@ -113,14 +122,43 @@ internal class LibraryBackup(private val graph: AppGraph) {
         }
     }
 
-    /** A folder tree gets a new "Inkwell-backup-YYYYMMDD-HHmm.zip"; a document Uri is written directly. */
-    private fun resolveTarget(target: Uri, now: Long): Uri {
-        if (!isTree(target)) return target
+    /** Where the backup is written, and the name it gets once complete (null: written in place). */
+    private class Target(val uri: Uri, val finalName: String?)
+
+    /**
+     * A folder tree gets a new "Inkwell-backup-partial-YYYYMMDD-HHmm.zip" that is renamed to
+     * "Inkwell-backup-YYYYMMDD-HHmm.zip" when complete, so a backup cut short by the process
+     * being killed is never taken for a good one. Providers that cannot rename get the final
+     * name directly; a document Uri is written directly.
+     */
+    private fun resolveTarget(target: Uri, now: Long): Target {
+        if (!isTree(target)) return Target(target, null)
         val tree = DocumentFile.fromTreeUri(context, target)
         if (tree == null || !tree.canWrite()) throw ExportErrors.of(context, R.string.export_err_folder)
-        val file = tree.createFile("application/zip", BackupNaming.fileName(now))
+        val finalName = BackupNaming.fileName(now)
+        val partial = tree.createFile("application/zip", BackupNaming.partialFileName(now))
             ?: throw ExportErrors.of(context, R.string.export_err_backup_target)
-        return file.uri
+        if (supportsRename(partial.uri)) return Target(partial.uri, finalName)
+        runCatching { partial.delete() }
+        val file = tree.createFile("application/zip", finalName)
+            ?: throw ExportErrors.of(context, R.string.export_err_backup_target)
+        return Target(file.uri, null)
+    }
+
+    private fun supportsRename(uri: Uri): Boolean = try {
+        context.contentResolver.query(uri, arrayOf(DocumentsContract.Document.COLUMN_FLAGS), null, null, null)?.use { c ->
+            c.moveToFirst() && (c.getInt(0) and DocumentsContract.Document.FLAG_SUPPORTS_RENAME) != 0
+        } ?: false
+    } catch (e: Exception) {
+        false
+    }
+
+    /** The renamed document's Uri (it may change), or null when the provider refused. */
+    private fun rename(uri: Uri, name: String): Uri? = try {
+        DocumentsContract.renameDocument(context.contentResolver, uri, name)
+    } catch (e: Exception) {
+        Log.w(TAG, "Backup could not be renamed (${e.javaClass.simpleName})")
+        null
     }
 
     private fun isTree(uri: Uri): Boolean = try {
@@ -134,12 +172,12 @@ internal class LibraryBackup(private val graph: AppGraph) {
 
     // ------------------------------------------------------------------ Restore
 
-    suspend fun restoreFrom(uri: Uri): Int = withContext(Dispatchers.IO) {
+    suspend fun restoreFrom(uri: Uri): RestoreReport = withContext(Dispatchers.IO) {
         try {
             if (firstEntry(uri) == PackageManifest.MANIFEST) {
                 // Not a backup but a single package: import it as one document.
                 open(uri).use { importer.import(it, null) }
-                return@withContext 1
+                return@withContext RestoreReport(1)
             }
             open(uri).use { restore(it) }
         } catch (t: Throwable) {
@@ -161,11 +199,12 @@ internal class LibraryBackup(private val graph: AppGraph) {
         throw PackageException(PackageException.Reason.NOT_A_PACKAGE, e)
     }
 
-    private suspend fun restore(input: InputStream): Int {
+    private suspend fun restore(input: InputStream): RestoreReport {
         val libraryWasEmpty = graph.db.documents().getAll().isEmpty()
         val zip = ZipInputStream(input)
         var library: LibraryManifest? = null
         var restored = 0
+        var skipped = 0
         var sawContent = false
         val folderCache = HashMap<List<String>, String?>()
         while (true) {
@@ -201,13 +240,14 @@ internal class LibraryBackup(private val graph: AppGraph) {
                         if (e is PackageException && e.reason == PackageException.Reason.NO_SPACE) throw e
                         if (ExportErrors.isNoSpace(e)) throw e
                         Log.w(TAG, "Skipped a document while restoring (${e.javaClass.simpleName})")
+                        skipped++
                     }
                 }
             }
         }
         if (!sawContent) throw PackageException(PackageException.Reason.NOT_A_PACKAGE)
         if (libraryWasEmpty) library?.settings?.let { applySettings(it) }
-        return restored
+        return RestoreReport(restored, skipped)
     }
 
     /** Finds the folder at [path] (matching names case-insensitively) or creates the missing part. */
@@ -256,5 +296,7 @@ internal class LibraryBackup(private val graph: AppGraph) {
 
     companion object {
         private const val TAG = "LibraryBackup"
+        /** A running backup touches or reads its temp package within minutes; older ones are leftovers. */
+        private const val STALE_TEMP_MS = 6L * 60 * 60 * 1000
     }
 }

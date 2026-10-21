@@ -35,12 +35,18 @@ internal class BackupPrefs(context: Context) {
         get() = prefs.getBoolean(KEY_LAST_FAILED, false)
         set(value) { prefs.edit().putBoolean(KEY_LAST_FAILED, value).apply() }
 
+    /** File name of the newest automatic backup that holds every document; pruning keeps it. */
+    var lastCompleteName: String?
+        get() = prefs.getString(KEY_LAST_COMPLETE, null)
+        set(value) { prefs.edit().putString(KEY_LAST_COMPLETE, value).apply() }
+
     companion object {
         private const val FILE = "inkwell_export_backup"
         private const val KEY_TREE = "auto_tree_uri"
         private const val KEY_DAYS = "auto_interval_days"
         private const val KEY_LAST_OK = "auto_last_success"
         private const val KEY_LAST_FAILED = "auto_last_failed"
+        private const val KEY_LAST_COMPLETE = "auto_last_complete_name"
     }
 }
 
@@ -81,14 +87,22 @@ internal object AutoBackup {
         wm.enqueueUniquePeriodicWork(WORK_NAME, ExistingPeriodicWorkPolicy.UPDATE, request)
     }
 
-    /** Deletes all but the [KEEP] newest backups in [tree]. Other files are never touched. */
-    fun prune(context: Context, tree: Uri) {
+    /**
+     * Deletes all but the [KEEP] newest backups in [tree] (never [keepName]) and partial
+     * backups left by a run that was killed. Other files are never touched.
+     */
+    fun prune(context: Context, tree: Uri, keepName: String? = null) {
         val dir = DocumentFile.fromTreeUri(context, tree) ?: return
         val files = dir.listFiles().filter { it.isFile }
-        for (f in BackupNaming.toDelete(files, { it.name.orEmpty() }, { it.lastModified() }, KEEP)) {
+        val old = BackupNaming.toDelete(files, { it.name.orEmpty() }, { it.lastModified() }, KEEP).filter { it.name != keepName }
+        val stale = BackupNaming.stalePartials(files, { it.name.orEmpty() }, { it.lastModified() }, System.currentTimeMillis(), STALE_PARTIAL_MS)
+        for (f in old + stale) {
             runCatching { f.delete() }
         }
     }
+
+    /** No backup takes this long; a partial file this old was left by a killed run. */
+    private const val STALE_PARTIAL_MS = 24L * 60 * 60 * 1000
 
     private const val TAG = "AutoBackup"
 }
@@ -105,10 +119,13 @@ class AutoBackupWorker(context: Context, params: WorkerParameters) : CoroutineWo
         }
         return try {
             val graph = AppGraph.get(applicationContext)
-            graph.backup.backupTo(tree, includeAudio = true)
-            AutoBackup.prune(applicationContext, tree)
-            prefs.lastSuccessAt = System.currentTimeMillis()
-            prefs.lastFailed = false
+            val report = graph.backup.backupTo(tree, includeAudio = true)
+            val complete = report.skipped == 0
+            if (complete) report.file?.let { DocumentFile.fromSingleUri(applicationContext, it)?.name }?.let { prefs.lastCompleteName = it }
+            // A backup that had to leave documents out never pushes out the last one that has them all.
+            AutoBackup.prune(applicationContext, tree, keepName = prefs.lastCompleteName)
+            if (complete) prefs.lastSuccessAt = System.currentTimeMillis()
+            prefs.lastFailed = !complete
             Result.success()
         } catch (c: CancellationException) {
             throw c
