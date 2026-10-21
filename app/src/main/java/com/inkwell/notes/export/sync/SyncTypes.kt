@@ -48,6 +48,13 @@ fun DestinationPrefs.withTargets(kind: SyncKind, targets: Set<OutputTarget>): De
 
 val DestinationPrefs.hasAnyTarget: Boolean get() = notes.isNotEmpty() || transcripts.isNotEmpty() || audio.isNotEmpty()
 
+/**
+ * The vault when any output goes there: the vault then keeps a document row whose title and
+ * folder path follow the library (see [SyncEngine.enqueueMoved]).
+ */
+fun DestinationPrefs.vaultMetadataTargets(): Set<OutputTarget> =
+    if (OutputTarget.VAULT in notes || OutputTarget.VAULT in transcripts || OutputTarget.VAULT in audio) setOf(OutputTarget.VAULT) else emptySet()
+
 /** Removes the folder destination everywhere (used when its permission was revoked). */
 fun DestinationPrefs.withoutFolder(): DestinationPrefs = copy(
     notes = notes - OutputTarget.FOLDER,

@@ -78,6 +78,12 @@ data class SyncStatus(
 interface SyncManager {
     val status: StateFlow<SyncStatus>
     fun onDocumentChanged(docId: String)
+    /**
+     * The document's title or its place in the library changed (moved, or a folder above it was
+     * renamed or moved): move the copies kept in sync destinations. Unlike [onDocumentChanged]
+     * this also covers transcripts and audio, and sends the vault only the new metadata.
+     */
+    fun onDocumentMoved(docId: String) = onDocumentChanged(docId)
     fun onTranscriptReady(docId: String, recordingId: String)
     fun onRecordingFinished(docId: String, recordingId: String)
     fun onDocumentDeleted(docId: String)

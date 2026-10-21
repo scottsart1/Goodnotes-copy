@@ -128,6 +128,21 @@ class SyncManagerImpl(private val graph: AppGraph) : SyncManager {
         }
     }
 
+    override fun onDocumentMoved(docId: String) {
+        val prefs = graph.settings.current.destinations
+        if (!prefs.autoSync || !prefs.hasAnyTarget) return
+        // Its own key: an edit settling meanwhile must not replace the move, nor the move the edit.
+        debouncer.submit(movedKey(docId)) {
+            withContext(Dispatchers.IO) {
+                val now = graph.settings.current.destinations
+                if (now.autoSync && now.hasAnyTarget) {
+                    safely { engine.enqueueMoved(docId, now) }
+                    kick()
+                }
+            }
+        }
+    }
+
     override fun onTranscriptReady(docId: String, recordingId: String) = enqueueRecording(docId, recordingId, SyncKind.TRANSCRIPT)
 
     override fun onRecordingFinished(docId: String, recordingId: String) = enqueueRecording(docId, recordingId, SyncKind.AUDIO)
@@ -145,6 +160,7 @@ class SyncManagerImpl(private val graph: AppGraph) : SyncManager {
 
     override fun onDocumentDeleted(docId: String) {
         debouncer.cancel(docId)
+        debouncer.cancel(movedKey(docId))
         graph.appScope.launch(Dispatchers.IO) {
             // Copies in the folder and the vault stay: deleting locally never deletes them. The
             // folder location is kept too, so a later document with the same title gets its own
@@ -359,6 +375,8 @@ class SyncManagerImpl(private val graph: AppGraph) : SyncManager {
 
     private companion object {
         const val TAG = "InkwellSync"
+        /** Debounce key of a document's move; its edits use the document id itself. */
+        fun movedKey(docId: String) = "$docId#moved"
         /** Notes are copied this long after the last edit of a document. */
         const val EDIT_SETTLE_MS = 30_000L
         const val SETTINGS_SETTLE_MS = 1_200L

@@ -169,7 +169,8 @@ class LibraryRepositoryImpl internal constructor(
             }
             docsInRenamedFolders(renamed)
         }
-        affectedDocs.forEach { hooks.documentMetaChanged(it) }
+        // Their folder path changed: sync moves their copies too.
+        affectedDocs.forEach { hooks.documentMoved(it) }
     }
 
     override suspend fun folderPath(folderId: String?): String {
@@ -454,7 +455,8 @@ class LibraryRepositoryImpl internal constructor(
             db.documents().update(cur.copy(trashedAt = null, folderId = folderId))
             docsInRenamedFolders(renamed)
         }
-        affectedDocs.forEach { hooks.documentMetaChanged(it) }
+        // Their folder path changed: sync moves their copies too.
+        affectedDocs.forEach { hooks.documentMoved(it) }
     }
 
     override suspend fun deletePermanently(id: String) {

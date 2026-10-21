@@ -97,6 +97,38 @@ class SyncEngine(
     }
 
     /**
+     * The document's title or place in the library changed: queues what moves its copies, without
+     * copying its notes to the vault again.
+     * - Folder (only when it holds copies of the document): one output is written again in the new
+     *   directory, and [Placement.finishMove] moves the rest there: the notes when they go to the
+     *   folder, otherwise one transcript, otherwise one recording.
+     * - Vault: a metadata-only update (title, folder path) of a document the vault already has.
+     */
+    suspend fun enqueueMoved(docId: String, prefs: DestinationPrefs = this.prefs()): Int {
+        var n = 0
+        val folder = setOf(OutputTarget.FOLDER)
+        if (state.folderLocation(docId) != null) {
+            if (OutputTarget.FOLDER in prefs.notes) {
+                n += enqueue(docId, SyncKind.NOTES, folder)
+            } else if (OutputTarget.FOLDER in prefs.transcripts || OutputTarget.FOLDER in prefs.audio) {
+                val recordings = source.recordings(docId)
+                val transcript = recordings.firstOrNull { it.transcriptStatus == TranscriptStatus.DONE }
+                    ?.takeIf { OutputTarget.FOLDER in prefs.transcripts }
+                val audio = recordings.firstOrNull { it.isFinished() && it.segmentFiles.isNotEmpty() }
+                    ?.takeIf { OutputTarget.FOLDER in prefs.audio }
+                when {
+                    transcript != null -> n += enqueue(docId, SyncKind.TRANSCRIPT, folder, transcript.id)
+                    audio != null -> n += enqueue(docId, SyncKind.AUDIO, folder, audio.id)
+                }
+            }
+        }
+        if (OutputTarget.VAULT in prefs.vaultMetadataTargets()) {
+            n += enqueue(docId, SyncKind.NOTES, setOf(OutputTarget.VAULT), VAULT_METADATA_REF)
+        }
+        return n
+    }
+
+    /**
      * Every document, transcript and finished recording, for the chosen targets. [only] limits it to
      * one output type and/or target (used when a destination was just switched on).
      */
@@ -195,7 +227,7 @@ class SyncEngine(
     private suspend fun processOne(item: SyncQueueEntity, ctx: RunContext) {
         val kind = runCatching { SyncKind.valueOf(item.kind) }.getOrNull()
         val target = runCatching { OutputTarget.valueOf(item.target) }.getOrNull()
-        if (kind == null || target == null || target !in ctx.prefs.targetsFor(kind)) {
+        if (kind == null || target == null || target !in targetsFor(kind, item.refId, ctx.prefs)) {
             // Unknown row or the destination was switched off meanwhile: nothing to do.
             finish(item, SyncItemStatus.DONE, item.attempts, null)
             return
@@ -319,6 +351,7 @@ class SyncEngine(
     // ------------------------------------------------------------------ per kind
 
     private suspend fun syncNotes(item: SyncQueueEntity, target: OutputTarget, ctx: RunContext): Outcome {
+        if (item.refId == VAULT_METADATA_REF) return syncVaultMetadata(item, target, ctx)
         val doc = source.document(item.documentId)?.takeIf { it.trashedAt == null } ?: return Outcome.Skipped
         val format = ctx.prefs.notesFormat
         // Edits made while this copy is being made must count as unsynced: stamp the start time.
@@ -328,8 +361,10 @@ class SyncEngine(
                 val client = ctx.vault()
                 val id = VaultNames.docId(doc.id)
                 val markdown = ctx.markdown(doc.id)
+                val writtenAt = clock()
                 client.putDoc(id, SyncPayloads.docUpsert(doc, source.folderPath(doc.folderId), markdown))
                 ctx.knownVaultDocs?.add(id)
+                ctx.vaultDocWrittenAt[doc.id] = writtenAt
                 if (format.includesPdf) client.putFile(id, VaultNames.NOTES_PDF, ctx.pdf(doc.id), VaultNames.MIME_PDF)
                 if (format.includesMarkdown) client.putBytes(id, VaultNames.NOTES_MD, markdown.encodeToByteArray(), VaultNames.MIME_MARKDOWN)
             }
@@ -403,18 +438,46 @@ class SyncEngine(
      */
     private suspend fun ensureVaultDoc(client: VaultClient, doc: DocumentMeta, ctx: RunContext): String {
         val id = VaultNames.docId(doc.id)
+        if (vaultHasDoc(client, id, ctx)) return id
+        val markdown = if (OutputTarget.VAULT in ctx.prefs.notes) ctx.markdown(doc.id) else null
+        val writtenAt = clock()
+        client.putDoc(id, SyncPayloads.docUpsert(doc, source.folderPath(doc.folderId), markdown))
+        ctx.knownVaultDocs?.add(id)
+        ctx.vaultDocWrittenAt[doc.id] = writtenAt
+        return id
+    }
+
+    /** Whether the vault already has the document [id] (its list is loaded once per run). */
+    private suspend fun vaultHasDoc(client: VaultClient, id: String, ctx: RunContext): Boolean {
         val known = ctx.knownVaultDocs ?: client.listDocIds().toHashSet().also { ctx.knownVaultDocs = it }
-        if (id in known) return id
+        if (id in known) return true
         // The vault lists at most VAULT_LIST_CAP documents; beyond that, absence from the list
         // proves nothing, and re-creating the doc metadata-only would wipe its stored notes.
         if (known.size >= VAULT_LIST_CAP && client.hasDoc(id)) {
             known += id
-            return id
+            return true
         }
+        return false
+    }
+
+    /**
+     * After a move or rename: the vault gets the document's current title and folder path. Its
+     * files are not uploaded again, and a document the vault does not have is not created.
+     */
+    private suspend fun syncVaultMetadata(item: SyncQueueEntity, target: OutputTarget, ctx: RunContext): Outcome {
+        if (target != OutputTarget.VAULT) return Outcome.Skipped
+        val doc = source.document(item.documentId)?.takeIf { it.trashedAt == null } ?: return Outcome.Skipped
+        // Written to the vault in this run since the move (its notes were copied): already current.
+        if ((ctx.vaultDocWrittenAt[doc.id] ?: Long.MIN_VALUE) >= item.enqueuedAt) return Outcome.Skipped
+        val client = ctx.vault()
+        val id = VaultNames.docId(doc.id)
+        if (!vaultHasDoc(client, id, ctx)) return Outcome.Skipped
+        // The upsert replaces the text as well: send it again when notes go to the vault.
         val markdown = if (OutputTarget.VAULT in ctx.prefs.notes) ctx.markdown(doc.id) else null
+        val writtenAt = clock()
         client.putDoc(id, SyncPayloads.docUpsert(doc, source.folderPath(doc.folderId), markdown))
-        known += id
-        return id
+        ctx.vaultDocWrittenAt[doc.id] = writtenAt
+        return Outcome.Done
     }
 
     // ------------------------------------------------------------------ folder placement
@@ -499,6 +562,8 @@ class SyncEngine(
         var heldForCredentials: Boolean = sameVault && previous?.heldForCredentials == true
         var folderBlocked: Exception? = previous?.folderBlocked?.takeIf { sameFolder }
         var knownVaultDocs: HashSet<String>? = previous?.knownVaultDocs?.takeIf { sameVault }
+        /** When this run last wrote each document's vault metadata (local document id -> [clock]). */
+        val vaultDocWrittenAt: HashMap<String, Long> = previous?.vaultDocWrittenAt?.takeIf { sameVault } ?: HashMap()
         val placements: HashMap<String, Placement> = previous?.placements?.takeIf { sameFolder } ?: HashMap()
         private var client: VaultClient? = previous?.client?.takeIf { sameVault }
         private var root: FolderNode? = previous?.root?.takeIf { sameFolder }
@@ -565,6 +630,16 @@ class SyncEngine(
     private enum class Outcome { Done, Skipped, NotReady }
 
     companion object {
+        /**
+         * `refId` of a NOTES item for the vault that only updates the document's metadata (title,
+         * folder path) after a move or rename: see [enqueueMoved].
+         */
+        const val VAULT_METADATA_REF = "metadata"
+
+        /** Where an item may go under [prefs]: a metadata update goes to the vault while any output goes there. */
+        internal fun targetsFor(kind: SyncKind, refId: String?, prefs: DestinationPrefs): Set<OutputTarget> =
+            if (kind == SyncKind.NOTES && refId == VAULT_METADATA_REF) prefs.vaultMetadataTargets() else prefs.targetsFor(kind)
+
         /** Maximum rows the vault returns from GET api/docs (see web/notes-vault/src/api.ts). */
         internal const val VAULT_LIST_CAP = 2000
         private const val TAG = "InkwellSync"

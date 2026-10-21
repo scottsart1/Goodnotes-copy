@@ -34,7 +34,7 @@ class NaturalOrderTest {
         assertTrue(order.compare("v99999999999999999999", "v100000000000000000000") < 0)
     }
 
-    @Test fun numbersSortBeforeTextWhateverTheText() {
+    @Test fun numbersSortBeforeLettersAndOtherDigits() {
         // ICU reads "５" and "⑤" as the digit 5: through the collator "9 Plan" > "５月" > "20261021_…"
         // while "20261021_…" > "9 Plan", a cycle that makes TimSort throw.
         val a = "20261021_Untitled"
@@ -47,10 +47,31 @@ class NaturalOrderTest {
         assertTrue(order.compare("Plan 9", "Plan A") < 0)
     }
 
+    @Test fun punctuationAndSymbolsStillSortBeforeNumbers() {
+        // A leading "_" or "(" keeps a title above the date-named ones, as the collator orders it.
+        for (title in listOf("_Inbox", "(Draft) essay", "#todo", "!Important")) {
+            assertTrue("$title before a date name", order.compare(title, "20261021_Topic") < 0)
+            assertTrue("$title before a number", order.compare(title, "9 Plan") < 0)
+            assertTrue("$title before letters", order.compare(title, "Apple") < 0)
+            assertTrue(order.compare("20261021_Topic", title) > 0)
+        }
+        assertEquals(
+            listOf("_Inbox", "(Draft)", "9 Plan", "20261021_Topic", "Apple"),
+            listOf("Apple", "20261021_Topic", "(Draft)", "9 Plan", "_Inbox").sortedWith(order),
+        )
+    }
+
+    @Test fun foldersSortLikeDocuments() {
+        val folders = com.inkwell.notes.library.NaturalOrder(Locale.ENGLISH)
+        val titles = listOf("５月の予定", "Apple", "20261021_Topic", "9 Plan", "_Inbox", "(Draft)", "Plan 10", "plan 2")
+        assertEquals(titles.sortedWith(order), titles.sortedWith(folders))
+    }
+
     @Test fun orderIsConsistentOnMixedTitles() {
         val titles = listOf(
             "20261021_Untitled", "9 Plan", "５月の予定", "⑤ notes", "(Draft)", "_x", "Plan",
             "plan 2", "Plan 10", "Plan 02", "École", "０", "0", "00", "a1", "A01", "", " ", "1a", "1 a",
+            "_Inbox", "#todo", "!Important", "-dash", "٣ arabic", "x٣", "€5", "~t",
         )
         for (x in titles) for (y in titles) {
             assertEquals("antisymmetry of '$x' and '$y'", Integer.signum(order.compare(x, y)), -Integer.signum(order.compare(y, x)))

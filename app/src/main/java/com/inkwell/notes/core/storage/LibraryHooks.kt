@@ -79,12 +79,16 @@ internal object GraphLibraryHooks : LibraryHooks {
 
     override fun documentRenamed(docId: String) = dispatch("rename") {
         it.indexing.documentMetaChanged(docId)
+        // The notes show the title: copy them again. The folder copies live in a directory named
+        // after it, transcripts and audio included: move them.
         it.sync.onDocumentChanged(docId)
+        it.sync.onDocumentMoved(docId)
     }
 
     override fun documentMoved(docId: String) = dispatch("move") {
         it.indexing.documentMetaChanged(docId)
-        it.sync.onDocumentChanged(docId)
+        // Only where the copies live changed: no new notes export for the vault.
+        it.sync.onDocumentMoved(docId)
     }
 
     override fun pagesNeedIndexing(docId: String, pageIds: List<String>) = dispatch("index pages") { g ->
