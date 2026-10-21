@@ -150,15 +150,17 @@ class SyncEngineChangesDuringRunTest {
         val h = harness(prefs)
         h.network.online = false
         // More offline vault items than one page of the queue, all older than the folder copy.
+        // Recent times, so the run's cleanup of old finished rows leaves the folder row alone.
+        val start = h.now - 20_000
         h.dao.rows.value = (1..5_001).map { i ->
             SyncQueueEntity(
                 rowId = i.toLong(), documentId = "doc-$i", kind = SyncKind.NOTES.name, target = OutputTarget.VAULT.name,
-                refId = null, enqueuedAt = i.toLong(), attempts = 0, lastError = null, status = SyncItemStatus.PENDING,
+                refId = null, enqueuedAt = start + i, attempts = 0, lastError = null, status = SyncItemStatus.PENDING,
             )
         }
         h.dao.rows.value = h.dao.rows.value + SyncQueueEntity(
             rowId = 10_000, documentId = d.id, kind = SyncKind.NOTES.name, target = OutputTarget.FOLDER.name,
-            refId = null, enqueuedAt = 10_000, attempts = 0, lastError = null, status = SyncItemStatus.PENDING,
+            refId = null, enqueuedAt = start + 10_000, attempts = 0, lastError = null, status = SyncItemStatus.PENDING,
         )
         h.engine.run()
 
