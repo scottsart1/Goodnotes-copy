@@ -13,6 +13,7 @@ import android.view.ViewConfiguration
 import androidx.input.motionprediction.MotionEventPredictor
 import com.inkwell.notes.core.model.InputPrefs
 import com.inkwell.notes.core.model.LongPressAction
+import com.inkwell.notes.core.model.SideButtonMode
 import com.inkwell.notes.core.model.TapGestureAction
 import com.inkwell.notes.core.model.ToolState
 import com.inkwell.notes.core.model.ToolType
@@ -324,6 +325,14 @@ internal class InputRouter(private val e: InkEngine) {
             cur.onUp(e, ev)
         }
         handler.removeCallbacks(longPress)
+        if (stylusToolType == ToolType.LASSO && buttons.mode == SideButtonMode.HOLD_TO_LASSO && buttons.temporaryTool == null) {
+            // Hold-to-lasso button released before lifting: the loop is done. Continuing with the
+            // base tool would clear the new selection and draw a stray stroke to the lift point.
+            stylusTool = null
+            stylusToolType = null
+            stylusConsumed = true
+            return
+        }
         startStylusTool(newType)
     }
 
@@ -364,6 +373,8 @@ internal class InputRouter(private val e: InkEngine) {
     }
 
     private val longPress = Runnable {
+        // "Nothing" leaves the gesture alone: checked before cancelling or consuming anything.
+        if (e.inputPrefs.longPress == LongPressAction.NONE) return@Runnable
         val x: Float; val y: Float
         if (stylusId != -1) {
             val type = stylusToolType ?: return@Runnable
@@ -379,7 +390,6 @@ internal class InputRouter(private val e: InkEngine) {
             mode = Mode.CONSUMED
             x = f.x; y = f.y
         } else return@Runnable
-        if (e.inputPrefs.longPress == LongPressAction.NONE) return@Runnable
         val page = e.pageIndexAt(x, y)
         if (page < 0) return@Runnable
         e.viewToPage(page, x, y, tmp)
