@@ -3,6 +3,7 @@ package com.inkwell.notes.core.storage
 import android.graphics.Bitmap
 import android.util.Log
 import com.inkwell.notes.app.AppGraph
+import com.inkwell.notes.audio.transcription.Transcriptions
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -36,8 +37,9 @@ internal interface LibraryHooks {
     /**
      * Recordings of a deleted document are gone from the database (rows and audio cascade or
      * are removed with the folder), so what other features keep about them outside the
-     * database must go too: the speaker service's encrypted per-recording voice data, its
-     * queued identification job, its model wait and its "voices to name" notification.
+     * database must go too: a queued or running transcription, the speaker service's encrypted
+     * per-recording voice data, its queued identification job, its model wait and its "voices to
+     * name" notification.
      */
     fun recordingsDeleted(docId: String, recordingIds: List<String>) {}
 
@@ -89,6 +91,14 @@ internal object GraphLibraryHooks : LibraryHooks {
     override fun recordingsDeleted(docId: String, recordingIds: List<String>) = dispatch("forget recordings") { g ->
         // Each recording on its own: one failure must not keep the others' voice data around.
         for (id in recordingIds) {
+            try {
+                // A running transcription would otherwise keep writing its progress file.
+                Transcriptions.cancel(g, id)
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.w(TAG, "cancel transcription failed: ${e.javaClass.simpleName}")
+            }
             try {
                 g.speakers.onRecordingDeleted(id)
             } catch (e: kotlinx.coroutines.CancellationException) {
