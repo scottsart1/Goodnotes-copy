@@ -64,6 +64,25 @@ class ErrorMappingTest {
         assertEquals(AiFailure.Kind.QUOTA, ErrorMapper.http(AiProviderId.ANTHROPIC, 400, """{"type":"error","error":{"type":"invalid_request_error","message":"Your credit balance is too low to access the Anthropic API."}}""").kind)
     }
 
+    @Test fun rateLimitMentioningBillingStaysRetryable() {
+        val body = """{"error":{"message":"Rate limit reached for gpt-4o-mini on requests per min (RPM): Limit 3, Used 3. Please try again in 20s. """ +
+            """Visit https://platform.openai.com/account/rate-limits. You can increase your rate limit by adding a payment method to your account at """ +
+            """https://platform.openai.com/account/billing.","type":"requests","code":"rate_limit_exceeded"}}"""
+        val r = ErrorMapper.http(p, 429, body, retryAfterHeader = "20")
+        assertEquals(AiFailure.Kind.RATE_LIMIT, r.kind)
+        assertTrue(r.retryable)
+        assertEquals(20_000L, r.retryAfterMs)
+    }
+
+    @Test fun nonPrimitiveErrorMessagesDoNotThrow() {
+        assertNull(ErrorMapper.providerMessage("""{"error":{"message":{"code":1}}}"""))
+        assertNull(ErrorMapper.providerMessage("""{"error":{"message":["a","b"]}}"""))
+        assertNull(ErrorMapper.providerMessage("""{"error":[1,2],"message":{"x":1}}"""))
+        assertEquals("plain", ErrorMapper.providerMessage("""{"error":"plain"}"""))
+        assertEquals("top", ErrorMapper.providerMessage("""{"error":{"message":{"code":1}},"message":"top"}"""))
+        assertEquals(AiFailure.Kind.BAD_REQUEST, ErrorMapper.http(p, 400, """{"error":{"message":{"code":1}}}""").kind)
+    }
+
     @Test fun serverAndNetworkErrorsAreRetryable() {
         for (code in listOf(500, 502, 503, 504, 529)) assertTrue("$code", ErrorMapper.http(p, code, "").retryable)
         assertTrue(ErrorMapper.io(p, UnknownHostException("api.openai.com")).retryable)

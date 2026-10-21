@@ -81,8 +81,14 @@ internal fun NamingSection(s: AppSettings, actions: SettingsActions) {
                 val status = aiStatus
                 if (status != null) {
                     Note(
-                        if (status.available) "Using ${status.modelName ?: "your auto-naming model"}."
-                        else "No AI model is set up, so naming uses on-device keywords. Nothing is sent anywhere.",
+                        when {
+                            !status.available -> "No AI model is set up, so naming uses on-device keywords. Nothing is sent anywhere."
+                            // Background naming cannot ask first, so it does not send content while confirmation is on.
+                            s.privacy.confirmAiTransmission ->
+                                "Using ${status.modelName ?: "your auto-naming model"} when you ask for a name. Automatic naming uses " +
+                                    "on-device keywords while \"Confirm before sending content to AI\" is on in Privacy."
+                            else -> "Using ${status.modelName ?: "your auto-naming model"}."
+                        },
                         modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 12.dp),
                     )
                 }

@@ -4,8 +4,8 @@ import com.inkwell.notes.core.model.AiException
 import com.inkwell.notes.core.model.AiProviderId
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
-import kotlinx.serialization.json.jsonPrimitive
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import java.io.IOException
 import java.io.InterruptedIOException
@@ -87,6 +87,10 @@ object ErrorMapper {
                 if (modelId != null) "Model $model was not found at $name. Choose another model in AI settings."
                 else "$name endpoint not found (404). Check the custom endpoint URL in AI settings.",
                 retryable = false, httpStatus = status, kind = AiFailure.Kind.NOT_FOUND,
+            )
+            status in 300..399 -> AiFailure(
+                "$name endpoint redirected to another address ($status). Enter the final URL as the custom endpoint in AI settings.",
+                retryable = false, httpStatus = status, kind = AiFailure.Kind.CONFIG,
             )
             status == 402 || isQuota(lower) -> AiFailure(
                 "Your $name account has no remaining credit or quota. Add billing credit with $name, then try again.",
@@ -175,10 +179,11 @@ object ErrorMapper {
             ?: return body.trim().takeIf { it.length in 1..300 && !it.startsWith("<") }
         val err = obj["error"]
         val msg = when (err) {
-            is JsonObject -> err["message"]?.jsonPrimitive?.contentOrNull
+            // A non-primitive message (object/array from a custom endpoint) is ignored rather than thrown.
+            is JsonObject -> (err["message"] as? JsonPrimitive)?.contentOrNull
             null -> null
-            else -> runCatching { err.jsonPrimitive.contentOrNull }.getOrNull()
-        } ?: obj["message"]?.let { runCatching { it.jsonPrimitive.contentOrNull }.getOrNull() }
+            else -> (err as? JsonPrimitive)?.contentOrNull
+        } ?: (obj["message"] as? JsonPrimitive)?.contentOrNull
         return msg?.trim()?.takeIf { it.isNotEmpty() }
     }
 
@@ -190,7 +195,8 @@ object ErrorMapper {
         ).any { lower.contains(it) }
 
     private fun isQuota(lower: String): Boolean =
-        listOf("insufficient_quota", "insufficient balance", "insufficient_balance", "credit balance is too low", "exceeded your current quota", "billing")
+        // No bare "billing": OpenAI rate-limit (429) bodies link to account/billing and must stay retryable.
+        listOf("insufficient_quota", "insufficient balance", "insufficient_balance", "credit balance is too low", "exceeded your current quota")
             .any { lower.contains(it) }
 
     /** Retry-After as seconds or HTTP date, in ms. */
