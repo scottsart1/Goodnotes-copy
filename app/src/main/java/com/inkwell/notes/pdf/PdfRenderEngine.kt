@@ -11,6 +11,8 @@ import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.asCoroutineDispatcher
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -136,7 +138,8 @@ internal class PdfRenderEngine(
      */
     suspend fun probe(file: File): Probe {
         var failure: Probe = Probe.Damaged
-        val handle = withContext(dispatcher) {
+        // Not cancellable, so an opened renderer always reaches the finally below that closes it.
+        val handle = withContext(NonCancellable + dispatcher) {
             var descriptor: ParcelFileDescriptor? = null
             try {
                 descriptor = ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY)
@@ -152,6 +155,7 @@ internal class PdfRenderEngine(
             }
         } ?: return failure
         try {
+            currentCoroutineContext().ensureActive()
             val count = handle.pageCount
             val sizes = ArrayList<Pair<Float, Float>>(count)
             while (sizes.size < count) {

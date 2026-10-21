@@ -9,9 +9,12 @@ import com.inkwell.notes.core.model.Orientation
 import com.inkwell.notes.core.model.PageMeta
 import com.inkwell.notes.core.model.PageSizePreset
 import com.inkwell.notes.core.model.PageTemplate
+import com.inkwell.notes.core.storage.PageOrdering
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -120,8 +123,9 @@ internal class DocumentAssembler(
         // Build the new PDF first, so a failure here never creates a library entry.
         val pdf = if (compaction.keep.isEmpty()) null else buildSubset(compaction.keep)
         try {
+            // Created without cancellation so the id always comes back and a cancel is discarded below.
             val created = try {
-                library.createDocument(kind, folderId, originalName = title)
+                withContext(NonCancellable) { library.createDocument(kind, folderId, originalName = title) }
             } catch (c: CancellationException) {
                 throw c
             } catch (e: Exception) {
@@ -129,6 +133,7 @@ internal class DocumentAssembler(
                 throw PdfErrors.forWrite(context, e)
             }
             try {
+                currentCoroutineContext().ensureActive()
                 populate(created.id, sources, compaction.remapped, pdf)
             } catch (c: CancellationException) {
                 withContext(NonCancellable) { discard(created.id) }
@@ -217,7 +222,10 @@ internal class DocumentAssembler(
         if (src.bookmarked) library.setBookmark(dst.id, true, src.bookmarkTitle)
     }
 
-    /** Copies ink and other items plus the image files they reference. Returns false for empty pages. */
+    /**
+     * Copies ink and other items plus the image files they reference. Returns false for empty pages.
+     * Audio links are dropped: the recordings belong to the source document.
+     */
     private suspend fun copyContent(fromDoc: String, fromPage: String, toDoc: String, toPage: String): Boolean {
         val content = graph.pageStore.load(fromDoc, fromPage)
         if (content.isEmpty) return false
@@ -228,7 +236,7 @@ internal class DocumentAssembler(
                 if (from.isFile && !to.exists()) from.copyTo(to)
             }
         }
-        graph.pageStore.save(toDoc, toPage, content)
+        graph.pageStore.save(toDoc, toPage, if (fromDoc == toDoc) content else PageOrdering.withoutAudio(content))
         return true
     }
 

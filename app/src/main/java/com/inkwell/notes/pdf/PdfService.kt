@@ -11,6 +11,8 @@ import com.inkwell.notes.core.model.DocumentMeta
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -139,8 +141,9 @@ class PdfServiceImpl(private val graph: AppGraph) : PdfService {
      */
     private suspend fun importPreparedFile(file: File, folderId: String?, title: String?): DocumentMeta {
         val sizes = importer.prepare(file)
+        // Created without cancellation so the id always comes back and a cancel is discarded below.
         val doc = try {
-            library.createDocument(DocKind.PDF, folderId, originalName = title)
+            withContext(NonCancellable) { library.createDocument(DocKind.PDF, folderId, originalName = title) }
         } catch (c: CancellationException) {
             throw c
         } catch (e: Exception) {
@@ -148,6 +151,7 @@ class PdfServiceImpl(private val graph: AppGraph) : PdfService {
             throw PdfErrors.forWrite(context, e)
         }
         try {
+            currentCoroutineContext().ensureActive()
             engine.replaceSource(doc.id, file)
             library.addPdfPages(doc.id, sizes)
         } catch (c: CancellationException) {
