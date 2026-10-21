@@ -96,6 +96,9 @@ class WhiteboardController(val graph: AppGraph, val docId: String) : InkCanvasLi
     var temporaryTool by mutableStateOf<ToolType?>(null); private set
     var textEdit by mutableStateOf<TextEditRequest?>(null)
     var stickyEdit by mutableStateOf<StickyEditRequest?>(null)
+    /** What the open text and sticky editors hold now, so leaving the board does not lose it. */
+    private var textDraft: Triple<TextEditRequest, String, TextConfig>? = null
+    private var stickyDraft: Triple<StickyEditRequest, String, Int>? = null
     var longPress by mutableStateOf<LongPressRequest?>(null)
     /** Board point where the next picked image should go (null = centre of the view). */
     var imageTarget: PointF? = null
@@ -208,6 +211,7 @@ class WhiteboardController(val graph: AppGraph, val docId: String) : InkCanvasLi
 
     /** Leaves the screen: flush, release the canvas, stop observing. */
     fun dispose() {
+        commitPendingEdits()
         flush()
         persistToolsNow()
         boardSaver.removeErrorListener(saveErrorListener)
@@ -222,6 +226,8 @@ class WhiteboardController(val graph: AppGraph, val docId: String) : InkCanvasLi
 
     fun releaseCanvas() {
         if (released) return
+        // The canvas view may be released before dispose(): commit open editors while it exists.
+        commitPendingEdits()
         released = true
         canvas?.let { c ->
             runCatching { c.flush() }
@@ -326,8 +332,29 @@ class WhiteboardController(val graph: AppGraph, val docId: String) : InkCanvasLi
 
     // ------------------------------------------------------------------ Text & stickies
 
+    fun onTextDraft(req: TextEditRequest, text: String, config: TextConfig) {
+        textDraft = Triple(req, text, config)
+    }
+
+    fun onStickyDraft(req: StickyEditRequest, text: String, color: Int) {
+        stickyDraft = Triple(req, text, color)
+    }
+
+    /** Commits a text box or sticky still open in its editor (screen stopped or closed). */
+    fun commitPendingEdits() {
+        val text = textEdit
+        textDraft?.let { (req, t, cfg) ->
+            if (req === text && (t != req.initialText || cfg != req.config)) runCatching { commitText(req, t, cfg) }
+        }
+        val sticky = stickyEdit
+        stickyDraft?.let { (req, t, color) ->
+            if (req === sticky && (t != req.initialText || color != req.color)) runCatching { commitSticky(req, t, color) }
+        }
+    }
+
     fun commitText(req: TextEditRequest, text: String, config: TextConfig) {
         textEdit = null
+        textDraft = null
         val c = canvas ?: return
         if (req.itemId == null) {
             if (text.isNotBlank()) c.insertText(0, text, PointF(req.pageX, req.pageY), config)
@@ -340,6 +367,7 @@ class WhiteboardController(val graph: AppGraph, val docId: String) : InkCanvasLi
 
     fun commitSticky(req: StickyEditRequest, text: String, color: Int) {
         stickyEdit = null
+        stickyDraft = null
         canvas?.updateSticky(ItemRef(req.pageId, req.itemId, ItemType.STICKY), text, color)
         if (color != tools.stickyColor) updateTools(tools.copy(stickyColor = color))
     }

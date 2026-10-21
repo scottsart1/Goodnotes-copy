@@ -44,6 +44,9 @@ data class IndexedPassage(
 /** Local full-text index (Room FTS4) over every text source, with optional semantic search. */
 interface SearchIndex {
     suspend fun search(query: String, limit: Int = 60, semantic: Boolean = false): List<SearchHit>
+    /** Keyword search inside one document; the document filter applies before [limit]. */
+    suspend fun searchInDocument(docId: String, query: String, limit: Int = 500): List<SearchHit> =
+        search(query, limit).filter { it.documentId == docId }
     suspend fun indexDocumentMeta(doc: DocumentMeta)
     suspend fun replacePageText(docId: String, pageId: String, source: TextSource, blocks: List<RecognizedBlock>, engine: String)
     suspend fun replaceTranscript(docId: String, recordingId: String, segments: List<TranscriptSegment>, engine: String)

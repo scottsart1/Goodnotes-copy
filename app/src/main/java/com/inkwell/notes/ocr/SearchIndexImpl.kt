@@ -30,6 +30,9 @@ class SearchIndexImpl(private val graph: AppGraph) : SearchIndex {
     override suspend fun search(query: String, limit: Int, semantic: Boolean): List<SearchHit> =
         engine.search(query, limit, semantic).hits
 
+    override suspend fun searchInDocument(docId: String, query: String, limit: Int): List<SearchHit> =
+        engine.search(query, limit, wantSemantic = false, documentId = docId).hits
+
     /** [search] plus whether semantic matching was used or failed (for the search screen). */
     internal suspend fun searchDetailed(query: String, limit: Int, semantic: Boolean): SearchOutcome =
         engine.search(query, limit, semantic)

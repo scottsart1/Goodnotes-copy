@@ -31,10 +31,10 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.movableContentOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -88,6 +88,7 @@ fun SplitLayout(leftDocId: String, rightDocId: String, nav: AppNavigator, keepSc
     val controllers = remember { mutableStateMapOf<String, NotebookController>() }
     val bounds = remember { mutableStateMapOf<String, Rect>() }
     val drag = remember { PaneDrag() }
+    val panes = remember { HashMap<String, @Composable (Boolean, Modifier) -> Unit>() }
     var origin by remember { mutableStateOf(Offset.Zero) }
     val density = LocalDensity.current
 
@@ -143,8 +144,13 @@ fun SplitLayout(leftDocId: String, rightDocId: String, nav: AppNavigator, keepSc
             if (total > 0f) fraction = Placement.splitFraction(fraction + delta / total)
         }
         val ids = listOf(first, second)
-        val paneContent: @Composable (String, Boolean, Modifier) -> Unit = { id, isFirst, mod ->
-            key(id) {
+        // Each pane is movable content keyed by its document, so swapping the panes or switching
+        // between stacked and side by side moves the editors instead of recreating them (which
+        // would drop undo history, selection, open panels and text being typed).
+        fun paneContent(id: String): @Composable (Boolean, Modifier) -> Unit = panes.getOrPut(id) {
+            movableContentOf { isFirst: Boolean, mod: Modifier ->
+                // One sink per pane: a new object would restart the drag handle's gesture mid-drag.
+                val sink = remember { sinkFor(id) }
                 NotebookPane(
                     docId = id,
                     initialPage = null,
@@ -157,7 +163,7 @@ fun SplitLayout(leftDocId: String, rightDocId: String, nav: AppNavigator, keepSc
                         isLeft = isFirst,
                         onClosePane = { closePane(id) },
                         onSendToOther = { content, from -> send(content, from) },
-                        dragSink = sinkFor(id),
+                        dragSink = sink,
                     ),
                     onController = { c -> if (c == null) controllers.remove(id) else controllers[id] = c },
                 )
@@ -165,11 +171,11 @@ fun SplitLayout(leftDocId: String, rightDocId: String, nav: AppNavigator, keepSc
         }
         if (stacked) {
             Column(Modifier.fillMaxSize()) {
-                ids.forEachIndexed { i, id -> paneContent(id, i == 0, Modifier.fillMaxWidth().weight(if (i == 0) fraction else 1f - fraction)) }
+                ids.forEachIndexed { i, id -> paneContent(id)(i == 0, Modifier.fillMaxWidth().weight(if (i == 0) fraction else 1f - fraction)) }
             }
         } else {
             Row(Modifier.fillMaxSize()) {
-                ids.forEachIndexed { i, id -> paneContent(id, i == 0, Modifier.fillMaxHeight().weight(if (i == 0) fraction else 1f - fraction)) }
+                ids.forEachIndexed { i, id -> paneContent(id)(i == 0, Modifier.fillMaxHeight().weight(if (i == 0) fraction else 1f - fraction)) }
             }
         }
         // Divider: a thin draggable strip on the pane boundary (so pens still reach the pane

@@ -132,6 +132,8 @@ fun WhiteboardScreen(docId: String, nav: AppNavigator) {
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner, controller) {
         val observer = LifecycleEventObserver { _, event ->
+            // Stopping (background, app lock, possible process death) commits an open text box too.
+            if (event == Lifecycle.Event.ON_STOP) controller.commitPendingEdits()
             if (event == Lifecycle.Event.ON_PAUSE || event == Lifecycle.Event.ON_STOP) controller.flush()
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -363,10 +365,16 @@ private fun WhiteboardContent(controller: WhiteboardController, nav: AppNavigato
                     RecordingDock(controller.docId, Modifier.fillMaxSize())
 
                     controller.textEdit?.let { req ->
-                        TextBoxEditor(req, controller.page?.paper?.color ?: 0xFFFFFFFF.toInt()) { text, cfg -> controller.commitText(req, text, cfg) }
+                        TextBoxEditor(
+                            req,
+                            controller.page?.paper?.color ?: 0xFFFFFFFF.toInt(),
+                            onDraft = { text, cfg -> controller.onTextDraft(req, text, cfg) },
+                        ) { text, cfg -> controller.commitText(req, text, cfg) }
                     }
                     controller.stickyEdit?.let { req ->
-                        StickyEditor(req) { text, color -> controller.commitSticky(req, text, color) }
+                        StickyEditor(req, onDraft = { text, color -> controller.onStickyDraft(req, text, color) }) { text, color ->
+                            controller.commitSticky(req, text, color)
+                        }
                     }
                     controller.longPress?.let { req ->
                         LongPressMenu(
