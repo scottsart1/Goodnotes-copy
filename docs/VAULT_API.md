@@ -47,7 +47,8 @@ password.
 - `429 {"error": "locked", "retryAfterSeconds": n}` after repeated failures (per IP, rolling).
 
 Every other `/api/*` call needs `Authorization: Bearer <token>` (app) or the cookie (web).
-Tokens are HMAC-signed, expire after 30 days, and are invalidated when the password changes.
+Tokens are HMAC-signed, expire after 30 days, and are invalidated when the password changes
+or when the vault is switched from link-only to password access.
 `401 {"error":"unauthorized"}` means "log in again".
 
 `POST {BASE}/api/logout` clears the cookie.

@@ -172,6 +172,17 @@ else
 fi
 
 PRINT_URL=""
+# Worker secrets cannot be read back and later runs keep the stored link, so once a
+# generated link is stored it is printed on every exit, even if a later step fails.
+print_url() {
+  local status=$?
+  if [[ -n "$PRINT_URL" ]]; then
+    printf '\nYour private vault URL (shown only this once - save it in your password manager):\n  %s\n\n' "$PRINT_URL"
+    if (( status != 0 )); then
+      printf 'The deploy did not finish; re-run this script (it keeps this link).\n\n'
+    fi
+  fi
+}
 case "$LINK_ACTION" in
   set) put_secret NOTES_LINK_ID "$NOTES_LINK_ID" ;;
   keep) log "Keeping the existing NOTES_LINK_ID secret" ;;
@@ -179,6 +190,7 @@ case "$LINK_ACTION" in
     NOTES_LINK_ID="$(random_id)"
     put_secret NOTES_LINK_ID "$NOTES_LINK_ID"
     PRINT_URL="$SITE/notes/$NOTES_LINK_ID"
+    trap print_url EXIT
     ;;
 esac
 
@@ -194,8 +206,4 @@ fi
 # 5. Deploy
 log "Deploying the Worker"
 "${WRANGLER[@]}" deploy >&2
-
-if [[ -n "$PRINT_URL" ]]; then
-  printf '\nYour private vault URL (shown only this once - save it in your password manager):\n  %s\n\n' "$PRINT_URL"
-fi
 log "Done."

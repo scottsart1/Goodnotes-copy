@@ -22,6 +22,8 @@ export interface Secrets {
   linkId: string;
   password: string;
   sessionSecret: string;
+  /** Set when NOTES_ACCESS = "link"; tokens minted then never pass in password mode. */
+  linkOnly?: boolean;
 }
 
 /** True when the private link alone opens the vault (NOTES_ACCESS = "link"): no password, no sessions. */
@@ -34,13 +36,18 @@ export function getSecrets(env: Env): Secrets | null {
   const password = env.NOTES_PASSWORD ?? "";
   const sessionSecret = env.SESSION_SECRET ?? "";
   if (!linkId || !sessionSecret) return null;
-  if (!password && !linkOnly(env)) return null;
-  return { linkId, password, sessionSecret };
+  const open = linkOnly(env);
+  if (!password && !open) return null;
+  return { linkId, password, sessionSecret, linkOnly: open };
 }
 
-/** First 8 bytes (hex) of SHA-256(password + secret): changes whenever the password does. */
+/**
+ * First 8 bytes (hex) of SHA-256(password + secret): changes whenever the password does.
+ * In link-only mode the input is prefixed with "link\0", so a token anyone with the link
+ * could mint stops working once the vault is switched back to password access.
+ */
 export async function passwordVersion(secrets: Secrets): Promise<string> {
-  const digest = await sha256(secrets.password + secrets.sessionSecret);
+  const digest = await sha256((secrets.linkOnly ? "link\0" : "") + secrets.password + secrets.sessionSecret);
   return toHex(digest.slice(0, 8));
 }
 

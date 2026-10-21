@@ -2,7 +2,7 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vitest";
 import { linkOnly } from "../src/auth";
 import type { Env } from "../src/env";
-import { BASE, LINK_ID, ORIGIN, bearer, call, docBody, uid, uniqueIp } from "./helpers";
+import { BASE, LINK_ID, ORIGIN, bearer, call, docBody, login, uid, uniqueIp } from "./helpers";
 
 /** NOTES_ACCESS = "link": the private link alone opens the vault. No password secret needed. */
 const open: Env = { ...env, NOTES_ACCESS: "link", NOTES_PASSWORD: "" };
@@ -94,6 +94,21 @@ describe("password access stays the default", () => {
     const html = await (await call(BASE, { env: e })).text();
     expect(html).toContain('<body data-signed-in="false">');
     expect(html).toContain('<button id="lock-btn" class="btn" type="button">Lock</button>');
+  });
+
+  it("a token minted while link-only does not open the vault once switched back", async () => {
+    // Link mode with the password secret still set: the pv must still differ.
+    const wasOpen: Env = { ...env, NOTES_ACCESS: "link" };
+    const res = await call("/api/session", { method: "POST", body: "{}", env: wasOpen });
+    expect(res.status).toBe(200);
+    const { token } = (await res.json()) as { token: string };
+    const e: Env = { ...env, NOTES_ACCESS: "password" };
+    expect((await call("/api/ping", { headers: bearer(token), env: e })).status).toBe(401);
+    const html = await (await call(BASE, { headers: { Cookie: `nv_session=${token}` }, env: e })).text();
+    expect(html).toContain('<body data-signed-in="false">');
+    // A token from a real login still works.
+    const fresh = await login(e);
+    expect((await call("/api/ping", { headers: bearer(fresh.token), env: e })).status).toBe(200);
   });
 
   it("without a password secret it is not configured, not open", async () => {
