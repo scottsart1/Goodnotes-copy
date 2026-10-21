@@ -177,7 +177,8 @@ class SyncManagerImpl(private val graph: AppGraph) : SyncManager {
             if (dao.pendingCount() == 0) engine.enqueueEverything(prefs) else engine.enqueueChangedDocuments(prefs)
         }
         val report = try {
-            engine.run()
+            // The user asked: items waiting out a retry backoff go now too.
+            engine.run(ignoreBackoff = true)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
@@ -341,7 +342,8 @@ class SyncManagerImpl(private val graph: AppGraph) : SyncManager {
             for (added in after - before) enqueued += engine.enqueueEverything(new, onlyKind = kind, onlyTarget = added)
         }
         if (new.folderUri != old.folderUri) {
-            stateStore.clearAllLocations()
+            // Document locations are kept per folder (see PrefsSyncStateStore): coming back to a
+            // folder later still knows which directories hold deleted documents' last copies.
             if (old.folderUri != null && new.folderUri != null) enqueued += engine.enqueueEverything(new, onlyTarget = OutputTarget.FOLDER)
         }
         val oldVault = VaultUrl.normalize(old.vaultUrl)

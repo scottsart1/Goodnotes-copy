@@ -139,7 +139,40 @@ class SyncEngineChangesDuringRunTest {
         h.engine.run()
 
         assertTrue(File(docDir(), "notes.pdf").readBytes().contentEquals(FakeSource.pdfBytes(again.id)))
-        assertNull(h.state.folderLocation(d.id))
+        assertNull(h.state.folderLocation(folderPrefs.folderUri!!, d.id))
+    }
+
+    @Test
+    fun `a deleted document's last copies stay protected after using another folder and coming back`() = runBlocking {
+        val otherDrive = File(tmp, "other").apply { mkdirs() }
+        val otherUri = "content://com.android.externalstorage.documents/tree/primary%3AOther"
+        val h = harness(folderPrefs)
+        h.folderAccess = FolderAccess { uri -> JavaFileNode(if (uri == otherUri) otherDrive else drive) }
+        h.engine.enqueue(d.id, SyncKind.NOTES, h.prefs.notes)
+        h.engine.run()
+        // d is deleted: its copy in the first folder is now the only one.
+        h.source.docs.remove(d.id)
+
+        // Another folder for a while (or the first one's permission was lost), where a new
+        // document with the same title is copied.
+        h.prefs = folderPrefs.copy(folderUri = otherUri)
+        val elsewhere = doc(id = "5e5e5e5e-1111-2222-3333-444455556666", title = d.title, folderId = "f2")
+        h.source.docs[elsewhere.id] = elsewhere
+        h.engine.enqueue(elsewhere.id, SyncKind.NOTES, h.prefs.notes)
+        h.engine.run()
+        assertTrue(File(otherDrive, "Inkwell/Economics/Term 1/${d.title}/notes.pdf").readBytes().contentEquals(FakeSource.pdfBytes(elsewhere.id)))
+        h.source.docs.remove(elsewhere.id)
+
+        // The first folder is chosen again and another new document takes the title.
+        h.prefs = folderPrefs
+        val again = doc(id = "7c1d9e0f-1111-2222-3333-444455556666", title = d.title, folderId = "f2")
+        h.source.docs[again.id] = again
+        h.engine.enqueue(again.id, SyncKind.NOTES, h.prefs.notes)
+        h.engine.run()
+
+        assertTrue("the deleted document's copy is untouched", File(docDir(), "notes.pdf").readBytes().contentEquals(FakeSource.pdfBytes(d.id)))
+        assertTrue(File(docDir("${d.title} (7c1d9e)"), "notes.pdf").readBytes().contentEquals(FakeSource.pdfBytes(again.id)))
+        assertEquals(listOf("Inkwell", "Economics", "Term 1", d.title), h.state.folderLocation(folderPrefs.folderUri!!, d.id))
     }
 
     // ------------------------------------------------------------------ queue

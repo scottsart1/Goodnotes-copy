@@ -95,19 +95,51 @@ internal class PrefsSyncStateStore(context: Context) : SyncStateStore {
         get() = prefs.getLong(KEY_REFUSED_AT, 0)
         set(value) = prefs.edit().putLong(KEY_REFUSED_AT, value).apply()
 
-    override fun folderLocation(docId: String): List<String>? = decode(locations.getString(docId, null))
+    /** Locations live under "<folder tree URI><SEP><document id>", so each folder keeps its own. */
+    private fun key(folder: String, docId: String) = folder + SEP + docId
 
-    override fun folderLocations(): Map<String, List<String>> =
-        locations.all.mapNotNull { (docId, value) -> decode(value as? String)?.let { docId to it } }.toMap()
+    @Volatile private var legacyAdopted = false
+
+    /**
+     * Locations saved before they were kept per folder (key = document id) belong to the folder
+     * chosen at that time, which is the one sync uses first after the update: [folder] takes them.
+     */
+    @Synchronized
+    private fun adoptLegacy(folder: String) {
+        if (legacyAdopted) return
+        legacyAdopted = true
+        val legacy = locations.all.filterKeys { !it.contains(SEP) }
+        if (legacy.isEmpty()) return
+        locations.edit().apply {
+            for ((docId, value) in legacy) {
+                remove(docId)
+                if (value is String) putString(key(folder, docId), value)
+            }
+        }.apply()
+    }
+
+    override fun folderLocation(folder: String, docId: String): List<String>? {
+        adoptLegacy(folder)
+        return decode(locations.getString(key(folder, docId), null))
+    }
+
+    override fun folderLocations(folder: String): Map<String, List<String>> {
+        adoptLegacy(folder)
+        val prefix = folder + SEP
+        return locations.all.mapNotNull { (k, value) ->
+            if (!k.startsWith(prefix)) return@mapNotNull null
+            decode(value as? String)?.let { k.substring(prefix.length) to it }
+        }.toMap()
+    }
 
     private fun decode(stored: String?): List<String>? =
         stored?.split(SEP)?.filter { it.isNotEmpty() }?.takeIf { it.isNotEmpty() }
 
-    override fun setFolderLocation(docId: String, segments: List<String>?) {
-        locations.edit().apply { if (segments == null) remove(docId) else putString(docId, segments.joinToString(SEP)) }.apply()
+    override fun setFolderLocation(folder: String, docId: String, segments: List<String>?) {
+        adoptLegacy(folder)
+        val k = key(folder, docId)
+        locations.edit().apply { if (segments == null) remove(k) else putString(k, segments.joinToString(SEP)) }.apply()
     }
-
-    fun clearAllLocations() = locations.edit().clear().apply()
 
     private companion object {
         const val KEY_LAST_SUCCESS = "lastSuccessAt"

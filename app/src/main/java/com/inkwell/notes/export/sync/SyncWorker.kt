@@ -109,7 +109,8 @@ internal class SyncScheduler(private val context: Context) {
          * How to ask for a run under a unique name that has work in [states]; null when nothing
          * is needed. A waiting run (retry backoff, which can grow to hours, or a missing network)
          * is replaced so new items go now. A run in progress may already have passed the new
-         * items, so another run is queued behind it, once.
+         * items, so another run is queued behind it, once. Replacing a run in backoff does not
+         * retry failed items early: each waits out its own backoff ([SyncEngine.retryDelayMs]).
          */
         internal fun policyFor(states: List<WorkInfo.State>): ExistingWorkPolicy? {
             val running = WorkInfo.State.RUNNING in states

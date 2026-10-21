@@ -65,6 +65,15 @@ class SyncEngine(
 
     @Volatile private var dirty = false
 
+    /**
+     * When each item that just failed may be tried again (queue row id -> epoch ms), so a run
+     * started early (a kick after an edit, a recording, a settings change) does not use up the
+     * retry attempts of items still waiting out their backoff during a server or folder outage.
+     * In memory only: after the process restarts every waiting item gets one immediate try.
+     * Guarded by [runLock].
+     */
+    private val retryAt = HashMap<Long, Long>()
+
     // ------------------------------------------------------------------ enqueueing
 
     /** Adds one item per target, replacing open items for the same thing. Returns how many. */
@@ -161,19 +170,23 @@ class SyncEngine(
 
     // ------------------------------------------------------------------ running
 
-    /** Processes every item in [scope] that can go now. Waits if another run is in progress. */
-    suspend fun run(scope: SyncScope = SyncScope.ALL): SyncRunReport = runLock.withLock {
+    /**
+     * Processes every item in [scope] that can go now. Waits if another run is in progress. Items
+     * that failed recently wait for their backoff ([retryDelayMs]) unless [ignoreBackoff] ("Sync now").
+     */
+    suspend fun run(scope: SyncScope = SyncScope.ALL, ignoreBackoff: Boolean = false): SyncRunReport = runLock.withLock {
         _running.value = true
         try {
-            withContext(io) { runLocked(scope) }
+            withContext(io) { runLocked(scope, ignoreBackoff) }
         } finally {
             _running.value = false
         }
     }
 
-    private suspend fun runLocked(scope: SyncScope): SyncRunReport {
+    private suspend fun runLocked(scope: SyncScope, ignoreBackoff: Boolean): SyncRunReport {
         var ctx = RunContext(prefs())
         val attempted = HashSet<Long>()
+        val seenPending = HashSet<Long>()
         try {
             while (true) {
                 dirty = false
@@ -184,6 +197,7 @@ class SyncEngine(
                 var afterRowId = Long.MIN_VALUE
                 while (true) {
                     val page = queue().pendingAfter(afterAt, afterRowId, QUERY_LIMIT)
+                    page.forEach { seenPending += it.rowId }
                     val items = page
                         .filter { it.rowId !in attempted && scope.accepts(it) }
                         .sortedWith(compareBy<SyncQueueEntity>({ kindOrder(it.kind) }, { it.documentId }, { it.enqueuedAt }, { it.rowId }))
@@ -192,6 +206,12 @@ class SyncEngine(
                         // Destinations can change during a long run: each item goes by the current settings.
                         ctx = ctx.following(prefs())
                         attempted += item.rowId
+                        if (!ignoreBackoff && waitingOutBackoff(item)) {
+                            // Its next try is due later: the run comes back (worker retry) for it.
+                            ctx.defer()
+                            ctx.retryLater = true
+                            continue
+                        }
                         processed = true
                         processOne(item, ctx)
                     }
@@ -204,6 +224,8 @@ class SyncEngine(
         } finally {
             ctx.exports.clear()
         }
+        // Forget rows that are no longer pending (done, failed, replaced or dropped meanwhile).
+        if (scope == SyncScope.ALL) retryAt.keys.retainAll(seenPending)
         val now = clock()
         runCatching {
             queue().pruneDone(now - KEEP_DONE_MS)
@@ -346,6 +368,15 @@ class SyncEngine(
 
     private suspend fun finish(item: SyncQueueEntity, status: String, attempts: Int, error: String?) {
         queue().setOutcome(item.rowId, status, attempts, error?.take(500))
+        // A failed try that will be retried waits out its backoff; anything else goes when it can.
+        if (status == SyncItemStatus.PENDING && attempts > item.attempts) retryAt[item.rowId] = clock() + retryDelayMs(attempts)
+        else retryAt.remove(item.rowId)
+    }
+
+    private fun waitingOutBackoff(item: SyncQueueEntity): Boolean {
+        val due = retryAt[item.rowId] ?: return false
+        // Attempts reset to 0 ("Sync now" retrying failed items): no backoff left to wait out.
+        return item.attempts > 0 && clock() < due
     }
 
     // ------------------------------------------------------------------ per kind
@@ -492,7 +523,7 @@ class SyncEngine(
         ctx.placements[doc.id]?.let { return it }
         val folderNames = source.folderNames(doc.folderId)
         var segments = FolderNaming.documentDir(folderNames, doc.title, doc.id)
-        val previous = state.folderLocation(doc.id)
+        val previous = state.folderLocation(ctx.folderKey, doc.id)
         if (ctx.ownersOf(segments).any { it != doc.id }) {
             if (FolderWriter.findDir(root, segments) != null) {
                 segments = FolderNaming.documentDir(folderNames, doc.title, doc.id, withId = true)
@@ -570,24 +601,26 @@ class SyncEngine(
         /** Folder location -> documents whose copies are there; loaded on first use. */
         private var ownerMap: HashMap<List<String>, HashSet<String>>? = previous?.ownerMap?.takeIf { sameFolder }
         private var markdownCache: Pair<String, String>? = previous?.markdownCache
+        /** The folder destination whose document locations this run reads and writes. */
+        val folderKey: String get() = prefs.folderUri.orEmpty()
         val exports: ExportCache = previous?.exports ?: ExportCache(source)
 
         /** This context while the settings are still [current]; otherwise a new one for them. */
         fun following(current: DestinationPrefs): RunContext = if (current == prefs) this else RunContext(current, this)
 
         private fun owners(): HashMap<List<String>, HashSet<String>> = ownerMap ?: HashMap<List<String>, HashSet<String>>().also { map ->
-            for ((docId, segments) in state.folderLocations()) map.getOrPut(segments) { HashSet() } += docId
+            for ((docId, segments) in state.folderLocations(folderKey)) map.getOrPut(segments) { HashSet() } += docId
             ownerMap = map
         }
 
         fun ownersOf(segments: List<String>): Set<String> = owners()[segments].orEmpty()
 
         fun forgetOwners(segments: List<String>) {
-            owners().remove(segments)?.forEach { state.setFolderLocation(it, null) }
+            owners().remove(segments)?.forEach { state.setFolderLocation(folderKey, it, null) }
         }
 
         fun setLocation(docId: String, from: List<String>?, segments: List<String>) {
-            state.setFolderLocation(docId, segments)
+            state.setFolderLocation(folderKey, docId, segments)
             val map = owners()
             if (from != null) map[from]?.remove(docId)
             map.getOrPut(segments) { HashSet() } += docId
@@ -644,6 +677,9 @@ class SyncEngine(
         internal const val VAULT_LIST_CAP = 2000
         private const val TAG = "InkwellSync"
         const val MAX_ATTEMPTS = 8
+        /** Wait before the first retry of a failed item; doubles per attempt (as the worker's own backoff). */
+        const val RETRY_BASE_MS = 30_000L
+        private const val MAX_RETRY_DELAY_MS = 60L * 60 * 1000
         /** After the vault refused the password, no login is attempted for this long (the vault's lockout window). */
         const val CREDENTIALS_HOLD_MS = 15L * 60 * 1000
         private const val QUERY_LIMIT = 5000
@@ -651,6 +687,10 @@ class SyncEngine(
         const val CHANGE_TOLERANCE_MS = 2_000L
         private const val KEEP_DONE_MS = 7L * 24 * 3600 * 1000
         private const val KEEP_FAILED_MS = 30L * 24 * 3600 * 1000
+
+        /** How long an item that failed [attempts] times waits before its next try. */
+        fun retryDelayMs(attempts: Int): Long =
+            (RETRY_BASE_MS shl (attempts - 1).coerceIn(0, 20)).coerceAtMost(MAX_RETRY_DELAY_MS)
 
         private fun kindOrder(kind: String): Int = when (kind) {
             SyncKind.NOTES.name -> 0
