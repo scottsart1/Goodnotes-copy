@@ -44,6 +44,11 @@ internal fun NamingSection(s: AppSettings, actions: SettingsActions) {
     val naming = s.naming
     val aiStatus by rememberAiTaskStatus(actions.graph, AiTask.NAMING, s.ai)
     fun set(transform: (NamingPrefs) -> NamingPrefs) = actions.update { it.copy(naming = transform(it.naming)) }
+    // Books (or cancels) the next naming check once the change is saved: schedule() reads the
+    // saved settings, so calling it straight away would still see the old values.
+    fun setAndReschedule(transform: (NamingPrefs) -> NamingPrefs) = actions.update(
+        onApplied = { actions.background("Couldn't schedule automatic naming.") { actions.graph.naming.schedule() } },
+    ) { it.copy(naming = transform(it.naming)) }
 
     SectionColumn {
         SettingsGroup("How files are named") {
@@ -54,10 +59,7 @@ internal fun NamingSection(s: AppSettings, actions: SettingsActions) {
             SwitchRow(
                 "Name files automatically",
                 naming.autoNameEnabled,
-                { v ->
-                    set { it.copy(autoNameEnabled = v) }
-                    if (v) actions.background("Couldn't schedule automatic naming.") { actions.graph.naming.schedule() }
-                },
+                { v -> setAndReschedule { it.copy(autoNameEnabled = v) } },
                 subtitle = "Untitled files get a short topic once they have enough content.",
             )
             RowDivider()
@@ -66,7 +68,7 @@ internal fun NamingSection(s: AppSettings, actions: SettingsActions) {
                 subtitle = "Time to keep writing before a topic is chosen. Files without enough content stay Untitled and are checked again later.",
                 choices = listOf(Choice(12, "12 hours"), Choice(24, "24 hours"), Choice(48, "48 hours")),
                 selected = naming.delayHours,
-                onSelect = { h -> set { it.copy(delayHours = h) } },
+                onSelect = { h -> setAndReschedule { it.copy(delayHours = h) } },
                 enabled = naming.autoNameEnabled,
             )
             RowDivider()
