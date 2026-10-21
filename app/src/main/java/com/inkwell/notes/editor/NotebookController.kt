@@ -207,7 +207,7 @@ class NotebookController(
     override suspend fun loadContent(page: PageMeta): PageContent {
         saver.latest(page.id)?.let { return it.content }
         return try {
-            graph.pageStore.load(docId, page.id).also { unreadablePages.remove(page.id) }
+            graph.pageStore.load(docId, page.id, strict = true).also { unreadablePages.remove(page.id) }
         } catch (t: Throwable) {
             if (t is kotlinx.coroutines.CancellationException) throw t
             Log.e(TAG, "Loading page ${page.id} failed: ${t.javaClass.simpleName}")

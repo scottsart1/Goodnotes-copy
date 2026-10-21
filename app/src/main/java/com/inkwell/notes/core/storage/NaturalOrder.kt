@@ -5,8 +5,8 @@ import java.util.Locale
 
 /**
  * Natural, case-insensitive ordering for titles: digit runs compare by value
- * ("Lecture 2" < "Lecture 10"), text compares with the locale's collation ignoring case.
- * Not thread-safe (Collator); create one per sort.
+ * ("Lecture 2" < "Lecture 10"), text compares with the locale's collation ignoring case, and a
+ * digit run sorts before text. Not thread-safe (Collator); create one per sort.
  */
 class NaturalOrder(locale: Locale = Locale.getDefault()) : Comparator<String> {
     private val collator: Collator = Collator.getInstance(locale).apply { strength = Collator.SECONDARY }
@@ -29,6 +29,10 @@ class NaturalOrder(locale: Locale = Locale.getDefault()) : Comparator<String> {
                 if (c != 0) return c
                 val zeros = (i - si).compareTo(j - sj)
                 if (zeros != 0) return zeros
+            } else if (aDigit != bDigit) {
+                // Fixed, not the collator: it reads other digits ("５", "⑤") by value, so comparing a
+                // number with text through it makes the order intransitive and the sort can throw.
+                return if (aDigit) -1 else 1
             } else {
                 val si = i
                 while (i < a.length && a[i].isAsciiDigit() == aDigit) i++

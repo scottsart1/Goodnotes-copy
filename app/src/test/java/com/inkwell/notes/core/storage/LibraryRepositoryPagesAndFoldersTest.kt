@@ -386,6 +386,31 @@ class LibraryRepositoryPagesAndFoldersTest {
         assertEquals("A / B / C", repo.folderPath(c.id))
     }
 
+    @Test fun restoringAFolderRenamesItWhenANewSiblingTookItsName() = runTest {
+        val old = repo.createFolder("Biology", null)
+        val d = repo.createDocument(DocKind.NOTEBOOK, folderId = old.id)
+        repo.trashFolder(old.id)
+        val fresh = repo.createFolder("Biology", null)
+        assertEquals("Biology", fresh.name)
+        h.hooks.metaChanged.clear()
+        repo.restoreFolder(old.id)
+        assertEquals("Biology (2)", repo.getFolder(old.id)!!.name)
+        assertEquals("Biology", repo.getFolder(fresh.id)!!.name)
+        assertEquals(listOf(d.id), h.hooks.metaChanged)
+    }
+
+    @Test fun restoringADocumentRenamesARevivedFolderWhenANewSiblingTookItsName() = runTest {
+        val a = repo.createFolder("A", null)
+        val b = repo.createFolder("B", a.id)
+        val d = repo.createDocument(DocKind.NOTEBOOK, folderId = b.id)
+        repo.trashFolder(a.id)
+        repo.createFolder("A", null)
+        repo.restoreDocument(d.id)
+        assertNull(repo.getFolder(a.id)!!.trashedAt)
+        assertEquals("A (2) / B", repo.folderPath(b.id))
+        assertEquals(b.id, repo.getDocument(d.id)!!.folderId)
+    }
+
     @Test fun emptyingTheTrashReRootsLiveContentOfDeletedFolders() = runTest {
         val a = repo.createFolder("A", null)
         val b = repo.createFolder("B", a.id)
