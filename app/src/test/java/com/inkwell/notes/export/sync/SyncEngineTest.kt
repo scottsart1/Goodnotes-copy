@@ -292,6 +292,7 @@ class SyncEngineTest {
             val report = h.engine.run()
             assertTrue("the run comes back for the waiting item", report.retryLater)
             assertEquals(1, report.deferred)
+            assertTrue("the outage stays shown while the item waits", h.state.lastError!!.contains("HTTP 503"))
         }
         assertEquals(1, h.dao.all.single().attempts)
         assertEquals(SyncItemStatus.PENDING, h.dao.all.single().status)
@@ -308,6 +309,7 @@ class SyncEngineTest {
         h.now += 1
         val report = h.engine.run()
         assertNull(report.error, report.error)
+        assertNull("the copy went through: the error is cleared", h.state.lastError)
         assertEquals(SyncItemStatus.DONE, h.dao.all.single().status)
     }
 

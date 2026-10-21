@@ -111,7 +111,8 @@ class SyncEngine(
      * - Folder (only when it holds copies of the document): one output is written again in the new
      *   directory, and [Placement.finishMove] moves the rest there: the notes when they go to the
      *   folder, otherwise one transcript, otherwise one recording.
-     * - Vault: a metadata-only update (title, folder path) of a document the vault already has.
+     * - Vault (only when notes go there): the title and folder path of a document the vault
+     *   already has, sent with its current note text (see [vaultMetadataTargets]).
      */
     suspend fun enqueueMoved(docId: String, prefs: DestinationPrefs = this.prefs()): Int {
         var n = 0
@@ -121,8 +122,11 @@ class SyncEngine(
                 n += enqueue(docId, SyncKind.NOTES, folder)
             } else if (OutputTarget.FOLDER in prefs.transcripts || OutputTarget.FOLDER in prefs.audio) {
                 val recordings = source.recordings(docId)
-                val transcript = recordings.firstOrNull { it.transcriptStatus == TranscriptStatus.DONE }
-                    ?.takeIf { OutputTarget.FOLDER in prefs.transcripts }
+                // Only an output that syncTranscript/syncAudio actually writes runs finishMove: a
+                // finished transcript with no segments (a silent recording) is skipped there.
+                val transcript = if (OutputTarget.FOLDER !in prefs.transcripts) null else recordings.firstOrNull {
+                    it.transcriptStatus == TranscriptStatus.DONE && source.transcript(it.id)?.segments?.isNotEmpty() == true
+                }
                 val audio = recordings.firstOrNull { it.isFinished() && it.segmentFiles.isNotEmpty() }
                     ?.takeIf { OutputTarget.FOLDER in prefs.audio }
                 when {
@@ -209,6 +213,7 @@ class SyncEngine(
                         if (!ignoreBackoff && waitingOutBackoff(item)) {
                             // Its next try is due later: the run comes back (worker retry) for it.
                             ctx.defer()
+                            ctx.waitingBackoff++
                             ctx.retryLater = true
                             continue
                         }
@@ -234,8 +239,9 @@ class SyncEngine(
         if (ctx.succeeded > 0) state.lastSuccessAt = ctx.lastSuccessAt
         val error = ctx.error
         if (error != null) state.lastError = error
-        // A partial run (folder only, audio only) can't vouch for the other destination.
-        else if (scope == SyncScope.ALL && (ctx.succeeded > 0 || ctx.failed == 0)) state.lastError = null
+        // A partial run (folder only, audio only) can't vouch for the other destination, and a run
+        // that only skipped items waiting out their backoff proves nothing about the outage.
+        else if (scope == SyncScope.ALL && (ctx.succeeded > 0 || (ctx.failed == 0 && ctx.waitingBackoff == 0))) state.lastError = null
         return SyncRunReport(
             succeeded = ctx.succeeded,
             failed = ctx.failed,
@@ -503,8 +509,9 @@ class SyncEngine(
         val client = ctx.vault()
         val id = VaultNames.docId(doc.id)
         if (!vaultHasDoc(client, id, ctx)) return Outcome.Skipped
-        // The upsert replaces the text as well: send it again when notes go to the vault.
-        val markdown = if (OutputTarget.VAULT in ctx.prefs.notes) ctx.markdown(doc.id) else null
+        // The upsert replaces the text as well, so it is sent again (metadata items only go to
+        // the vault while notes do: see vaultMetadataTargets).
+        val markdown = ctx.markdown(doc.id)
         val writtenAt = clock()
         client.putDoc(id, SyncPayloads.docUpsert(doc, source.folderPath(doc.folderId), markdown))
         ctx.vaultDocWrittenAt[doc.id] = writtenAt
@@ -585,6 +592,8 @@ class SyncEngine(
         var succeeded: Int = previous?.succeeded ?: 0
         var failed: Int = previous?.failed ?: 0
         var deferred: Int = previous?.deferred ?: 0
+        /** Items skipped because they were waiting out their retry backoff. */
+        var waitingBackoff: Int = previous?.waitingBackoff ?: 0
         var retryLater: Boolean = previous?.retryLater ?: false
         var lastSuccessAt: Long = previous?.lastSuccessAt ?: 0L
         var error: String? = previous?.error
@@ -669,7 +678,7 @@ class SyncEngine(
          */
         const val VAULT_METADATA_REF = "metadata"
 
-        /** Where an item may go under [prefs]: a metadata update goes to the vault while any output goes there. */
+        /** Where an item may go under [prefs]: a metadata update goes to the vault while notes go there. */
         internal fun targetsFor(kind: SyncKind, refId: String?, prefs: DestinationPrefs): Set<OutputTarget> =
             if (kind == SyncKind.NOTES && refId == VAULT_METADATA_REF) prefs.vaultMetadataTargets() else prefs.targetsFor(kind)
 

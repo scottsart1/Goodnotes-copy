@@ -49,11 +49,13 @@ fun DestinationPrefs.withTargets(kind: SyncKind, targets: Set<OutputTarget>): De
 val DestinationPrefs.hasAnyTarget: Boolean get() = notes.isNotEmpty() || transcripts.isNotEmpty() || audio.isNotEmpty()
 
 /**
- * The vault when any output goes there: the vault then keeps a document row whose title and
- * folder path follow the library (see [SyncEngine.enqueueMoved]).
+ * The vault when notes go there: the vault's document row then follows the library's title and
+ * folder path (see [SyncEngine.enqueueMoved]). Not when only transcripts or audio go there: the
+ * vault's upsert replaces the stored note text too, so a metadata update without notes would
+ * erase the text an earlier Notes -> Vault setting left there.
  */
 fun DestinationPrefs.vaultMetadataTargets(): Set<OutputTarget> =
-    if (OutputTarget.VAULT in notes || OutputTarget.VAULT in transcripts || OutputTarget.VAULT in audio) setOf(OutputTarget.VAULT) else emptySet()
+    if (OutputTarget.VAULT in notes) setOf(OutputTarget.VAULT) else emptySet()
 
 /** Removes the folder destination everywhere (used when its permission was revoked). */
 fun DestinationPrefs.withoutFolder(): DestinationPrefs = copy(

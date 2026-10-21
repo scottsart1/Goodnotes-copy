@@ -83,6 +83,33 @@ class SyncEngineMoveTest {
     }
 
     @Test
+    fun `a move skips a first transcript that has no text and moves the copies with one that does`() = runBlocking {
+        val prefs = DestinationPrefs(transcripts = setOf(OutputTarget.FOLDER), audio = setOf(OutputTarget.FOLDER), folderUri = folderUri)
+        val h = harness(prefs)
+        // The first recording was silent: its transcription finished with no segments.
+        val lecture = h.source.recordings.getValue("rec-1")
+        h.source.recordings.clear()
+        h.source.recordings["rec-0"] = recording(id = "rec-0", title = "Silence", startedAt = lecture.startedAt - 100_000)
+        h.source.recordings["rec-1"] = lecture
+        h.source.transcripts["rec-0"] = StoredTranscript(emptyList(), "on-device")
+        h.engine.enqueue(d.id, SyncKind.TRANSCRIPT, prefs.transcripts, "rec-1")
+        h.engine.enqueue(d.id, SyncKind.AUDIO, prefs.audio, "rec-0")
+        h.engine.enqueue(d.id, SyncKind.AUDIO, prefs.audio, "rec-1")
+        h.engine.run()
+        val copies = listOf("audio_Lecture 3.m4a", "audio_Silence.m4a", "transcript_Lecture 3.md")
+        assertEquals(copies, oldDir.list()!!.sorted())
+
+        h.move()
+        assertEquals(1, h.engine.enqueueMoved(d.id, prefs))
+        assertEquals(listOf(SyncKind.TRANSCRIPT.name to "rec-1"), h.dao.pendingRows().map { it.kind to it.refId })
+        h.engine.run()
+
+        assertEquals(copies, newDir.list()!!.sorted())
+        assertFalse("the old copies are gone", oldDir.exists())
+        assertTrue(h.dao.pendingRows().isEmpty())
+    }
+
+    @Test
     fun `a move copies the notes again when they go to the folder`() = runBlocking {
         val prefs = DestinationPrefs(notes = setOf(OutputTarget.FOLDER), transcripts = setOf(OutputTarget.FOLDER), folderUri = folderUri)
         val h = harness(prefs)
@@ -128,18 +155,17 @@ class SyncEngineMoveTest {
     }
 
     @Test
-    fun `with only transcripts in the vault a move updates the metadata and sends no note text`() = runBlocking {
+    fun `with only transcripts in the vault a move leaves the vault's stored notes alone`() = runBlocking {
+        // Notes went to the vault before; the upsert would replace their text with nothing.
         vault.docIds += d.id
         val prefs = DestinationPrefs(transcripts = setOf(OutputTarget.VAULT), vaultUrl = vaultUrl)
         val h = harness(prefs)
         h.move()
-        h.engine.enqueueMoved(d.id, prefs)
+        assertEquals(0, h.engine.enqueueMoved(d.id, prefs))
         h.engine.run()
 
-        assertEquals(listOf("POST /api/session", "GET /api/docs", "PUT /api/docs/${d.id}"), vault.calls())
-        val put = FakeVault.jsonOf(vault.requests.last())
-        assertEquals("Economics", put["folderPath"]!!.jsonPrimitive.content)
-        assertFalse(put.containsKey("markdown"))
+        assertTrue(vault.requests.isEmpty())
+        assertTrue(h.dao.all.isEmpty())
     }
 
     @Test
@@ -186,25 +212,31 @@ class SyncEngineMoveTest {
     }
 
     @Test
-    fun `a metadata update is dropped once no output goes to the vault`() = runBlocking {
+    fun `a metadata update is dropped once notes no longer go to the vault`() = runBlocking {
         vault.docIds += d.id
-        val prefs = DestinationPrefs(transcripts = setOf(OutputTarget.VAULT), vaultUrl = vaultUrl)
+        val prefs = DestinationPrefs(notes = setOf(OutputTarget.VAULT), transcripts = setOf(OutputTarget.VAULT), vaultUrl = vaultUrl)
         val h = harness(prefs)
-        h.engine.enqueueMoved(d.id, prefs)
-        h.prefs = prefs.copy(transcripts = emptySet())
+        assertEquals(1, h.engine.enqueueMoved(d.id, prefs))
+        // Transcripts still go to the vault: a metadata-only upsert would erase its stored notes.
+        h.prefs = prefs.copy(notes = emptySet())
         h.engine.run()
         assertTrue(vault.requests.isEmpty())
         assertTrue(h.dao.pendingRows().isEmpty())
     }
 
     @Test
-    fun `metadata updates go to the vault while any output does`() {
+    fun `metadata updates go to the vault while notes do`() {
         val none = DestinationPrefs()
         assertEquals(emptySet<OutputTarget>(), none.vaultMetadataTargets())
-        assertEquals(setOf(OutputTarget.VAULT), none.copy(audio = setOf(OutputTarget.VAULT)).vaultMetadataTargets())
+        assertEquals(setOf(OutputTarget.VAULT), none.copy(notes = setOf(OutputTarget.VAULT)).vaultMetadataTargets())
+        assertEquals(emptySet<OutputTarget>(), none.copy(audio = setOf(OutputTarget.VAULT)).vaultMetadataTargets())
         assertEquals(emptySet<OutputTarget>(), none.copy(notes = setOf(OutputTarget.FOLDER)).vaultMetadataTargets())
         assertEquals(
             setOf(OutputTarget.VAULT),
+            SyncEngine.targetsFor(SyncKind.NOTES, SyncEngine.VAULT_METADATA_REF, none.copy(notes = setOf(OutputTarget.VAULT))),
+        )
+        assertEquals(
+            emptySet<OutputTarget>(),
             SyncEngine.targetsFor(SyncKind.NOTES, SyncEngine.VAULT_METADATA_REF, none.copy(transcripts = setOf(OutputTarget.VAULT))),
         )
         assertEquals(emptySet<OutputTarget>(), SyncEngine.targetsFor(SyncKind.NOTES, null, none.copy(transcripts = setOf(OutputTarget.VAULT))))
