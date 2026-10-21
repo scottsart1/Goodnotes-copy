@@ -91,6 +91,8 @@ internal fun FolderCard(
 internal fun VaultCard(
     prefs: DestinationPrefs,
     hasPassword: Boolean,
+    /** A password is saved, perhaps for another vault link: Forget still removes it. */
+    hasAnyPassword: Boolean = hasPassword,
     check: CheckState,
     onUrlChanged: (String) -> Unit,
     onUrlCommit: (String) -> Unit,
@@ -123,7 +125,13 @@ internal fun VaultCard(
         LabeledField(stringResource(R.string.sync_vault_url)) {
             OutlinedTextField(
                 value = url,
-                onValueChange = { url = it; onUrlChanged(it) },
+                onValueChange = {
+                    url = it
+                    onUrlChanged(it)
+                    // A password still in the field is for the link the field now shows: save it
+                    // again for that link (one saved for another link only ever goes to that link).
+                    if (password.isNotEmpty()) onPasswordChanged(password)
+                },
                 modifier = Modifier.fillMaxWidth().onFocusChanged {
                     if (urlFocused && !it.isFocused) onUrlCommit(url)
                     urlFocused = it.isFocused
@@ -173,7 +181,7 @@ internal fun VaultCard(
             SecondaryAction(
                 stringResource(if (check == CheckState.Running) R.string.sync_testing else R.string.sync_vault_test),
                 { onTest(url, password) },
-                enabled = normalized != null && (hasPassword || password.isNotEmpty()),
+                enabled = normalized != null,
                 busy = check == CheckState.Running,
             )
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -187,11 +195,11 @@ internal fun VaultCard(
                 }, enabled = normalized != null)
                 Icon(Icons.AutoMirrored.Outlined.OpenInNew, null, Modifier.size(16.dp), tint = if (normalized != null) c.accent else c.inkMuted)
             }
-            if (hasPassword) QuietAction(stringResource(R.string.sync_vault_forget), { password = ""; onForgetPassword() }, color = c.danger)
+            if (hasPassword || hasAnyPassword) QuietAction(stringResource(R.string.sync_vault_forget), { password = ""; onForgetPassword() }, color = c.danger)
         }
         CheckResult(check)
         val usesVault = prefs.hasAnyTarget && (OutputTarget.VAULT in prefs.notes || OutputTarget.VAULT in prefs.transcripts || OutputTarget.VAULT in prefs.audio)
-        if (usesVault && (normalized == null || (!hasPassword && password.isEmpty()))) {
+        if (usesVault && normalized == null) {
             InfoLine(stringResource(R.string.sync_vault_needs_setup))
         }
     }

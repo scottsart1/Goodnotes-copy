@@ -70,6 +70,15 @@ class FakeSyncQueueDao : SyncQueueDao {
 
     override suspend fun pendingCount(): Int = pendingRows().size
 
+    override suspend fun pendingAfter(afterAt: Long, afterRowId: Long, limit: Int): List<SyncQueueEntity> =
+        pendingRows()
+            .filter { it.enqueuedAt > afterAt || (it.enqueuedAt == afterAt && it.rowId > afterRowId) }
+            .sortedWith(compareBy<SyncQueueEntity>({ it.enqueuedAt }, { it.rowId }))
+            .take(limit)
+
+    override suspend fun pendingKindsAndTargets(): List<SyncQueueEntity> =
+        pendingRows().groupBy { it.kind to it.target }.values.map { rows -> rows.minBy { it.rowId } }
+
     override fun observeFailedCount(): Flow<Int> = rows.map { list -> list.count { it.status == SyncItemStatus.FAILED } }
 
     override suspend fun setOutcome(rowId: Long, status: String, attempts: Int, lastError: String?) {
@@ -126,6 +135,8 @@ class FakeSource(private val tmp: File) : SyncSource {
     var pdfExports = 0
     var audioExports = 0
     var failExport: Throwable? = null
+    /** Runs at the start of every PDF export (to change things in the middle of a run). */
+    var onExport: () -> Unit = {}
 
     override suspend fun document(docId: String) = docs[docId]
     override suspend fun allDocuments() = docs.values.toList()
@@ -146,6 +157,7 @@ class FakeSource(private val tmp: File) : SyncSource {
     override suspend fun markdown(docId: String) = markdowns[docId] ?: "# ${docs[docId]?.title}\n"
 
     override suspend fun exportPdf(docId: String): File {
+        onExport()
         failExport?.let { throw it }
         pdfExports++
         return File(tmp, "export-$docId-$pdfExports.pdf").apply { writeBytes(pdfBytes(docId)) }
@@ -245,9 +257,13 @@ class FakeVault(
     val requests = CopyOnWriteArrayList<RecordedRequest>()
     val issuedTokens = CopyOnWriteArrayList<String>()
     val docIds = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+    /** Note text the vault stores per document (from PUT api/docs/{id}). */
+    val markdowns = java.util.concurrent.ConcurrentHashMap<String, String>()
     /** Tokens the server accepts. Clear it to simulate an expired/invalidated session. */
     val validTokens = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
     @Volatile var lockedSeconds: Long? = null
+    /** NOTES_ACCESS = "link": no password, no token needed; a login gets a token anyway. */
+    @Volatile var linkOnly = false
     @Volatile var failNext: MutableList<MockResponse> = CopyOnWriteArrayList()
     private var counter = 0
 
@@ -282,8 +298,8 @@ class FakeVault(
                 return json(429, """{"error":"locked","retryAfterSeconds":$it}""").setHeader("Retry-After", it.toString())
             }
             val body = r.body.clone().readUtf8()
-            val pw = Json.parseToJsonElement(body).jsonObject["password"]?.toString()?.trim('"')
-            if (pw != password) return json(401, """{"error":"invalid_password"}""")
+            val pw = runCatching { Json.parseToJsonElement(body).jsonObject["password"]?.toString()?.trim('"') }.getOrNull()
+            if (pw != password && !linkOnly) return json(401, """{"error":"invalid_password"}""")
             val token = "tok-${++counter}.sig"
             issuedTokens += token
             validTokens += token
@@ -292,16 +308,24 @@ class FakeVault(
         }
         val auth = r.getHeader("Authorization")
         val token = auth?.removePrefix("Bearer ").orEmpty()
-        if (auth == null || !validTokens.contains(token)) return json(401, """{"error":"unauthorized"}""")
+        if (!linkOnly && (auth == null || !validTokens.contains(token))) return json(401, """{"error":"unauthorized"}""")
         return when {
             rest == "/api/ping" && r.method == "GET" -> json(200, """{"ok":true,"name":"Your Pit Box · Notes"}""")
             rest == "/api/docs" && r.method == "GET" -> json(200, """{"docs":[${docIds.joinToString(",") { """{"id":"$it","title":"t","kind":"NOTEBOOK"}""" }}]}""")
             rest.startsWith("/api/docs/") && r.method == "GET" && rest.removePrefix("/api/docs/").none { it == '/' } ->
-                if (rest.removePrefix("/api/docs/") in docIds) json(200, """{"id":"${rest.removePrefix("/api/docs/")}","title":"t","kind":"NOTEBOOK"}""")
+                if (rest.removePrefix("/api/docs/") in docIds) {
+                    val id = rest.removePrefix("/api/docs/")
+                    val md = kotlinx.serialization.json.JsonPrimitive(markdowns[id].orEmpty()).toString()
+                    json(200, """{"id":"$id","title":"t","kind":"NOTEBOOK","markdown":$md}""")
+                }
                 else json(404, """{"error":"not_found"}""")
             rest.startsWith("/api/docs/") && r.method == "PUT" -> {
                 val parts = rest.removePrefix("/api/docs/").split("/")
                 docIds += parts[0]
+                if (parts.size == 1) {
+                    val md = runCatching { Json.parseToJsonElement(r.body.clone().readUtf8()).jsonObject["markdown"] }.getOrNull()
+                    markdowns[parts[0]] = (md as? kotlinx.serialization.json.JsonPrimitive)?.content.orEmpty()
+                }
                 if (parts.size == 3 && parts[1] == "files" && r.getHeader("Content-Length") == null) json(411, """{"error":"length_required"}""")
                 else json(200, """{"ok":true}""")
             }
@@ -377,7 +401,10 @@ class EngineHarness(
         folders = FolderAccess { uri -> folderAccess.root(uri) },
         network = network,
         state = state,
-        onFolderRevoked = { revoked++; prefs = prefs.withoutFolder() },
+        onFolderRevoked = { uri ->
+            revoked++
+            if (prefs.folderUri == uri) prefs = prefs.withoutFolder()
+        },
         clock = { now },
         io = Dispatchers.Unconfined,
         endpointFor = { url -> if (url.isNotBlank()) endpoint ?: vault?.endpoint else null },

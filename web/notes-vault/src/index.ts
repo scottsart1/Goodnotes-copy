@@ -1,5 +1,5 @@
 import { handleApi } from "./api";
-import { authenticate, getSecrets, handleLogin, handleLogout, sameOrigin, SESSION_COOKIE, getCookie, verifyToken } from "./auth";
+import { authenticate, getSecrets, handleLogin, handleLogout, linkOnly, sameOrigin, SESSION_COOKIE, getCookie, verifyToken } from "./auth";
 import { secretEquals } from "./crypto";
 import type { Env } from "./env";
 import { HttpError, errorResponse, json, newNonce, plainNotFound, withSecurityHeaders } from "./http";
@@ -14,6 +14,8 @@ const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
  *   /notes/<NOTES_LINK_ID>            web UI (also with a trailing slash)
  *   /notes/<NOTES_LINK_ID>/api/...    JSON API (docs/VAULT_API.md)
  *   anything else                     plain 404 (the vault is invisible without the link)
+ * With NOTES_ACCESS = "link" the link alone opens the page and the API; otherwise both
+ * also need the password.
  */
 async function route(request: Request, env: Env, nonce: string): Promise<Response> {
   const url = new URL(request.url);
@@ -30,9 +32,10 @@ async function route(request: Request, env: Env, nonce: string): Promise<Respons
       throw new HttpError(405, "method_not_allowed", undefined, { Allow: "GET, HEAD" });
     }
     const secrets = getSecrets(env);
+    const open = !!secrets && linkOnly(env);
     const cookie = getCookie(request, SESSION_COOKIE);
-    const signedIn = !!(secrets && cookie && (await verifyToken(cookie, secrets)));
-    return new Response(renderPage(nonce, signedIn), {
+    const signedIn = open || !!(secrets && cookie && (await verifyToken(cookie, secrets)));
+    return new Response(renderPage(nonce, signedIn, !open), {
       headers: { "Content-Type": "text/html; charset=utf-8" },
     });
   }
@@ -51,6 +54,14 @@ async function route(request: Request, env: Env, nonce: string): Promise<Respons
     return handleLogout(request, secrets);
   }
 
+  if (linkOnly(env)) {
+    // The link is the key: no token needed (one sent by an older app is ignored). A
+    // browser on another site never gets to change anything through it.
+    if (!SAFE_METHODS.has(method) && request.headers.has("Origin") && !sameOrigin(request)) {
+      throw new HttpError(403, "bad_origin");
+    }
+    return handleApi(request, env, parts, url);
+  }
   const via = await authenticate(request, secrets);
   if (!via) throw new HttpError(401, "unauthorized");
   // CSRF: browsers attach the cookie automatically, so state changes made with it must

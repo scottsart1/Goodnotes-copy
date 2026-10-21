@@ -1,5 +1,6 @@
 # Private notes vault for yourpitbox.com/notes (see README.md).
-# Secrets (never in this file): NOTES_LINK_ID, NOTES_PASSWORD, SESSION_SECRET.
+# Secrets (never in this file): NOTES_LINK_ID, SESSION_SECRET, and NOTES_PASSWORD unless
+# NOTES_ACCESS is "link".
 name = "notes-vault"
 main = "src/index.ts"
 compatibility_date = "2026-08-01"
@@ -14,6 +15,11 @@ routes = [
   { pattern = "yourpitbox.com/notes*", zone_name = "yourpitbox.com" },
   { pattern = "www.yourpitbox.com/notes*", zone_name = "yourpitbox.com" },
 ]
+
+# "link": the private link alone opens the vault (single user, no password). Remove it, or
+# set "password", to require NOTES_PASSWORD as well.
+[vars]
+NOTES_ACCESS = "link"
 
 # Request URLs contain the private link id, so Workers Logs / invocation logs stay off.
 [observability]

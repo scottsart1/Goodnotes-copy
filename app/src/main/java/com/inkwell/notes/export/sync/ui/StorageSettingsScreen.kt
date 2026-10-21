@@ -117,6 +117,7 @@ internal fun StorageSettingsScreen(modifier: Modifier = Modifier) {
                 VaultCard(
                     prefs = prefs,
                     hasPassword = vm.hasPassword,
+                    hasAnyPassword = vm.hasAnyPassword,
                     check = vm.vaultCheck,
                     onUrlChanged = vm::onUrlChanged,
                     onUrlCommit = vm::commitUrl,
@@ -149,6 +150,7 @@ internal fun StorageSettingsScreen(modifier: Modifier = Modifier) {
                     onAutoBackup = { on -> if (on) launchTree(autoBackupPicker, null) else vm.disableAutoBackup() },
                     onChangeAutoFolder = { launchTree(autoBackupPicker, vm.autoBackup?.uri) },
                     onDismissResult = vm::dismissBackupResult,
+                    autoStatus = vm.autoBackupStatus,
                 )
             }
         }

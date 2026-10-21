@@ -26,8 +26,9 @@ interface VaultCredentials {
 }
 
 /**
- * HTTP client for the notes vault (docs/VAULT_API.md). Logs in with the password from
- * [credentials], caches the bearer token, and on a `401` logs in again exactly once.
+ * HTTP client for the notes vault (docs/VAULT_API.md). Without a password in [credentials]
+ * the private link alone is the key (a link-only vault): no login, no token. With one, it
+ * logs in, caches the bearer token, and on a `401` logs in again exactly once.
  * Never logs or puts into exception messages the link, password, token or any body.
  */
 class VaultClient(
@@ -86,6 +87,15 @@ class VaultClient(
         missingIsAnswer = true,
     ) { r -> r.code != 404 }
 
+    /**
+     * `GET api/docs/{docId}`: the note text the vault stores for the document, or null when the
+     * vault does not have it (or did not say).
+     */
+    suspend fun storedMarkdown(docId: String): String? = authorized(
+        build = { token -> Request.Builder().url(endpoint.api("docs", docId)).get().header("Accept", "application/json").bearer(token).build() },
+        missingIsAnswer = true,
+    ) { r -> if (r.code == 404) null else decode(r, VaultStoredDoc.serializer()).markdown }
+
     /** `PUT api/docs/{docId}` with a [VaultDocUpsert]. */
     suspend fun putDoc(docId: String, doc: VaultDocUpsert) {
         val json = VaultJson.encodeToString(VaultDocUpsert.serializer(), doc)
@@ -119,13 +129,37 @@ class VaultClient(
         authorized(build = { token -> Request.Builder().url(url).put(body).bearer(token).build() }, what = what) { }
     }
 
-    /** Runs [build] with a valid token; a 401 clears the cached session and logs in once more. */
+    /**
+     * Runs [build] without a token when no password is saved (a link-only vault; a 401 means
+     * this vault does ask for one), else with a valid token: a 401 then clears the cached
+     * session and logs in once more.
+     */
     private suspend fun <T> authorized(
-        build: (String) -> Request,
+        build: (String?) -> Request,
         what: String? = null,
         missingIsAnswer: Boolean = false,
         handle: (Response) -> T,
     ): T {
+        val response = if (credentials.password().isNullOrEmpty()) {
+            execute(build(null)).also { r ->
+                if (r.code == 401) {
+                    r.close()
+                    throw VaultException.MissingPassword()
+                }
+            }
+        } else {
+            withToken(build)
+        }
+        return response.use { r ->
+            when {
+                r.isSuccessful -> handle(r)
+                missingIsAnswer && r.code == 404 && isJsonNotFound(r) -> handle(r)
+                else -> throw errorFor(r, what)
+            }
+        }
+    }
+
+    private suspend fun withToken(build: (String?) -> Request): Response {
         var session = cachedOrLogin()
         var response = execute(build(session.token))
         if (response.code == 401) {
@@ -142,13 +176,7 @@ class VaultClient(
                 throw VaultException.Unauthorized()
             }
         }
-        return response.use { r ->
-            when {
-                r.isSuccessful -> handle(r)
-                missingIsAnswer && r.code == 404 && isJsonNotFound(r) -> handle(r)
-                else -> throw errorFor(r, what)
-            }
-        }
+        return response
     }
 
     private fun isJsonNotFound(r: Response): Boolean {
@@ -243,7 +271,7 @@ class VaultClient(
         }
     }
 
-    private fun Request.Builder.bearer(token: String) = header("Authorization", "Bearer $token")
+    private fun Request.Builder.bearer(token: String?) = if (token == null) this else header("Authorization", "Bearer $token")
 
     companion object {
         private val JSON = "application/json; charset=utf-8".toMediaType()

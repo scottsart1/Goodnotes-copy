@@ -15,6 +15,8 @@ export default defineConfig(async () => {
           bindings: {
             NOTES_LINK_ID: "test-link-id-0000-not-a-real-secret",
             NOTES_PASSWORD: "test-password-not-real",
+            // Most tests cover the password mode; linkonly.test.ts switches to "link".
+            NOTES_ACCESS: "password",
             SESSION_SECRET: "test-session-secret-not-real-0123456789",
             TEST_MIGRATIONS: migrations,
           },

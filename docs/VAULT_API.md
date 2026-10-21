@@ -11,9 +11,14 @@ BASE = https://yourpitbox.com/notes/<LINK_ID>
 ```
 
 `LINK_ID` is a long random secret (the "special link"). Any request whose path does not
-start with `/notes/<LINK_ID>` gets a plain 404, indistinguishable from a missing page. The
-password is checked on top of that. Neither value is stored in this repository: both are
-Worker secrets (`NOTES_LINK_ID`, `NOTES_PASSWORD`).
+start with `/notes/<LINK_ID>` gets a plain 404, indistinguishable from a missing page.
+
+- **Link-only access** (`NOTES_ACCESS = "link"` in `wrangler.toml`, what this vault uses):
+  that check is the whole of access control.
+- **Password access:** the password is checked on top of the link.
+
+Neither secret is stored in this repository: both are Worker secrets (`NOTES_LINK_ID`,
+`NOTES_PASSWORD`).
 
 The Worker never redirects, and the app does not follow redirects, so the bearer token cannot
 travel to another server. The one exception is a site moving between `www.host` and `host`.
@@ -24,6 +29,16 @@ error.
 
 ## Authentication
 
+**Link-only access.** No authentication. Every `/api/*` call works without a token. A
+state-changing call (anything but GET, HEAD and OPTIONS) whose `Origin` is another site
+gets `403 {"error":"bad_origin"}`. `POST {BASE}/api/session` still answers
+`200 {"token", "expiresAt"}` for any body and sets no cookie, so older apps that log in keep
+working; a token they send is ignored. The app calls the API without a token when no
+password is saved. If such a call gets a 401, the app tells the user the vault asks for a
+password.
+
+**Password access:**
+
 `POST {BASE}/api/session` with JSON `{"password": "..."}`
 
 - `200 {"token": "<opaque>", "expiresAt": <epoch ms>}`, and a `Set-Cookie` (HttpOnly,
@@ -32,7 +47,8 @@ error.
 - `429 {"error": "locked", "retryAfterSeconds": n}` after repeated failures (per IP, rolling).
 
 Every other `/api/*` call needs `Authorization: Bearer <token>` (app) or the cookie (web).
-Tokens are HMAC-signed, expire after 30 days, and are invalidated when the password changes.
+Tokens are HMAC-signed, expire after 30 days, and are invalidated when the password changes
+or when the vault is switched from link-only to password access.
 `401 {"error":"unauthorized"}` means "log in again".
 
 `POST {BASE}/api/logout` clears the cookie.

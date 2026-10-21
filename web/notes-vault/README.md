@@ -6,7 +6,9 @@ and an R2 bucket, mounted on `yourpitbox.com/notes*` and `www.yourpitbox.com/not
 
 - **Invisible without the special link.** Everything except `/notes/<LINK_ID>` and the
   paths below it returns a plain `404 Not Found`, including `/notes` itself.
-- **Password on top.** The web page and the API need a session created with the password.
+- **Link only, or a password on top.** With `NOTES_ACCESS = "link"` in `wrangler.toml`
+  (the setting for this single-user vault) the private link alone opens the page and the
+  API. Without it the page and the API also need a session created with the password.
 - **Protocol:** [`docs/VAULT_API.md`](../../docs/VAULT_API.md) (the contract the app's
   sync client is written against).
 
@@ -31,7 +33,8 @@ web/notes-vault/
 | `DB` | D1 binding | database `notes-vault` (id in `wrangler.toml`) |
 | `FILES` | R2 binding | bucket `notes-vault-files` (bodies at `<docId>/<name>`) |
 | `NOTES_LINK_ID` | Worker secret | the private path segment, e.g. 32 random URL-safe characters |
-| `NOTES_PASSWORD` | Worker secret | the vault password |
+| `NOTES_ACCESS` | var (`wrangler.toml`) | `"link"`: the link alone opens the vault; anything else: link plus password |
+| `NOTES_PASSWORD` | Worker secret | the vault password (not needed with `NOTES_ACCESS = "link"`) |
 | `SESSION_SECRET` | Worker secret | HMAC key for session tokens |
 
 None of the secrets are stored in this repository. If `NOTES_LINK_ID` is missing the
@@ -73,8 +76,8 @@ password is the last line of defence once someone has the link).
 
 Repository → Settings → Secrets and variables → Actions → New repository secret, add:
 
-`CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, `NOTES_PASSWORD`, `NOTES_LINK_ID`,
-`SESSION_SECRET`.
+`CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, `NOTES_LINK_ID`, `SESSION_SECRET`, and
+`NOTES_PASSWORD` for password access (not needed with `NOTES_ACCESS = "link"`).
 
 Then Actions → **Deploy notes vault** → Run workflow. From then on every push to `main`
 that touches `web/notes-vault/**` runs typecheck, tests and the deploy. Without
@@ -87,7 +90,7 @@ id: if `NOTES_LINK_ID` is not set and the Worker has none yet, it stops with an 
 cd web/notes-vault
 npm ci
 export CLOUDFLARE_API_TOKEN=<token> CLOUDFLARE_ACCOUNT_ID=<account-id>   # or: npx wrangler login
-export NOTES_PASSWORD='<your-password>'
+export NOTES_PASSWORD='<your-password>'  # password access only; not needed with NOTES_ACCESS = "link"
 export NOTES_LINK_ID=<link-id>         # optional; see below
 export SESSION_SECRET=<session-secret> # optional; see below
 npm run deploy                          # = bash scripts/deploy.sh
@@ -101,22 +104,24 @@ npm run deploy                          # = bash scripts/deploy.sh
 2. creates the R2 bucket `notes-vault-files` if missing;
 3. runs `wrangler d1 migrations apply notes-vault --remote`;
 4. sets the secrets with `printf "%s" "$X" | npx wrangler secret put NAME`. `NOTES_PASSWORD`
-   is required. If `NOTES_LINK_ID` / `SESSION_SECRET` are unset, existing values are kept;
+   is required unless `wrangler.toml` sets `NOTES_ACCESS = "link"` (then an existing one is
+   kept). If `NOTES_LINK_ID` / `SESSION_SECRET` are unset, existing values are kept;
    when the Worker has no link yet (first local run) a random 32-character id is generated
-   and **the private URL is printed once** - save it in your password manager;
+   and **the private URL is printed once** (even if a later step fails) - save it in your
+   password manager;
 5. runs `npx wrangler deploy` (routes `yourpitbox.com/notes*` and `www.yourpitbox.com/notes*`
-   on the `yourpitbox.com` zone, plus the `workers.dev` URL for testing).
+   on the `yourpitbox.com` zone). There is no `workers.dev` or preview URL
+   (`workers_dev = false`); test locally with `npx wrangler dev` (see Development).
 
 ## Using the vault
 
-Open `https://yourpitbox.com/notes/<LINK_ID>` (bookmark it; `www.` works too), enter the
-password and press **Unlock**. The session lasts 30 days on that browser; **Lock** signs
-out. The page lists synced documents (newest first) with search across titles, recognised
+Open `https://yourpitbox.com/notes/<LINK_ID>` (bookmark it; `www.` redirects there).
+With link-only access the notes show straight away. Anyone who has the link can read and
+change them, so keep it to yourself the way you would a password. With password access,
+enter the password and press **Unlock**. The session lasts 30 days on that browser, and
+**Lock** signs out. The page lists synced documents (newest first) with search across titles, recognised
 text and transcripts; selecting one shows the rendered notes, transcripts with clickable
 `[mm:ss]` timestamps that seek the recording, and downloadable files.
-
-For testing before DNS/routes are live, the same paths work on the Worker's
-`https://notes-vault.<your-subdomain>.workers.dev/notes/<LINK_ID>`.
 
 ### Changing the password
 
@@ -130,6 +135,9 @@ printf '%s' '<new-password>' | npx wrangler secret put NOTES_PASSWORD
 Every existing session token (browsers and the app) stops working immediately, because
 tokens carry a fingerprint of the password. Enter the new password in the app.
 
+Switching `NOTES_ACCESS` from `"link"` to password access also invalidates every token
+issued while the link alone opened the vault, so the link alone no longer gets in.
+
 ### Changing the link
 
 Set a new `NOTES_LINK_ID` the same way. The old link turns into a plain 404 at once;
@@ -138,10 +146,12 @@ update the URL in the app and your bookmark. Rotating `SESSION_SECRET` signs eve
 ## How the app connects
 
 In Inkwell: **Settings › Storage, sync & backup › Your Pit Box vault**. Paste the private
-URL (`https://yourpitbox.com/notes/<LINK_ID>`) and the password, then use *Test
-connection*. The app stores the password in its encrypted `SecretStore`, signs in with
-`POST {url}/api/session`, and sends `Authorization: Bearer <token>` with every call. On
-`401 {"error":"unauthorized"}` it signs in again. Choose per output (notes, transcripts,
+URL (`https://yourpitbox.com/notes/<LINK_ID>`) and use *Test connection*.
+- **Link-only vault:** leave the password empty. The app then calls the API with the link
+  alone.
+- **Password vault:** enter the password. The app stores it in its encrypted `SecretStore`,
+  signs in with `POST {url}/api/session`, and sends `Authorization: Bearer <token>` with
+  every call. On `401 {"error":"unauthorized"}` it signs in again. Choose per output (notes, transcripts,
 audio) whether it goes to the vault.
 
 Implementation details the client can rely on (all within `docs/VAULT_API.md`):
@@ -167,7 +177,8 @@ Implementation details the client can rely on (all within `docs/VAULT_API.md`):
 - The link id and password are compared in constant time (both sides SHA-256 hashed,
   then a byte loop without early exit).
 - Token = `base64url(JSON {exp, pv}) + "." + base64url(HMAC-SHA256(SESSION_SECRET, payload))`,
-  valid 30 days; `pv` = first 8 bytes (hex) of SHA-256(`NOTES_PASSWORD` + `SESSION_SECRET`).
+  valid 30 days; `pv` = first 8 bytes (hex) of SHA-256(`NOTES_PASSWORD` + `SESSION_SECRET`),
+  with `"link\0"` prefixed to the input in link-only mode.
 - Cookie `nv_session`: `HttpOnly; Secure; SameSite=Strict; Path=/notes/<LINK_ID>; Max-Age=2592000`.
 - Lockout: per client address (IPv6 per /64, from `CF-Connecting-IP`), after 8 failed
   logins within 15 minutes further attempts get 429 until the window ends; a successful

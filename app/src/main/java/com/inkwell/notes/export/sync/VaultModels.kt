@@ -48,6 +48,10 @@ internal data class VaultPingResponse(val ok: Boolean = false, val name: String?
 @Serializable
 internal data class VaultDocSummary(val id: String = "")
 
+/** The part of `GET api/docs/{docId}` a metadata update keeps: the stored note text. */
+@Serializable
+internal data class VaultStoredDoc(val markdown: String? = null)
+
 @Serializable
 internal data class VaultDocList(val docs: List<VaultDocSummary> = emptyList())
 

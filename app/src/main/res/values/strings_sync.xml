@@ -27,17 +27,17 @@
     <string name="sync_folder_not_writable">This folder can\'t be written to. Choose another one.</string>
 
     <string name="sync_vault_title">Your Pit Box vault</string>
-    <string name="sync_vault_subtitle">Your private notes vault on yourpitbox.com. The link and password stay on this tablet.</string>
+    <string name="sync_vault_subtitle">Your private notes vault on yourpitbox.com. The private link opens it; keep it to yourself.</string>
     <string name="sync_vault_url">Vault link</string>
-    <string name="sync_vault_password">Password</string>
+    <string name="sync_vault_password">Password (optional)</string>
     <string name="sync_vault_password_saved">Saved. Type a new one to replace it.</string>
-    <string name="sync_vault_password_hint">Vault password</string>
+    <string name="sync_vault_password_hint">Only if your vault asks for one</string>
     <string name="sync_vault_password_show">Show password</string>
     <string name="sync_vault_password_hide">Hide password</string>
     <string name="sync_vault_forget">Forget password</string>
     <string name="sync_vault_test">Test connection</string>
     <string name="sync_vault_open">Open vault in browser</string>
-    <string name="sync_vault_needs_setup">Add the vault link and password to start uploading.</string>
+    <string name="sync_vault_needs_setup">Add the vault link to start uploading.</string>
     <string name="sync_vault_browser_error">No browser is available to open the vault.</string>
 
     <string name="sync_section_title">Sync</string>
@@ -70,6 +70,12 @@
     <string name="sync_backup_auto_on">Every day to %1$s</string>
     <string name="sync_backup_auto_off">Off</string>
     <string name="sync_backup_change">Change folder…</string>
+    <string name="sync_backup_auto_last">Last complete automatic backup: %1$s</string>
+    <string name="sync_backup_auto_failed">The last automatic backup failed. It tries again on the next run.</string>
+    <plurals name="sync_backup_auto_skipped">
+        <item quantity="one">The last automatic backup left %d document out because it couldn\'t be read.</item>
+        <item quantity="other">The last automatic backup left %d documents out because they couldn\'t be read.</item>
+    </plurals>
     <string name="sync_backup_explainer">Sync copies your latest notes to the places you chose. Backups are separate snapshots: deleting a note never deletes its backups.</string>
     <string name="sync_restore_confirm_title">Restore from this backup?</string>
     <string name="sync_restore_confirm_body">The documents in the backup are restored into your library. Large backups can take a few minutes.</string>

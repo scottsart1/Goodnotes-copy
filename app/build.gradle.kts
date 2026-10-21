@@ -14,8 +14,8 @@ android {
         applicationId = "com.inkwell.notes"
         minSdk = 29
         targetSdk = 35
-        versionCode = 4
-        versionName = "1.1.2"
+        versionCode = 6
+        versionName = "1.1.4"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables { useSupportLibrary = true }
         ndk {

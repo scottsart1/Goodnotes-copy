@@ -48,6 +48,14 @@ fun DestinationPrefs.withTargets(kind: SyncKind, targets: Set<OutputTarget>): De
 
 val DestinationPrefs.hasAnyTarget: Boolean get() = notes.isNotEmpty() || transcripts.isNotEmpty() || audio.isNotEmpty()
 
+/**
+ * The vault when anything goes there: the vault's document row then follows the library's title
+ * and folder path (see [SyncEngine.enqueueMoved]). The upsert replaces the stored note text too,
+ * so without Notes -> Vault the update sends back the text the vault already has.
+ */
+fun DestinationPrefs.vaultMetadataTargets(): Set<OutputTarget> =
+    if (OutputTarget.VAULT in notes || OutputTarget.VAULT in transcripts || OutputTarget.VAULT in audio) setOf(OutputTarget.VAULT) else emptySet()
+
 /** Removes the folder destination everywhere (used when its permission was revoked). */
 fun DestinationPrefs.withoutFolder(): DestinationPrefs = copy(
     notes = notes - OutputTarget.FOLDER,
@@ -94,9 +102,16 @@ interface SyncStateStore {
     var vaultCredentialsRefusedAt: Long
         get() = 0L
         set(@Suppress("UNUSED_PARAMETER") value) {}
-    /** Where the document's files were last written inside the folder destination. */
-    fun folderLocation(docId: String): List<String>?
-    fun setFolderLocation(docId: String, segments: List<String>?)
+    /**
+     * Where the document's files were last written inside the folder destination [folder] (its
+     * tree URI). Kept after the document is deleted (its copies stay), so no other document writes
+     * over them, and kept per folder, so choosing another folder and coming back (or choosing the
+     * folder again after its permission was lost) still knows whose copies are where.
+     */
+    fun folderLocation(folder: String, docId: String): List<String>?
+    fun setFolderLocation(folder: String, docId: String, segments: List<String>?)
+    /** Every stored location in [folder], by document id. */
+    fun folderLocations(folder: String): Map<String, List<String>> = emptyMap()
 }
 
 interface NetworkState {
@@ -109,9 +124,13 @@ class InMemorySyncState : SyncStateStore {
     override var lastError: String? = null
     override var vaultLockedUntil: Long = 0
     override var vaultCredentialsRefusedAt: Long = 0
-    private val locations = HashMap<String, List<String>>()
-    override fun folderLocation(docId: String): List<String>? = synchronized(locations) { locations[docId] }
-    override fun setFolderLocation(docId: String, segments: List<String>?) {
-        synchronized(locations) { if (segments == null) locations.remove(docId) else locations[docId] = segments }
+    /** Folder -> document id -> location. */
+    private val locations = HashMap<String, HashMap<String, List<String>>>()
+    override fun folderLocation(folder: String, docId: String): List<String>? = synchronized(locations) { locations[folder]?.get(docId) }
+    override fun setFolderLocation(folder: String, docId: String, segments: List<String>?) {
+        synchronized(locations) {
+            if (segments == null) locations[folder]?.remove(docId) else locations.getOrPut(folder) { HashMap() }[docId] = segments
+        }
     }
+    override fun folderLocations(folder: String): Map<String, List<String>> = synchronized(locations) { HashMap(locations[folder].orEmpty()) }
 }

@@ -161,13 +161,49 @@ class VaultClientTest {
     }
 
     @Test
-    fun `missing password is reported before any request`() = runBlocking {
+    fun `without a password a vault that asks for one reports MissingPassword after one bare request`() = runBlocking {
         try {
             vault.client(MemoryCredentials(pw = null)).ping()
             fail("expected MissingPassword")
         } catch (e: VaultException.MissingPassword) {
-            assertTrue(vault.requests.isEmpty())
+            assertTrue(e.blocksVault)
+            assertEquals(listOf("GET /api/ping"), vault.calls())
+            assertNull(vault.requests.single().getHeader("Authorization"))
         }
+    }
+
+    @Test
+    fun `a link-only vault is used without a password, a login or a token`() = runBlocking {
+        vault.linkOnly = true
+        val credentials = MemoryCredentials(pw = null)
+        val client = vault.client(credentials)
+
+        assertEquals("Your Pit Box · Notes", client.ping())
+        client.putDoc("doc-1", VaultDocUpsert("t", "NOTEBOOK", 1, 2))
+        client.putBytes("doc-1", "page.pdf", ByteArray(10), "application/pdf")
+        assertEquals(setOf("doc-1"), client.listDocIds())
+        assertFalse(client.hasDoc("missing"))
+
+        assertEquals(
+            listOf("GET /api/ping", "PUT /api/docs/doc-1", "PUT /api/docs/doc-1/files/page.pdf", "GET /api/docs", "GET /api/docs/missing"),
+            vault.calls(),
+        )
+        assertTrue(vault.requests.all { it.getHeader("Authorization") == null })
+        assertTrue(credentials.saves.isEmpty())
+    }
+
+    @Test
+    fun `an empty saved password counts as none`() = runBlocking {
+        vault.linkOnly = true
+        assertEquals("Your Pit Box · Notes", vault.client(MemoryCredentials(pw = "")).ping())
+        assertEquals(listOf("GET /api/ping"), vault.calls())
+    }
+
+    @Test
+    fun `a saved password still works with a link-only vault`() = runBlocking {
+        vault.linkOnly = true
+        assertEquals("Your Pit Box · Notes", vault.client(MemoryCredentials(pw = "an old password")).ping())
+        assertEquals(listOf("POST /api/session", "GET /api/ping"), vault.calls())
     }
 
     @Test
@@ -314,6 +350,16 @@ class VaultClientTest {
     }
 
     @Test
+    fun `connection test with no password pings a link-only vault with the link alone`() = runBlocking {
+        vault.linkOnly = true
+        val ok = VaultConnectionTest.run(FakeVault.httpClient(), vault.endpoint, "").getOrThrow()
+        assertEquals("Connected to Your Pit Box · Notes", ok.message)
+        assertNull(ok.session)
+        assertEquals(listOf("GET /api/ping"), vault.calls())
+        assertNull(vault.requests.single().getHeader("Authorization"))
+    }
+
+    @Test
     fun `connection test explains each failure`() = runBlocking {
         val wrong = VaultConnectionTest.run(FakeVault.httpClient(), vault.endpoint, "bad")
         assertEquals("Wrong password.", wrong.exceptionOrNull()!!.message)
@@ -327,7 +373,7 @@ class VaultClientTest {
         assertTrue(notVault.exceptionOrNull()!!.message!!.contains("404"))
 
         val empty = VaultConnectionTest.run(FakeVault.httpClient(), vault.endpoint, "")
-        assertEquals("Enter the vault password.", empty.exceptionOrNull()!!.message)
+        assertEquals("This vault asks for a password. Enter it and test again.", empty.exceptionOrNull()!!.message)
 
         val endpoint = vault.endpoint
         vault.close()

@@ -22,19 +22,32 @@ export interface Secrets {
   linkId: string;
   password: string;
   sessionSecret: string;
+  /** Set when NOTES_ACCESS = "link"; tokens minted then never pass in password mode. */
+  linkOnly?: boolean;
+}
+
+/** True when the private link alone opens the vault (NOTES_ACCESS = "link"): no password, no sessions. */
+export function linkOnly(env: Env): boolean {
+  return (env.NOTES_ACCESS ?? "").trim().toLowerCase() === "link";
 }
 
 export function getSecrets(env: Env): Secrets | null {
   const linkId = env.NOTES_LINK_ID ?? "";
   const password = env.NOTES_PASSWORD ?? "";
   const sessionSecret = env.SESSION_SECRET ?? "";
-  if (!linkId || !password || !sessionSecret) return null;
-  return { linkId, password, sessionSecret };
+  if (!linkId || !sessionSecret) return null;
+  const open = linkOnly(env);
+  if (!password && !open) return null;
+  return { linkId, password, sessionSecret, linkOnly: open };
 }
 
-/** First 8 bytes (hex) of SHA-256(password + secret): changes whenever the password does. */
+/**
+ * First 8 bytes (hex) of SHA-256(password + secret): changes whenever the password does.
+ * In link-only mode the input is prefixed with "link\0", so a token anyone with the link
+ * could mint stops working once the vault is switched back to password access.
+ */
 export async function passwordVersion(secrets: Secrets): Promise<string> {
-  const digest = await sha256(secrets.password + secrets.sessionSecret);
+  const digest = await sha256((secrets.linkOnly ? "link\0" : "") + secrets.password + secrets.sessionSecret);
   return toHex(digest.slice(0, 8));
 }
 
@@ -177,6 +190,11 @@ async function countAttempt(db: D1Database, bucket: string, now: number): Promis
 export async function handleLogin(request: Request, env: Env, secrets: Secrets): Promise<Response> {
   // Defence in depth for the browser: a cross-site page cannot post the login form for us.
   if (request.headers.has("Origin") && !sameOrigin(request)) throw new HttpError(403, "bad_origin");
+  if (linkOnly(env)) {
+    // Nothing to check: the link was. Apps that still log in get a token they don't need.
+    const { token, expiresAt } = await issueToken(secrets);
+    return json({ token, expiresAt });
+  }
   const body = await readJson(request, 4096);
   const password = (body as { password?: unknown } | null)?.password;
   if (typeof password !== "string" || password.length === 0 || password.length > 1024) {

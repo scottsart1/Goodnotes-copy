@@ -200,14 +200,34 @@ class SyncEngineTest {
     }
 
     @Test
-    fun `missing link or password is reported without network traffic`() = runBlocking {
+    fun `missing link is reported without network traffic`() = runBlocking {
         val noLink = harness(vaultPrefs.copy(vaultUrl = ""))
         noLink.engine.enqueue(d.id, SyncKind.NOTES, noLink.prefs.notes)
         assertTrue(noLink.engine.run().error!!.contains("vault link"))
+        assertTrue(vault.requests.isEmpty())
+    }
+
+    @Test
+    fun `without a password a vault that asks for one stops after one bare request and the item waits`() = runBlocking {
         val noPassword = harness(vaultPrefs, creds = MemoryCredentials(pw = null))
         noPassword.engine.enqueue(d.id, SyncKind.NOTES, noPassword.prefs.notes)
-        assertTrue(noPassword.engine.run().error!!.contains("vault password"))
-        assertTrue(vault.requests.isEmpty())
+        val report = noPassword.engine.run()
+        assertTrue(report.error!!, report.error!!.contains("asks for a password"))
+        assertEquals(1, vault.requests.size)
+        assertNull(vault.requests.single().getHeader("Authorization"))
+        assertEquals(SyncItemStatus.PENDING, noPassword.dao.all.single().status)
+    }
+
+    @Test
+    fun `a link-only vault syncs without a password`() = runBlocking {
+        vault.linkOnly = true
+        val h = harness(vaultPrefs, creds = MemoryCredentials(pw = null))
+        h.engine.enqueue(d.id, SyncKind.NOTES, h.prefs.notes)
+        val report = h.engine.run()
+        assertNull(report.error, report.error)
+        assertEquals(SyncItemStatus.DONE, h.dao.all.single().status)
+        assertTrue(vault.calls().none { it == "POST /api/session" })
+        assertTrue(vault.requests.all { it.getHeader("Authorization") == null })
     }
 
     @Test
@@ -234,6 +254,7 @@ class SyncEngineTest {
         val h = harness(vaultPrefs.copy(notesFormat = NotesExportFormat.MARKDOWN))
         h.engine.enqueue(d.id, SyncKind.NOTES, h.prefs.notes)
         repeat(SyncEngine.MAX_ATTEMPTS - 1) { i ->
+            if (i > 0) h.now += SyncEngine.retryDelayMs(i)
             vault.failNext += FakeVault.json(503, """{"error":"overloaded"}""")
             val report = h.engine.run()
             assertTrue(report.retryLater)
@@ -242,6 +263,7 @@ class SyncEngineTest {
             assertEquals(i + 1, row.attempts)
             assertTrue(row.lastError!!.contains("HTTP 503"))
         }
+        h.now += SyncEngine.retryDelayMs(SyncEngine.MAX_ATTEMPTS - 1)
         vault.failNext += FakeVault.json(503, """{"error":"overloaded"}""")
         h.engine.run()
         assertEquals(SyncItemStatus.FAILED, h.dao.all.single().status)
@@ -256,6 +278,51 @@ class SyncEngineTest {
     }
 
     @Test
+    fun `runs kicked during an item's retry backoff neither send it nor use up its attempts`() = runBlocking {
+        val h = harness(vaultPrefs.copy(notesFormat = NotesExportFormat.MARKDOWN))
+        h.engine.enqueue(d.id, SyncKind.NOTES, h.prefs.notes)
+        vault.failNext += FakeVault.json(503, """{"error":"overloaded"}""")
+        h.engine.run()
+        assertEquals(1, h.dao.all.single().attempts)
+        val sent = vault.requests.size
+
+        // Edits settling, recordings and settings changes kick runs again and again during the outage.
+        repeat(20) {
+            h.now += 1_000
+            val report = h.engine.run()
+            assertTrue("the run comes back for the waiting item", report.retryLater)
+            assertEquals(1, report.deferred)
+            assertTrue("the outage stays shown while the item waits", h.state.lastError!!.contains("HTTP 503"))
+        }
+        assertEquals(1, h.dao.all.single().attempts)
+        assertEquals(SyncItemStatus.PENDING, h.dao.all.single().status)
+        assertEquals("nothing is sent while the item waits", sent, vault.requests.size)
+
+        // "Sync now" does not wait: the user asked.
+        vault.failNext += FakeVault.json(503, """{"error":"overloaded"}""")
+        h.engine.run(ignoreBackoff = true)
+        assertEquals(2, h.dao.all.single().attempts)
+        h.now += SyncEngine.retryDelayMs(2) - 1
+        h.engine.run()
+        assertEquals("the longer second backoff is waited out too", 2, h.dao.all.single().attempts)
+
+        h.now += 1
+        val report = h.engine.run()
+        assertNull(report.error, report.error)
+        assertNull("the copy went through: the error is cleared", h.state.lastError)
+        assertEquals(SyncItemStatus.DONE, h.dao.all.single().status)
+    }
+
+    @Test
+    fun `retry backoff doubles per attempt and is capped`() {
+        assertEquals(30_000L, SyncEngine.retryDelayMs(1))
+        assertEquals(60_000L, SyncEngine.retryDelayMs(2))
+        assertEquals(30_000L shl 6, SyncEngine.retryDelayMs(SyncEngine.MAX_ATTEMPTS - 1))
+        assertEquals(3_600_000L, SyncEngine.retryDelayMs(50))
+        assertEquals(30_000L, SyncEngine.retryDelayMs(0))
+    }
+
+    @Test
     fun `export failures retry, unimplemented exports fail`() = runBlocking {
         val h = harness(folderPrefs)
         h.source.failExport = IOException("render failed")
@@ -266,6 +333,7 @@ class SyncEngineTest {
         assertTrue(r1.error!!.contains(d.title))
 
         h.source.failExport = NotImplementedError()
+        h.now += SyncEngine.retryDelayMs(1)
         val r2 = h.engine.run()
         assertEquals(1, r2.failed)
         assertEquals(SyncItemStatus.FAILED, h.dao.all.single().status)

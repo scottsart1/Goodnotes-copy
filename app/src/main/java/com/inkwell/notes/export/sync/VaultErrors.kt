@@ -24,7 +24,8 @@ sealed class VaultException(message: String, cause: Throwable? = null) : Excepti
         override val blocksVault = true
     }
 
-    class MissingPassword : VaultException("Add the vault password in Settings › Storage, sync & backup.") {
+    /** No password is saved and the vault asks for one (it is not link-only). */
+    class MissingPassword : VaultException("This vault asks for a password. Add it in Settings › Storage, sync & backup.") {
         override val retryable = false
         override val blocksVault = true
     }
