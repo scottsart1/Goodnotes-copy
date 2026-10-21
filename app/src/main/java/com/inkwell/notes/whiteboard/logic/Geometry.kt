@@ -26,14 +26,19 @@ data class Box(val left: Float, val top: Float, val right: Float, val bottom: Fl
 }
 
 object BoardGeometry {
-    /** Bounds of every item (strokes include their width, unattached connector ends included). */
+    /**
+     * Bounds of every item as drawn (strokes include their width, rotated shapes, texts and
+     * images their rotated box, unattached connector ends included).
+     */
     fun contentBounds(content: PageContent): Box? {
         var out: Box? = null
         fun add(b: Box?) { if (b != null) out = out?.union(b) ?: b }
         for (s in content.strokes) add(pointsBounds(s.points, InkPoints.STRIDE)?.inset(-s.width, -s.width))
-        for (s in content.shapes) add(pointsBounds(s.points, 2)?.inset(-s.strokeWidth / 2f, -s.strokeWidth / 2f))
-        for (t in content.texts) add(Box(t.x, t.y, t.x + t.width, t.y + t.height))
-        for (i in content.images) add(Box(i.x, i.y, i.x + i.width, i.y + i.height))
+        for (s in content.shapes) {
+            add(pointsBounds(s.points, 2)?.let { BoardAnchors.rotated(it, s.rotation) }?.inset(-s.strokeWidth / 2f, -s.strokeWidth / 2f))
+        }
+        for (t in content.texts) add(BoardAnchors.rotated(Box(t.x, t.y, t.x + t.width, t.y + t.height), t.rotation))
+        for (i in content.images) add(BoardAnchors.rotated(Box(i.x, i.y, i.x + i.width, i.y + i.height), i.rotation))
         for (s in content.stickies) add(Box(s.x, s.y, s.x + s.width, s.y + s.height))
         for (c in content.connectors) {
             if (c.fromItemId == null) add(Box(c.fromX, c.fromY, c.fromX, c.fromY))

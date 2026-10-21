@@ -25,6 +25,7 @@ import com.inkwell.notes.ink.ItemRef
 import com.inkwell.notes.ink.ItemType
 import com.inkwell.notes.ink.PageLayoutMode
 import com.inkwell.notes.whiteboard.kit.UiMessage
+import com.inkwell.notes.whiteboard.logic.BoardGeometry
 import com.inkwell.notes.whiteboard.logic.Box
 import com.inkwell.notes.whiteboard.logic.MinimapMath
 import kotlinx.coroutines.CancellationException
@@ -37,7 +38,10 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
 /** Request to edit (or create) a text box over the canvas. Rect in canvas-view pixels. */
@@ -121,6 +125,8 @@ class WhiteboardController(val graph: AppGraph, val docId: String) : InkCanvasLi
     private var boundCanvas: InkCanvasView? = null
     private var released = false
     private var minimapJob: Job? = null
+    private val minimapLock = Mutex()
+    private var minimapShown = true
     private var viewSaveJob: Job? = null
     private var toolSaveJob: Job? = null
     private var lastSavedView: CanvasViewState? = null
@@ -245,16 +251,32 @@ class WhiteboardController(val graph: AppGraph, val docId: String) : InkCanvasLi
         minimapJob?.cancel()
         minimapJob = scope.launch {
             if (delayMs > 0) delay(delayMs)
+            if (!minimapShown) {
+                // Collapsed: only the bounds (fit-to-content falls back to them), no bitmap.
+                contentBox = withContext(Dispatchers.Default) { BoardGeometry.contentBounds(content) }
+                return@launch
+            }
             val (w, h) = minimapPx
-            if (content.images.isNotEmpty()) withContext(Dispatchers.IO) { ops.preloadOverviewImages(content) }
-            val rendered = withContext(Dispatchers.Default) { ops.renderOverview(content, w, h) }
-            minimap = rendered
-            contentBox = rendered?.bounds
+            // One render at a time: a superseded render finishes its current batch before it
+            // stops, and the newer one waits for that instead of running beside it.
+            minimapLock.withLock {
+                if (content.images.isNotEmpty()) withContext(Dispatchers.IO) { ops.preloadOverviewImages(content) }
+                val rendered = withContext(Dispatchers.Default) { ops.renderOverview(content, w, h) { isActive } }
+                minimap = rendered
+                contentBox = rendered?.bounds
+            }
         }
     }
 
     /** Re-renders the overview now (e.g. after the minimap changed size). */
     fun refreshMinimap() = onContent(latestContent, 0)
+
+    /** The minimap is rendered only while it is shown; showing it again renders it at once. */
+    fun setMinimapShown(shown: Boolean) {
+        if (shown == minimapShown) return
+        minimapShown = shown
+        if (shown) refreshMinimap()
+    }
 
     /** Applies a changed page (e.g. new background) to the screen and the canvas. */
     fun updatePage(p: PageMeta) {
@@ -268,10 +290,10 @@ class WhiteboardController(val graph: AppGraph, val docId: String) : InkCanvasLi
 
     fun updateTools(state: ToolState) {
         if (state == tools) return
-        val toolChanged = state.tool != tools.tool
         tools = state
+        // The canvas ends the selection for writing and creating tools; lasso and hand keep it
+        // (pasted or inserted items stay selected so they can be moved right away).
         canvas?.setToolState(state)
-        if (toolChanged && selection != null) canvas?.clearSelection()
         toolSaveJob?.cancel()
         toolSaveJob = scope.launch { delay(1_000); persistToolsNow() }
     }

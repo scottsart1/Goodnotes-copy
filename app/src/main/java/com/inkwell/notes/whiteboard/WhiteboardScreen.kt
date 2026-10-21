@@ -2,6 +2,7 @@ package com.inkwell.notes.whiteboard
 
 import android.content.ActivityNotFoundException
 import android.graphics.PointF
+import android.provider.DocumentsContract
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
@@ -106,7 +107,9 @@ import com.inkwell.notes.whiteboard.ui.StickyEditor
 import com.inkwell.notes.whiteboard.ui.TextBoxEditor
 import com.inkwell.notes.whiteboard.ui.ZoomControls
 import com.inkwell.notes.whiteboard.ui.toolLabel
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.File
 
 private enum class BoardDialog { PDF_SNIPPET, SEND_TO_NOTEBOOK, ADD_PAGE, RENAME, EXPORT_BOARD }
@@ -187,7 +190,8 @@ private fun WhiteboardContent(controller: WhiteboardController, nav: AppNavigato
     var dialog by remember { mutableStateOf<BoardDialog?>(null) }
     var minimapCollapsed by rememberSaveable { mutableStateOf<Boolean?>(null) }
     var canvasSize by remember { mutableStateOf(IntSize.Zero) }
-    var pendingExport by remember { mutableStateOf<File?>(null) }
+    // Saved: the save picker may outlive this activity (process death while it is open).
+    var pendingExportPath by rememberSaveable { mutableStateOf<String?>(null) }
     var menuOpen by remember { mutableStateOf(false) }
 
     val pickImage = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
@@ -205,10 +209,17 @@ private fun WhiteboardContent(controller: WhiteboardController, nav: AppNavigato
         }
     }
     val saveExport = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("image/png")) { uri ->
-        val file = pendingExport
-        pendingExport = null
-        if (uri != null && file != null) {
+        val path = pendingExportPath
+        pendingExportPath = null
+        if (uri != null) {
             scope.launch {
+                val file = withContext(Dispatchers.IO) { path?.let { File(it) }?.takeIf { it.isFile } }
+                if (file == null) {
+                    // The rendered image is gone: remove the empty document the picker created.
+                    withContext(Dispatchers.IO) { runCatching { DocumentsContract.deleteDocument(context.contentResolver, uri) } }
+                    controller.messages.tryEmit(UiMessage(R.string.cd_file_save_failed))
+                    return@launch
+                }
                 runCatching { FileSharing.copyTo(context, file, uri) }
                     .onSuccess { controller.messages.tryEmit(UiMessage(R.string.cd_file_saved)) }
                     .onFailure { controller.messages.tryEmit(UiMessage(R.string.cd_file_save_failed)) }
@@ -247,6 +258,7 @@ private fun WhiteboardContent(controller: WhiteboardController, nav: AppNavigato
         val wide = maxWidth >= 1000.dp
         val narrow = maxWidth < 600.dp
         val collapsed = minimapCollapsed ?: narrow
+        LaunchedEffect(collapsed) { controller.setMinimapShown(!collapsed) }
         // An overlay panel (between the phone and wide layouts) covers the canvas' right edge.
         val coverPx = if (panel != null && !wide && !phone) minOf(with(density) { Dimens.panelWidth.toPx() }, canvasSize.width.toFloat()) else 0f
         SideEffect { audio.panelCoverPx = coverPx }
@@ -401,11 +413,11 @@ private fun WhiteboardContent(controller: WhiteboardController, nav: AppNavigato
                                                 controller.messages.tryEmit(UiMessage(R.string.cd_share_unavailable))
                                             }
                                             ExportAction.SAVE -> {
-                                                pendingExport = file
+                                                pendingExportPath = file.absolutePath
                                                 try {
                                                     saveExport.launch(file.name)
                                                 } catch (e: ActivityNotFoundException) {
-                                                    pendingExport = null
+                                                    pendingExportPath = null
                                                     controller.messages.tryEmit(UiMessage(R.string.cd_file_save_failed))
                                                 }
                                             }
