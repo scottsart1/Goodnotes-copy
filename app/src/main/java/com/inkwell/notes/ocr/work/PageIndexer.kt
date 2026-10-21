@@ -96,6 +96,8 @@ internal class PageIndexer(private val graph: AppGraph) {
         for (img in content.images.distinctBy { Triple(it.assetId, it.x, it.y) }) ocr += imageEntries(realDocId, img)
         var pdfText = emptyList<IndexEntry>()
         var pdfTextFailed = false
+        // The text layer is given up on and nothing replaces it: leave the earlier PDF text rows.
+        var keepPdfText = false
         val pdfIndex = page.pdfPageIndex
         if (pdfIndex != null) {
             val layer = try {
@@ -111,11 +113,12 @@ internal class PageIndexer(private val graph: AppGraph) {
                 // Not "no text layer": keep the page's PDF text and OCR rows and try again later,
                 // unless there is nothing to keep or the file keeps running out of memory.
                 val pdf = graph.pdf
-                val givenUp = pdf is PdfServiceImpl && pdf.pageTextGivenUp(realDocId)
-                if (!PdfTextFallback.ocrInstead(indexedBefore = pageEntity.indexedAt > 0, givenUp = givenUp)) {
-                    pdfTextFailed = true
-                } else if (ocrPrefs.autoOcrImports) {
-                    ocr += scannedPageEntries(realDocId, page, pdfIndex)
+                val givenUp = pdf is PdfServiceImpl && pdf.pageTextGivenUp(realDocId, pdfIndex)
+                when (PdfTextFallback.plan(indexedBefore = pageEntity.indexedAt > 0, givenUp = givenUp, autoOcr = ocrPrefs.autoOcrImports)) {
+                    PdfTextFallback.Plan.RETRY_LATER -> pdfTextFailed = true
+                    PdfTextFallback.Plan.OCR -> ocr += scannedPageEntries(realDocId, page, pdfIndex)
+                    PdfTextFallback.Plan.KEEP_PDF_TEXT -> keepPdfText = true
+                    PdfTextFallback.Plan.NO_TEXT -> Unit
                 }
             } else if (layer.trim().length >= MIN_PDF_TEXT_CHARS) {
                 pdfText = TextSplitter.passages(layer).map { IndexEntry(it, null, null, ENGINE_PDF_TEXT) }
@@ -124,7 +127,7 @@ internal class PageIndexer(private val graph: AppGraph) {
             }
         }
         if (!pdfTextFailed) {
-            sources[TextSource.PDF_TEXT] = pdfText
+            if (!keepPdfText) sources[TextSource.PDF_TEXT] = pdfText
             sources[TextSource.OCR] = ocr
         }
 
@@ -250,7 +253,7 @@ internal class PageIndexer(private val graph: AppGraph) {
         val impl = recognition() ?: return emptyList()
         if (page.isInfinite) return emptyList()
         val prefs = graph.settings.current.ocr
-        val sourceSize = withContext(Dispatchers.IO) { graph.files.sourcePdf(docId).let { if (it.exists()) it.length() else 0L } }
+        val sourceSize = sourcePdfSize(docId)
         val key = "$PDF_PAGE_KEY$pdfIndex"
         fun wantsAi(c: CachedImageOcr): Boolean {
             val mean = c.confidence ?: return false
@@ -292,9 +295,16 @@ internal class PageIndexer(private val graph: AppGraph) {
                 result = local.copy(aiTried = true)
             }
         }
-        if (sourceSize > 0) imageCache.put(docId, key, sourceSize, result)
+        // The source may have been replaced meanwhile (pages inserted): storing under the old size
+        // would delete the result carried over to the new file, so it would be OCRed (and paid
+        // for) again. Store only while the file is still the one this page was read from.
+        if (sourceSize > 0 && sourceSize == sourcePdfSize(docId)) imageCache.put(docId, key, sourceSize, result)
         return pageEntries(result, page)
     }
+
+    /** Size of [docId]'s source PDF (0 when it has none), the version key of scanned-page results. */
+    private suspend fun sourcePdfSize(docId: String): Long =
+        withContext(Dispatchers.IO) { graph.files.sourcePdf(docId).let { if (it.exists()) it.length() else 0L } }
 
     private fun normalised(text: String, b: FloatArray, w: Float, h: Float, confidence: Float?) =
         CachedImageOcr.CachedBlock(text, listOf(b[0] / w, b[1] / h, b[2] / w, b[3] / h), confidence)

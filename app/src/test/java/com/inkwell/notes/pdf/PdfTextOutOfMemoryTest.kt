@@ -39,6 +39,42 @@ class PdfTextOutOfMemoryTest {
         assertFalse(oom.givenUp("d", 100, 1))
     }
 
+    @Test fun heavyPagesAreGivenUpOnOneByOneNotTheWholeFile() {
+        val oom = PdfTextOutOfMemory()
+        // Two heavy pages, each running out of memory twice.
+        oom.record("d", 100, 1, pdfPageIndex = 3)
+        oom.record("d", 100, 1, pdfPageIndex = 5)
+        assertFalse(oom.givenUp("d", 100, 1, pdfPageIndex = 3))
+        oom.record("d", 100, 1, pdfPageIndex = 3)
+        oom.record("d", 100, 1, pdfPageIndex = 5)
+        assertTrue(oom.givenUp("d", 100, 1, pdfPageIndex = 3))
+        assertTrue(oom.givenUp("d", 100, 1, pdfPageIndex = 5))
+        // The file and its other pages are still read.
+        assertFalse(oom.givenUp("d", 100, 1))
+        assertFalse(oom.givenUp("d", 100, 1, pdfPageIndex = 4))
+        assertEquals(0, oom.count("d", 100, 1))
+        // A replaced file starts from zero for its pages too.
+        assertFalse(oom.givenUp("d", 200, 1, pdfPageIndex = 3))
+        // A file that cannot be loaded gives up on every page.
+        oom.record("e", 100, 1)
+        oom.record("e", 100, 1)
+        assertTrue(oom.givenUp("e", 100, 1, pdfPageIndex = 0))
+    }
+
+    @Test fun givenUpPagesKeepTheirPdfTextWhenNothingWouldReplaceIt() {
+        // The failure may pass and there are rows to keep: retry later.
+        assertEquals(PdfTextFallback.Plan.RETRY_LATER, PdfTextFallback.plan(indexedBefore = true, givenUp = false, autoOcr = true))
+        assertEquals(PdfTextFallback.Plan.RETRY_LATER, PdfTextFallback.plan(indexedBefore = true, givenUp = false, autoOcr = false))
+        // OCR replaces the text layer when it runs.
+        assertEquals(PdfTextFallback.Plan.OCR, PdfTextFallback.plan(indexedBefore = true, givenUp = true, autoOcr = true))
+        assertEquals(PdfTextFallback.Plan.OCR, PdfTextFallback.plan(indexedBefore = false, givenUp = false, autoOcr = true))
+        // Given up without OCR: the earlier PDF text stays searchable.
+        assertEquals(PdfTextFallback.Plan.KEEP_PDF_TEXT, PdfTextFallback.plan(indexedBefore = true, givenUp = true, autoOcr = false))
+        // Never indexed and no OCR: nothing to keep.
+        assertEquals(PdfTextFallback.Plan.NO_TEXT, PdfTextFallback.plan(indexedBefore = false, givenUp = true, autoOcr = false))
+        assertEquals(PdfTextFallback.Plan.NO_TEXT, PdfTextFallback.plan(indexedBefore = false, givenUp = false, autoOcr = false))
+    }
+
     @Test fun extractorStopsLoadingAFileThatKeepsRunningOutOfMemory() = runBlocking<Unit> {
         val dir = tmp.newFolder("work")
         val source = File(dir, "source.pdf").apply { writeBytes(byteArrayOf(1, 2, 3)) }
@@ -48,15 +84,17 @@ class PdfTextOutOfMemoryTest {
         try {
             val extractor = PdfTextExtractor(ops, sourceFile = { source }, scope = scope)
             assertNull(extractor.pageTextOrNull("d", 0))
-            assertFalse(extractor.givenUp("d"))
+            assertFalse(extractor.givenUp("d", 0))
             assertNull(extractor.pageTextOrNull("d", 1))
-            assertTrue(extractor.givenUp("d"))
+            // Loading the file itself ran out of memory: every page is given up.
+            assertTrue(extractor.givenUp("d", 0))
+            assertTrue(extractor.givenUp("d", 7))
             // Given up: the file is not loaded again.
             assertNull(extractor.pageTextOrNull("d", 2))
             assertEquals(2, loads)
             // A replaced source file is tried again.
             source.writeBytes(byteArrayOf(1, 2, 3, 4))
-            assertFalse(extractor.givenUp("d"))
+            assertFalse(extractor.givenUp("d", 0))
             assertNull(extractor.pageTextOrNull("d", 0))
             assertEquals(3, loads)
         } finally {

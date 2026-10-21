@@ -44,8 +44,9 @@ internal class PdfTextExtractor(
     /**
      * Like [pageText], but null when the text could not be read for now (out of memory), so the
      * indexer can try again later instead of taking the page for one without a text layer. Once a
-     * file has run out of memory [PdfTextOutOfMemory.GIVE_UP_AFTER] times it is not loaded again
-     * (null right away, see [givenUp]).
+     * file has run out of memory [PdfTextOutOfMemory.GIVE_UP_AFTER] times while loading it is not
+     * loaded again, and a page that ran out of memory that often is not read again (null right
+     * away, see [givenUp]); the file's other pages are still read.
      */
     suspend fun pageTextOrNull(docId: String, pdfPageIndex: Int): String? {
         if (pdfPageIndex < 0) return ""
@@ -58,8 +59,8 @@ internal class PdfTextExtractor(
                 val file = sourceFile(docId)
                 val length = file.length()
                 val modified = file.lastModified()
-                // Loading it again would only run out of memory again (once per page, every run).
-                if (outOfMemoryFailures.givenUp(docId, length, modified)) return@withLock null
+                // Loading it (or reading this page) again would only run out of memory again.
+                if (outOfMemoryFailures.givenUp(docId, length, modified, pdfPageIndex)) return@withLock null
                 val opened = try {
                     openLocked(docId)
                 } catch (oom: OutOfMemoryError) {
@@ -85,7 +86,8 @@ internal class PdfTextExtractor(
                 } catch (oom: OutOfMemoryError) {
                     Log.w(TAG, "Text extraction ran out of memory")
                     closeLocked()
-                    outOfMemoryFailures.record(docId, length, modified)
+                    // This page's content is too heavy; the file's other pages may read fine.
+                    outOfMemoryFailures.record(docId, length, modified, pdfPageIndex)
                     outOfMemory = true
                     null
                 }
@@ -97,12 +99,13 @@ internal class PdfTextExtractor(
     }
 
     /**
-     * True when the text layer of [docId]'s current source file keeps running out of memory and
-     * is no longer read in this process: its pages are best OCRed instead.
+     * True when the text layer of page [pdfPageIndex] of [docId]'s current source file (or the
+     * file as a whole) keeps running out of memory and is no longer read in this process: the
+     * page is best OCRed instead.
      */
-    suspend fun givenUp(docId: String): Boolean = withContext(Dispatchers.IO) {
+    suspend fun givenUp(docId: String, pdfPageIndex: Int): Boolean = withContext(Dispatchers.IO) {
         val file = sourceFile(docId)
-        outOfMemoryFailures.givenUp(docId, file.length(), file.lastModified())
+        outOfMemoryFailures.givenUp(docId, file.length(), file.lastModified(), pdfPageIndex)
     }
 
     /** Forgets cached text and closes the parsed document (source replaced or document closed). */

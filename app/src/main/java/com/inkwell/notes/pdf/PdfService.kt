@@ -178,8 +178,8 @@ class PdfServiceImpl(private val graph: AppGraph) : PdfService {
     /** [pageText], but null when the text could not be read for now (see [PdfTextExtractor.pageTextOrNull]). */
     internal suspend fun pageTextOrNull(docId: String, pdfPageIndex: Int): String? = text.pageTextOrNull(docId, pdfPageIndex)
 
-    /** True when [docId]'s text layer keeps running out of memory (see [PdfTextExtractor.givenUp]). */
-    internal suspend fun pageTextGivenUp(docId: String): Boolean = text.givenUp(docId)
+    /** True when the text layer of [docId]'s page [pdfPageIndex] keeps running out of memory (see [PdfTextExtractor.givenUp]). */
+    internal suspend fun pageTextGivenUp(docId: String, pdfPageIndex: Int): Boolean = text.givenUp(docId, pdfPageIndex)
 
     // ------------------------------------------------------------------ page operations
 
