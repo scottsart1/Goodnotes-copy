@@ -3,6 +3,7 @@ package com.inkwell.notes.whiteboard
 import android.content.ActivityNotFoundException
 import android.graphics.PointF
 import android.provider.DocumentsContract
+import android.provider.OpenableColumns
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
@@ -89,6 +90,7 @@ import com.inkwell.notes.whiteboard.kit.RenameDialog
 import com.inkwell.notes.whiteboard.kit.SlimTopBar
 import com.inkwell.notes.whiteboard.kit.UiMessage
 import com.inkwell.notes.whiteboard.logic.BoardAnchors
+import com.inkwell.notes.whiteboard.logic.ExportMath
 import com.inkwell.notes.whiteboard.ui.AddNotebookPageDialog
 import com.inkwell.notes.whiteboard.ui.BoardRecordButton
 import com.inkwell.notes.whiteboard.ui.BoardRecordingDialogs
@@ -215,8 +217,17 @@ private fun WhiteboardContent(controller: WhiteboardController, nav: AppNavigato
             scope.launch {
                 val file = withContext(Dispatchers.IO) { path?.let { File(it) }?.takeIf { it.isFile } }
                 if (file == null) {
-                    // The rendered image is gone: remove the empty document the picker created.
-                    withContext(Dispatchers.IO) { runCatching { DocumentsContract.deleteDocument(context.contentResolver, uri) } }
+                    // The rendered image is gone: remove the empty document the picker created,
+                    // but never a file the user chose to overwrite (it still has content).
+                    withContext(Dispatchers.IO) {
+                        runCatching {
+                            val size = context.contentResolver.query(uri, arrayOf(OpenableColumns.SIZE), null, null, null)?.use { c ->
+                                val col = c.getColumnIndex(OpenableColumns.SIZE)
+                                if (col >= 0 && c.moveToFirst() && !c.isNull(col)) c.getLong(col) else null
+                            }
+                            if (ExportMath.mayDeleteUnwrittenTarget(size)) DocumentsContract.deleteDocument(context.contentResolver, uri)
+                        }
+                    }
                     controller.messages.tryEmit(UiMessage(R.string.cd_file_save_failed))
                     return@launch
                 }
